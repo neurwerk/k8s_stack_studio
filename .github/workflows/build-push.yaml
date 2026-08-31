@@ -1,0 +1,398 @@
+# =============================================================================
+# Build and push the k8s-stack-studio Docker images to GHCR.
+#
+# Triggered on:
+#   - Version tags (v*)
+#
+# Images published:
+#   ghcr.io/neurwerk/k8s-stack-studio-api  — FastAPI backend (Python)
+#   ghcr.io/neurwerk/k8s-stack-studio-web  — Next.js frontend (Node.js)
+#
+# Tags:
+#   - Semver-tagged (v0.1.0 → 0.1.0, 0.1) for versioned releases
+# =============================================================================
+name: Build and Push
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: studio-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Validate tag and declared versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if [[ ! "${RELEASE_TAG}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            printf 'Release tag must match vX.Y.Z exactly: %s\n' "${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          RELEASE_VERSION="${BASH_REMATCH[1]}" python3 - <<'PY'
+          import json
+          import os
+          import tomllib
+          from pathlib import Path
+
+          expected = os.environ["RELEASE_VERSION"]
+          with Path("apps/api/pyproject.toml").open("rb") as file:
+              api_version = tomllib.load(file)["project"]["version"]
+          with Path("apps/web/package.json").open(encoding="utf-8") as file:
+              web_version = json.load(file)["version"]
+          with Path("apps/api/uv.lock").open("rb") as file:
+              api_lock = tomllib.load(file)
+          locked_api_version = next(
+              package["version"]
+              for package in api_lock["package"]
+              if package["name"] == "k8s-stack-studio"
+          )
+
+          versions = {
+              "release tag": expected,
+              "apps/api/pyproject.toml": api_version,
+              "apps/api/uv.lock": locked_api_version,
+              "apps/web/package.json": web_version,
+          }
+          if any(version != expected for version in versions.values()):
+              raise SystemExit(
+                  "Release versions are not aligned: "
+                  + ", ".join(f"{source}={version}" for source, version in versions.items())
+              )
+          PY
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      - name: Verify API lockfile
+        working-directory: apps/api
+        run: uv lock --check
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 9.15.4
+          run_install: false
+
+      - name: Verify pnpm lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+  quality:
+    name: Run repository quality gates
+    uses: ./.github/workflows/quality.yml
+
+  # ── API image (FastAPI backend) ─────────────────────────────────────────────
+  api:
+    needs: [validate, quality]
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.resolve-api.outputs.digest }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for API image
+        id: meta-api
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/neurwerk/k8s-stack-studio-api
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Inspect existing full API version
+        id: inspect-api
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+          IMAGE_NAME: ghcr.io/neurwerk/k8s-stack-studio-api
+        run: |
+          FULL_IMAGE="$IMAGE_NAME:${GITHUB_REF_NAME#v}"
+          set +e
+          manifest_json="$(
+            docker buildx imagetools inspect "$FULL_IMAGE" \
+              --format '{{json .Manifest}}' 2>&1
+          )"
+          inspect_status=$?
+          set -e
+          if (( inspect_status != 0 )); then
+            if [[ "$manifest_json" == *"not found"* ]] || \
+               [[ "$manifest_json" == *"manifest unknown"* ]]; then
+              printf '%s\n' "Full version image is absent: $FULL_IMAGE"
+              printf 'exists=false\n' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            printf '%s\n' "$manifest_json" >&2
+            printf '%s\n' "Could not safely determine whether $FULL_IMAGE exists" >&2
+            exit 1
+          fi
+
+          digest="$(jq -er '.digest | select(type == "string")' <<< "$manifest_json")"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            printf '%s\n' "Existing image manifest has an invalid digest: $digest" >&2
+            exit 1
+          fi
+          image_json="$(
+            docker buildx imagetools inspect "$IMAGE_NAME@$digest" \
+              --format '{{json .Image}}'
+          )"
+          if ! jq -e '.os == "linux" and .architecture == "amd64"' \
+            <<< "$image_json" >/dev/null; then
+            printf '%s\n' "Existing image has no valid linux/amd64 image config" >&2
+            exit 1
+          fi
+          revision="$(
+            jq -er '.config.Labels["org.opencontainers.image.revision"] | select(type == "string")' \
+              <<< "$image_json"
+          )"
+          if [[ "$revision" != "$EXPECTED_REVISION" ]]; then
+            printf 'Existing image revision %s does not match tagged commit %s\n' \
+              "$revision" "$EXPECTED_REVISION" >&2
+            exit 1
+          fi
+          printf '%s\n' "Reusing $FULL_IMAGE@$digest"
+          {
+            printf 'exists=true\n'
+            printf 'digest=%s\n' "$digest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push API image
+        if: steps.inspect-api.outputs.exists == 'false'
+        id: build-api
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: apps/api
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Resolve API digest
+        id: resolve-api
+        env:
+          BUILT_DIGEST: ${{ steps.build-api.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.inspect-api.outputs.digest }}
+          IMAGE_EXISTS: ${{ steps.inspect-api.outputs.exists }}
+        run: |
+          if [[ "$IMAGE_EXISTS" == "true" ]]; then
+            digest="$EXISTING_DIGEST"
+          else
+            digest="$BUILT_DIGEST"
+          fi
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            printf '%s\n' "Could not resolve a valid API image digest" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+  # ── Web image (Next.js frontend) ────────────────────────────────────────────
+  web:
+    needs: [validate, quality]
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.resolve-web.outputs.digest }}
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Web image
+        id: meta-web
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/neurwerk/k8s-stack-studio-web
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Inspect existing full Web version
+        id: inspect-web
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+          IMAGE_NAME: ghcr.io/neurwerk/k8s-stack-studio-web
+        run: |
+          FULL_IMAGE="$IMAGE_NAME:${GITHUB_REF_NAME#v}"
+          set +e
+          manifest_json="$(
+            docker buildx imagetools inspect "$FULL_IMAGE" \
+              --format '{{json .Manifest}}' 2>&1
+          )"
+          inspect_status=$?
+          set -e
+          if (( inspect_status != 0 )); then
+            if [[ "$manifest_json" == *"not found"* ]] || \
+               [[ "$manifest_json" == *"manifest unknown"* ]]; then
+              printf '%s\n' "Full version image is absent: $FULL_IMAGE"
+              printf 'exists=false\n' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            printf '%s\n' "$manifest_json" >&2
+            printf '%s\n' "Could not safely determine whether $FULL_IMAGE exists" >&2
+            exit 1
+          fi
+
+          digest="$(jq -er '.digest | select(type == "string")' <<< "$manifest_json")"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            printf '%s\n' "Existing image manifest has an invalid digest: $digest" >&2
+            exit 1
+          fi
+          image_json="$(
+            docker buildx imagetools inspect "$IMAGE_NAME@$digest" \
+              --format '{{json .Image}}'
+          )"
+          if ! jq -e '.os == "linux" and .architecture == "amd64"' \
+            <<< "$image_json" >/dev/null; then
+            printf '%s\n' "Existing image has no valid linux/amd64 image config" >&2
+            exit 1
+          fi
+          revision="$(
+            jq -er '.config.Labels["org.opencontainers.image.revision"] | select(type == "string")' \
+              <<< "$image_json"
+          )"
+          if [[ "$revision" != "$EXPECTED_REVISION" ]]; then
+            printf 'Existing image revision %s does not match tagged commit %s\n' \
+              "$revision" "$EXPECTED_REVISION" >&2
+            exit 1
+          fi
+          printf '%s\n' "Reusing $FULL_IMAGE@$digest"
+          {
+            printf 'exists=true\n'
+            printf 'digest=%s\n' "$digest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Web image
+        if: steps.inspect-web.outputs.exists == 'false'
+        id: build-web
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: Resolve Web digest
+        id: resolve-web
+        env:
+          BUILT_DIGEST: ${{ steps.build-web.outputs.digest }}
+          EXISTING_DIGEST: ${{ steps.inspect-web.outputs.digest }}
+          IMAGE_EXISTS: ${{ steps.inspect-web.outputs.exists }}
+        run: |
+          if [[ "$IMAGE_EXISTS" == "true" ]]; then
+            digest="$EXISTING_DIGEST"
+          else
+            digest="$BUILT_DIGEST"
+          fi
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            printf '%s\n' "Could not resolve a valid Web image digest" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: [api, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish GitHub Release
+        env:
+          API_DIGEST: ${{ needs.api.outputs.digest }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          WEB_DIGEST: ${{ needs.web.outputs.digest }}
+        run: |
+          if [[ ! "$API_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || \
+             [[ ! "$WEB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            printf '%s\n' "image publication did not return valid digests" >&2
+            exit 1
+          fi
+          version="${RELEASE_TAG#v}"
+          api_tag="ghcr.io/neurwerk/k8s-stack-studio-api:$version"
+          api_digest_ref="ghcr.io/neurwerk/k8s-stack-studio-api@$API_DIGEST"
+          web_tag="ghcr.io/neurwerk/k8s-stack-studio-web:$version"
+          web_digest_ref="ghcr.io/neurwerk/k8s-stack-studio-web@$WEB_DIGEST"
+          api_row="| \`$api_tag\` | \`$api_digest_ref\` |"
+          web_row="| \`$web_tag\` | \`$web_digest_ref\` |"
+          release_exists=false
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_exists=true
+            existing_notes="$(
+              gh release view "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --json body \
+                --jq .body
+            )"
+            if [[ "$existing_notes" == *"$api_row"* ]] && \
+               [[ "$existing_notes" == *"$web_row"* ]]; then
+              printf '%s\n' "GitHub Release $RELEASE_TAG already has current image notes"
+              exit 0
+            fi
+          fi
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+            -f tag_name="$RELEASE_TAG" --jq .body > "$RUNNER_TEMP/generated-notes.md"
+          {
+            printf '## Published Images\n\n'
+            printf '| Version tag | Manifest digest |\n'
+            printf '| --- | --- |\n'
+            printf '| `%s` | `%s` |\n' "$api_tag" "$api_digest_ref"
+            printf '| `%s` | `%s` |\n\n' "$web_tag" "$web_digest_ref"
+            cat "$RUNNER_TEMP/generated-notes.md"
+          } > "$RUNNER_TEMP/release-notes.md"
+          if [[ "$release_exists" == "true" ]]; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "Studio $RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "Studio $RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi

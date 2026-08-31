@@ -1,0 +1,65 @@
+# Git metadata
+.git
+.git/**
+**/.git
+**/.git/**
+
+# Environment files. Keep only redacted examples in the context.
+.env*
+**/.env*
+*.env
+*.env.*
+**/*.env
+**/*.env.*
+!.env.example
+!**/.env.example
+!*.env.example
+!**/*.env.example
+
+# JavaScript dependencies and build caches
+node_modules
+**/node_modules
+.pnpm-store
+**/.pnpm-store
+.turbo
+**/.turbo
+**/.next
+**/out
+**/coverage
+**/.nyc_output
+**/*.tsbuildinfo
+
+# Python environments, caches, builds, and coverage
+.venv
+**/.venv
+**/venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.ty
+**/.coverage
+**/.coverage.*
+**/htmlcov
+**/*.egg-info
+**/.eggs
+**/dist
+**/build
+
+# Generated runtime configuration
+apps/web/public/env.js
+
+# Local editor, OS, and temporary artifacts
+.DS_Store
+**/.DS_Store
+.idea
+**/.idea
+.vscode
+**/.vscode
+*.log
+**/*.log
+*.swp
+*.swo
+*~
+tmp
+**/tmp

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "api#dev": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["K8S_STUDIO_*"]
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "dist/**"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "test": {
+      "dependsOn": ["^test"]
+    },
+    "test:coverage": {
+      "dependsOn": ["^test:coverage"],
+      "outputs": ["coverage/**"]
+    }
+  }
+}

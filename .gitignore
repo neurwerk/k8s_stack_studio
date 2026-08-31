@@ -1,0 +1,64 @@
+/.git_backup*/
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+apps/web/public/env.js
+apps/web/tsconfig.tsbuildinfo
+coverage/
+.nyc_output/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+.eggs/
+*.egg
+apps/api/.venv/
+apps/api/venv/
+apps/api/.coverage
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ty/
+.coverage
+.coverage.*
+htmlcov/
+build/
+
+# Environment
+.env*
+**/.env*
+*.env
+*.env.*
+**/*.env
+**/*.env.*
+!.env.example
+!**/.env.example
+!*.env.example
+!**/*.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Turbo
+.turbo/
+
+# Local artifacts
+*.log
+tmp/

@@ -1,0 +1,17 @@
+{
+  "name": "api",
+  "private": true,
+  "license": "MIT",
+  "homepage": "https://github.com/neurwerk/k8s_stack_studio#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neurwerk/k8s_stack_studio.git",
+    "directory": "apps/api"
+  },
+  "bugs": {
+    "url": "https://github.com/neurwerk/k8s_stack_studio/issues"
+  },
+  "scripts": {
+    "dev": "uv run uvicorn k8s_stack_studio.main:create_app --factory --reload --port 4010"
+  }
+}

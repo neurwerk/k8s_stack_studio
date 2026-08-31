@@ -1,0 +1,129 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "k8s-stack-studio"
+version = "0.6.2"
+description = "AI Stack Studio FastAPI backend proxying internal services"
+authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.138.2",
+    "uvicorn>=0.34.0",
+    "pydantic-settings>=2.7",
+    "httpx>=0.28.0",
+    "prometheus-fastapi-instrumentator>=8.0.2",
+    "fastapi-keycloak-middleware>=1.6.0",
+]
+
+[project.scripts]
+k8s-stack-studio = "k8s_stack_studio.main:main"
+k8s-stack-studio-mgmt = "k8s_stack_studio.main:mgmt"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/k8s_stack_studio"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "W",     # pycodestyle warnings
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C90",   # mccabe cyclomatic complexity
+    "BLE",   # flake8-blind-except
+    "G",     # flake8-logging-format
+    "S",     # flake8-bandit (security)
+    "ANN",   # flake8-annotations
+    "D",     # pydocstyle
+    "RUF",   # ruff-specific rules
+    "FA",    # flake8-future-annotations
+    "SIM",   # flake8-simplify
+    "RET",   # flake8-return
+    "PTH",   # flake8-use-pathlib
+    "C4",    # flake8-comprehensions
+    "TRY",   # tryceratops
+    "T20",   # flake8-print
+]
+ignore = [
+    "D203",   # blank-line-before-class conflicts with D211
+    "D212",   # multi-line-summary-first-line conflicts with D213
+    "S104",   # bind-to-all-interfaces (handled at K8s level)
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "D100",   # module docstring
+    "D101",   # class docstring
+    "D102",   # public method docstring
+    "D103",   # public function docstring
+    "D104",   # package docstring
+    "ANN",    # annotations (pytest fixtures and parametrize are verbose to type fully)
+    "S",      # security (tests use hardcoded passwords, assert, etc.)
+    "T20",    # print (allowed for debugging in tests)
+    "TRY003", # long error message outside exception class
+]
+"**/__init__.py" = ["D104"]
+# B008: Depends() in argument defaults is the canonical FastAPI DI idiom.
+"src/k8s_stack_studio/controllers/**/*.py" = ["B008"]
+"src/k8s_stack_studio/lib/dependencies.py" = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["k8s_stack_studio"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ty]
+environment = { python = ".venv/bin/python" }
+
+[tool.ty.rules]
+all = "error"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+fail_under = 0   # TODO(2026-08): Phase 4 — raise to 80 after test suite is complete
+show_missing = true
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.20",
+    "ty>=0.0.55",
+    "pytest>=8",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6",
+    "httpx>=0.28",
+]
+
+[project.urls]
+Homepage = "https://github.com/neurwerk/k8s_stack_studio"
+Repository = "https://github.com/neurwerk/k8s_stack_studio"
+Issues = "https://github.com/neurwerk/k8s_stack_studio/issues"
+Security = "https://github.com/neurwerk/k8s_stack_studio/security/policy"
