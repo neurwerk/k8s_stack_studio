@@ -157,17 +157,24 @@ CI publishes two images:
 
 ### Releasing
 
-1. Bump `version` in `apps/api/pyproject.toml`
-2. Commit:
+1. Open a release issue and make the aligned API, web, and lockfile version
+   changes on a dedicated branch.
+2. Run the complete API and web quality gates, then open a pull request that
+   links the release issue and records the results.
+3. After required CI and review complete, obtain explicit authorization and
+   squash-merge the pull request.
+4. After separate release authorization, update local `main`, create the exact
+   tag from the merged commit, and push only that tag:
    ```bash
-   git add -A && git commit -m "chore: bump to v0.x.x"
-   ```
-3. Tag and push:
-   ```bash
+   git switch main
+   git pull --ff-only origin main
    git tag v0.x.x
-   git push origin main --tags
+   git push origin v0.x.x
    ```
-4. GitHub Actions builds and pushes versioned `linux/amd64` images to GHCR
+5. GitHub Actions builds and pushes versioned `linux/amd64` images to GHCR.
+
+Do not push release preparation directly to `main`, combine the branch push
+with the tag push, or treat merge authorization as release authorization.
 
 Only `v*` tags publish images. Branch pushes do not publish images.
 
