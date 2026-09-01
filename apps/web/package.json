@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.6.2",
+  "version": "0.1.0",
   "private": true,
   "license": "MIT",
   "homepage": "https://github.com/neurwerk/k8s_stack_studio#readme",
