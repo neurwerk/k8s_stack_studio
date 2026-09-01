@@ -81,3 +81,20 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  required_ci:
+    name: Required CI
+    needs: [api, web]
+    if: ${{ always() && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report required CI result
+        env:
+          API_RESULT: ${{ needs.api.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+        run: |
+          if [[ "$API_RESULT" != "success" || "$WEB_RESULT" != "success" ]]; then
+            printf 'Required validation failed: api=%s web=%s.\n' \
+              "$API_RESULT" "$WEB_RESULT" >&2
+            exit 1
+          fi
