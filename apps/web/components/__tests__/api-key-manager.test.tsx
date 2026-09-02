@@ -71,6 +71,22 @@ describe("ApiKeyManager", () => {
     expect(screen.getByText("Expires in 30 days.")).toBeInTheDocument();
   });
 
+  it("does not create a key when the name contains spaces", async () => {
+    const user = userEvent.setup();
+    render(<ApiKeyManager userId="target-user" canManage />);
+
+    await screen.findByText("automation");
+    await user.click(screen.getByRole("button", { name: "Create API key" }));
+    await user.type(screen.getByLabelText("Key name"), "deployment cli");
+    await user.click(await screen.findByRole("checkbox", { name: "llm:invoke" }));
+
+    const submit = screen.getByRole("button", { name: "Create key" });
+    expect(screen.getByLabelText("Key name")).toHaveAttribute("aria-invalid", "true");
+    expect(submit).toBeDisabled();
+    await user.click(submit);
+    expect(api.createApiKey).not.toHaveBeenCalled();
+  });
+
   it("renders a retryable permissions failure without exposing a server error", async () => {
     const user = userEvent.setup();
     api.fetchAgentGatewayPermissions.mockRejectedValue(new Error("token=secret"));
