@@ -15,6 +15,8 @@ interface ApiKeyManagerProps {
   canManage: boolean;
 }
 
+const API_KEY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._\x2d]{0,63}$/;
+
 function formatDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Unavailable" : date.toLocaleDateString();
@@ -111,8 +113,9 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
 
   const expiry = Number(expiresInDays);
   const validExpiry = Number.isInteger(expiry) && expiry >= 1 && expiry <= 365;
+  const validKeyName = API_KEY_NAME_PATTERN.test(newKeyName);
   const canCreate =
-    newKeyName.trim().length > 0 &&
+    validKeyName &&
     selectedPermissions.length > 0 &&
     validExpiry &&
     !permissionsLoading;
@@ -215,9 +218,18 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
                 onChange={(event) => {
                   setNewKeyName(event.target.value);
                 }}
+                required
+                maxLength={64}
+                pattern={API_KEY_NAME_PATTERN.source}
+                aria-describedby="api-key-name-help"
+                aria-invalid={newKeyName !== "" && !validKeyName}
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 autoFocus
               />
+              <p id="api-key-name-help" className="mt-1 text-xs text-muted-foreground">
+                Use 1 to 64 letters, numbers, periods, underscores, or hyphens. Start with a letter
+                or number.
+              </p>
             </div>
             <div>
               <label htmlFor="api-key-expiry" className="mb-2 block text-sm font-medium">
