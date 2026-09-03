@@ -9,9 +9,9 @@ import { UserUsage } from "@/components/user-usage";
 import { fetchUser } from "@/lib/api/admin";
 import {
   useCurrentUserId,
+  useHasRole,
   useIsApiKeyAdmin,
   useIsKeycloakAdmin,
-  useIsLangfuseAdmin,
 } from "@/lib/auth/roles";
 import type { KeycloakUser } from "@/lib/api/admin";
 
@@ -21,7 +21,7 @@ export default function UserDetailPage() {
   const currentUserId = useCurrentUserId();
   const isKeycloakAdmin = useIsKeycloakAdmin();
   const isApiKeyAdmin = useIsApiKeyAdmin();
-  const isLangfuseAdmin = useIsLangfuseAdmin();
+  const isUsageAdmin = useHasRole("langfuse-admin");
 
   const [user, setUser] = useState<KeycloakUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -30,7 +30,7 @@ export default function UserDetailPage() {
   const isSelf = currentUserId === userId;
   const canViewProfile = isSelf || isKeycloakAdmin;
   const canManageKeys = isSelf || isApiKeyAdmin;
-  const canViewUsage = isSelf || isLangfuseAdmin;
+  const canViewUsage = isSelf || isUsageAdmin;
 
   useEffect(() => {
     if (!canViewProfile) {
@@ -51,7 +51,7 @@ export default function UserDetailPage() {
   }, [userId, canViewProfile]);
 
   // 403
-  if (!canViewProfile && !canManageKeys) {
+  if (!canViewProfile && !canManageKeys && !canViewUsage) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
@@ -71,7 +71,7 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && loading) {
+  if (canViewProfile && loading && !canManageKeys && !canViewUsage) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -79,7 +79,7 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && error) {
+  if (canViewProfile && error && !canManageKeys && !canViewUsage) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
@@ -90,7 +90,7 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && !user) {
+  if (canViewProfile && !loading && !error && !user && !canManageKeys && !canViewUsage) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         User not found
@@ -156,17 +156,26 @@ export default function UserDetailPage() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : canManageKeys ? (
         <div className="rounded-lg border border-border bg-card p-6">
           <h1 className="text-xl font-semibold">API key management</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Manage API keys for user <span className="break-all font-mono text-xs">{userId}</span>.
           </p>
         </div>
+      ) : (
+        <div className="rounded-lg border border-border bg-card p-6">
+          <h1 className="text-xl font-semibold">User usage</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Usage for user <span className="break-all font-mono text-xs">{userId}</span>.
+          </p>
+        </div>
       )}
 
-      <ApiKeyManager userId={user?.id ?? userId} canManage={canManageKeys} />
-      {canViewUsage && user && <UserUsage userId={user.id} />}
+      {(user || canManageKeys) && (
+        <ApiKeyManager userId={user?.id ?? userId} canManage={canManageKeys} />
+      )}
+      {canViewUsage && <UserUsage userId={user?.id ?? userId} />}
     </div>
   );
 }

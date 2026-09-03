@@ -14,9 +14,9 @@ import httpx
 from fastapi import Depends, HTTPException, Request, status
 
 from k8s_stack_studio.config.settings import Settings
+from k8s_stack_studio.lib.agentgateway import AgentGatewayClient
 from k8s_stack_studio.lib.auth import StudioPrincipal
 from k8s_stack_studio.lib.keycloak_admin import KeycloakAdminClient
-from k8s_stack_studio.lib.langfuse import LangfuseClient
 from k8s_stack_studio.lib.opensearch import OpenSearchClient
 from k8s_stack_studio.lib.pii_engine import PiiEngineClient
 
@@ -61,13 +61,13 @@ def get_opensearch(
     return OpenSearchClient(settings=settings, client=client)
 
 
-def get_langfuse(
+def get_agentgateway(
     request: Request,
     settings: Settings = Depends(get_settings),
-) -> LangfuseClient:
-    """Return a LangfuseClient backed by the shared httpx client."""
-    client: httpx.AsyncClient = request.app.state.http_client
-    return LangfuseClient(settings=settings, client=client)
+) -> AgentGatewayClient:
+    """Return an AgentGatewayClient backed by its private-network client."""
+    client: httpx.AsyncClient = request.app.state.agentgateway_client
+    return AgentGatewayClient(settings=settings, client=client)
 
 
 # ── auth helpers ─────────────────────────────────────────────────────────────

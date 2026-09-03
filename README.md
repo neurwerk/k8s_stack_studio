@@ -14,8 +14,8 @@ The repository is a pnpm/Turbo monorepo containing:
 The browser loads deployment-specific OIDC settings from `/env.js`. The web app
 proxies `/api/*` to the FastAPI service, which validates Keycloak JWTs and
 enforces feature-specific realm roles. The API communicates with PII Engine
-over workload mTLS and uses authenticated integrations for OpenSearch,
-Keycloak administration, the API-key bridge, and Langfuse.
+over workload mTLS and integrates with OpenSearch, Keycloak administration,
+the API-key bridge, and AgentGateway's private usage analytics API.
 
 Default service URLs in the API settings are intentional Kubernetes service DNS
 names. Deployments override identity, credentials, certificates, and any
@@ -65,6 +65,12 @@ PII Engine also verifies its server certificate by default while always using
 the configured workload client certificate. Local development may explicitly
 set `K8S_STUDIO_PII_ENGINE_ALLOW_INSECURE_LOCAL=true` only for `localhost`,
 `127.0.0.1`, or `::1`; lookalike and remote hostnames are rejected.
+
+Usage views call the private AgentGateway admin API configured by
+`K8S_STUDIO_AGENTGATEWAY_ADMIN_URL`. The API client ignores ambient proxy
+settings and accepts only an absolute HTTP(S) URL without embedded credentials,
+a query, or a fragment. `K8S_STUDIO_USAGE_TIMEZONE` controls calendar boundaries.
+Langfuse tracing is separate from this usage integration.
 
 ## Validation
 

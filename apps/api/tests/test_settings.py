@@ -35,6 +35,7 @@ def test_settings_defaults() -> None:
     assert s.opensearch_ca_cert == ""
     assert s.opensearch_allow_insecure_local is False
     assert s.opensearch_tls_verify is True
+    assert s.agentgateway_admin_url.endswith(":15000")
     assert s.keycloak_server_url == "http://kc:80"
     assert s.keycloak_realm == "realm"
     assert s.keycloak_client_id == "cli"
@@ -104,6 +105,59 @@ def test_example_environment_uses_optional_opensearch_system_trust(
     assert values["K8S_STUDIO_OPENSEARCH_CA_CERT"] == ""
     assert settings.opensearch_ca_cert == ""
     assert settings.opensearch_tls_verify is True
+
+
+def test_example_environment_uses_loopback_agentgateway_admin_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The local analytics example uses a valid private-client base URL."""
+    example_path = Path(__file__).parents[3] / ".env.example"
+    values = {
+        name: value
+        for line in example_path.read_text().splitlines()
+        if line and not line.startswith("#")
+        for name, separator, value in [line.partition("=")]
+        if separator
+    }
+    monkeypatch.setenv(
+        "K8S_STUDIO_AGENTGATEWAY_ADMIN_URL",
+        values["K8S_STUDIO_AGENTGATEWAY_ADMIN_URL"],
+    )
+
+    settings = Settings()
+
+    assert settings.agentgateway_admin_url == "http://127.0.0.1:15000"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "agentgateway:15000",
+        "ftp://agentgateway:15000",
+        "http:///missing-host",
+        "http://user:password@agentgateway:15000",
+        "http://agentgateway:15000?token=secret",
+        "http://agentgateway:15000/#fragment",
+        "https://[::1:15000",
+    ],
+)
+def test_agentgateway_admin_url_rejects_invalid_or_credentialed_urls(url: str) -> None:
+    with pytest.raises(ValueError, match="absolute HTTP\\(S\\) URL"):
+        Settings(agentgateway_admin_url=url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://agentgateway:15000",
+        "https://agentgateway.example.com/private",
+        "http://localhost:15000",
+        "http://127.0.0.1:15000",
+        "http://[::1]:15000",
+    ],
+)
+def test_agentgateway_admin_url_accepts_absolute_http_urls(url: str) -> None:
+    assert Settings(agentgateway_admin_url=url).agentgateway_admin_url == url
 
 
 @pytest.mark.parametrize(
