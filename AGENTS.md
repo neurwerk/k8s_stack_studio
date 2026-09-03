@@ -15,6 +15,7 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `GET /api/policy-engine/actions`, `GET /api/policy-engine/policy` | `studio-user`, `pii-admin` | Shared PII Engine metadata |
 | `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; `q`/`namespace`/`pod`/`size`/`index` filters) |
 | `GET /api/admin/users`, `GET /api/admin/clients` | `studio-user`, `keycloak-admin` | Keycloak administration |
+| `GET /api/users/{user_id}/usage` | `studio-user`, self or `langfuse-admin` | Calls, total tokens, and USD cost from AgentGateway private analytics |
 | `GET /api/users/{user_id}/agentgateway-permissions` | `studio-user`, self or `api-key-admin` | Transparent bridge `GET /permissions?user_id=...` proxy |
 | API-key list/create/revoke routes | `studio-user`, self or `api-key-admin` | Bridge proxy; creates require immutable `name`, non-empty `permissions`, and `expires_in_days` from 1 to 365; no renewal route |
 
@@ -26,6 +27,10 @@ verified against the internal CA mounted at `K8S_STUDIO_OPENSEARCH_CA_CERT`
 only for loopback local-development endpoints.
 
 Settings are via `K8S_STUDIO_*` env vars.
+Usage analytics calls AgentGateway's private admin API through a dedicated,
+lifespan-managed client that ignores ambient proxy settings. The browser never
+calls AgentGateway directly, and the existing `langfuse-admin` role remains the
+cross-user usage authorization contract.
 PII Engine server verification can be disabled only through the explicit local
 option and only for exact `localhost`, `127.0.0.1`, or `::1` endpoints; workload
 client certificates remain required.
@@ -51,6 +56,7 @@ apps/
 │   │   │   └── settings.py      ← Pydantic BaseSettings (K8S_STUDIO_ prefix)
 │   │   ├── lib/
 │   │   │   ├── http_client.py   ← Shared httpx.AsyncClient (lifespan-managed)
+│   │   │   ├── agentgateway.py  ← Private request-log analytics client
 │   │   │   ├── pii_engine.py    ← PiiEngineClient — typed mTLS engine client
 │   │   │   ├── auth.py          ← Keycloak OIDC + studio-user admission middleware
 │   │   │   ├── dependencies.py  ← FastAPI Depends() wiring
@@ -107,8 +113,9 @@ pnpm-workspace.yaml               ← apps/*
 2. FastAPI admits operational routes only after Keycloak verifies a JWT with the `studio-user` realm role; feature routes retain their focused leaf-role checks
 3. The policy-engine endpoints proxy directly to PII Engine v1 over workload mTLS; human JWTs are not forwarded
 4. Policy evaluation is deterministic and model-free; Studio displays the Engine's transformed request, simulated model-facing echo, restored user response, and bounded diagnostics
-5. Verified `resource_access.agentgateway.roles` remains in the session contract for API-key entitlement management, but the policy tester never calls AgentGateway
-6. Sidebar uses `lucide-react` icons and is collapsible (width toggles between 16rem and 4rem)
+5. Usage queries are authorized by Studio and proxied to AgentGateway's private request-log analytics API; unrelated OTLP/Langfuse tracing behavior is unchanged
+6. Verified `resource_access.agentgateway.roles` remains in the session contract for API-key entitlement management, but the policy tester never calls AgentGateway
+7. Sidebar uses `lucide-react` icons and is collapsible (width toggles between 16rem and 4rem)
 
 ## Frontend details
 

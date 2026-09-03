@@ -18,6 +18,17 @@ class InvalidUsageTimezoneError(ValueError):
         super().__init__("Configured usage_timezone is not a valid IANA timezone.")
 
 
+class InvalidAgentGatewayAdminUrlError(ValueError):
+    """The configured AgentGateway admin URL is not a safe absolute URL."""
+
+    def __init__(self) -> None:
+        """Set a safe configuration error message."""
+        super().__init__(
+            "Configured agentgateway_admin_url must be an absolute HTTP(S) URL with a "
+            "hostname and without credentials, query, or fragment."
+        )
+
+
 class MissingPiiEngineHostnameError(ValueError):
     """The configured PII Engine URL has no hostname."""
 
@@ -129,11 +140,10 @@ class Settings(BaseSettings):
     # URL for the keycloak-api-key-bridge service (manages per-user API keys).
     keycloak_api_key_bridge_url: str = ""
 
-    # --- Langfuse (per-user usage dashboard) ---
-    langfuse_url: str = "http://monitor-langfuse-web.monitor-langfuse.svc.cluster.local:3000"
-    # Project-scoped API credentials, synced into the Studio runtime Secret.
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
+    # --- AgentGateway private analytics (per-user usage dashboard) ---
+    agentgateway_admin_url: str = (
+        "http://infra-agentgateway-gateway.infra-agentgateway.svc.cluster.local:15000"
+    )
     # Calendar usage periods are calculated in this IANA timezone.
     usage_timezone: str = "UTC"
 
@@ -194,4 +204,22 @@ class Settings(BaseSettings):
             ZoneInfo(value)
         except ZoneInfoNotFoundError as e:
             raise InvalidUsageTimezoneError from e
+        return value
+
+    @field_validator("agentgateway_admin_url")
+    @classmethod
+    def validate_agentgateway_admin_url(cls, value: str) -> str:
+        """Require a credential-free absolute HTTP(S) AgentGateway URL."""
+        parsed = _parse_url(value)
+        if (
+            parsed is None
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise InvalidAgentGatewayAdminUrlError
         return value

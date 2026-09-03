@@ -30,12 +30,6 @@ export function useIsApiKeyAdmin(): boolean {
   return roles.includes("api-key-admin");
 }
 
-/** Check whether the current user has the langfuse-admin role. */
-export function useIsLangfuseAdmin(): boolean {
-  const roles = useUserRoles();
-  return roles.includes("langfuse-admin");
-}
-
 /** Check whether the current user has the opensearch-admin role. */
 export function useIsOpensearchAdmin(): boolean {
   const roles = useUserRoles();

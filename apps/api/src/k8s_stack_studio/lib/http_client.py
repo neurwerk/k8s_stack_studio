@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import ssl
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Request
@@ -61,18 +61,18 @@ def _create_pii_engine_client(settings: Settings) -> httpx.AsyncClient:
 async def http_client_lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Attach a shared httpx.AsyncClient to ``app.state.http_client``."""
     settings = Settings()
-    client = _create_client()
-    opensearch_client = _create_client(verify=settings.opensearch_tls_verify, trust_env=False)
-    pii_engine_client = _create_pii_engine_client(settings)
-    app.state.http_client = client
-    app.state.opensearch_client = opensearch_client
-    app.state.pii_engine_client = pii_engine_client
-    try:
+    async with AsyncExitStack() as stack:
+        app.state.http_client = await stack.enter_async_context(_create_client())
+        app.state.agentgateway_client = await stack.enter_async_context(
+            _create_client(trust_env=False)
+        )
+        app.state.opensearch_client = await stack.enter_async_context(
+            _create_client(verify=settings.opensearch_tls_verify, trust_env=False)
+        )
+        app.state.pii_engine_client = await stack.enter_async_context(
+            _create_pii_engine_client(settings)
+        )
         yield
-    finally:
-        await client.aclose()
-        await opensearch_client.aclose()
-        await pii_engine_client.aclose()
 
 
 async def get_http_client(request: Request) -> httpx.AsyncClient:
