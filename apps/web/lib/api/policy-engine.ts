@@ -37,6 +37,10 @@ export interface ChatMessage {
   tool_call_id?: string;
 }
 
+export interface ChatStreamOptions {
+  include_usage: boolean;
+}
+
 export interface OpenAIChatRequest {
   model: string;
   messages: ChatMessage[];
@@ -44,6 +48,7 @@ export interface OpenAIChatRequest {
   top_p?: number;
   max_tokens?: number;
   stream?: boolean;
+  stream_options?: ChatStreamOptions | null;
 }
 
 export interface OpenAIResponsesRequest {
