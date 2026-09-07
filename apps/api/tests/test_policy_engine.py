@@ -10,6 +10,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
+from pydantic import ValidationError
 from starlette.requests import Request
 
 from k8s_stack_studio.controllers.policy_engine import evaluate, router
@@ -51,6 +52,8 @@ def studio_response() -> dict[str, object]:
         "request": {
             "model": "test-model",
             "messages": [{"role": "user", "content": "email *************"}],
+            "stream": False,
+            "stream_options": None,
         },
         "analysis": {
             "source": "current_request",
@@ -151,14 +154,13 @@ async def test_client_analyze_uses_studio_contract(
     client: PiiEngineClient, mock_http_client: MagicMock
 ) -> None:
     """Analyze posts the strict request and parses the no-reversal response."""
-    response = MagicMock(spec=httpx.Response)
-    response.status_code = 200
-    response.json.return_value = studio_response()
+    response = httpx.Response(200, json=studio_response())
     mock_http_client.request = AsyncMock(return_value=response)
 
     result = await client.analyze(request_model())
 
     assert result.entities == ["EMAIL_ADDRESS"]
+    assert result.model_dump(mode="json")["request"]["stream_options"] is None
     assert "reversal" not in result.model_dump()
     call = mock_http_client.request.await_args
     assert call is not None
@@ -204,18 +206,26 @@ async def test_client_actions_and_policy(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("include_usage", [None, False, True])
 async def test_client_evaluate_uses_dedicated_studio_path_without_headers(
-    client: PiiEngineClient, mock_http_client: MagicMock
+    client: PiiEngineClient, mock_http_client: MagicMock, include_usage: bool | None
 ) -> None:
-    """Evaluation sends the exact body through the existing isolated client."""
-    response = MagicMock(spec=httpx.Response)
-    response.status_code = 200
-    response.json.return_value = evaluation_response()
+    """Evaluation preserves serialized Engine stream options without human headers."""
+    options = None if include_usage is None else {"include_usage": include_usage}
+    payload = evaluation_response()
+    cast(dict[str, object], payload["request"]).update(
+        {"stream": options is not None, "stream_options": options}
+    )
+    response = httpx.Response(200, json=payload)
     mock_http_client.request = AsyncMock(return_value=response)
+    request = evaluation_request_model().model_dump(mode="json")
+    if options is not None:
+        request["request"].update({"stream": True, "stream_options": options})
 
-    result = await client.evaluate(evaluation_request_model())
+    result = await client.evaluate(StudioPolicyEvaluationRequest.model_validate(request))
 
     assert result.valid is True
+    assert result.model_dump(mode="json")["request"]["stream_options"] == options
     call = mock_http_client.request.await_args
     assert call is not None
     assert call.args[:2] == (
@@ -233,12 +243,33 @@ async def test_client_evaluate_uses_dedicated_studio_path_without_headers(
                     "tool_calls": [],
                 }
             ],
-            "stream": False,
+            "stream": options is not None,
+            **({"stream_options": options} if options is not None else {}),
             "tools": [],
         },
         "policy": {"pii": {"defaultAction": "mask"}},
         "simulation": "deterministic_echo",
     }
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"stream": True, "stream_options": {}},
+        {"stream": True, "stream_options": {"include_usage": "true"}},
+        {"stream": True, "stream_options": {"include_usage": 1}},
+        {"stream": True, "stream_options": {"include_usage": None}},
+        {"stream": True, "stream_options": {"include_usage": True, "unknown": True}},
+        {"stream_options": {"include_usage": True}},
+        {"stream": False, "stream_options": {"include_usage": False}},
+        {"stream": True, "stream_options": {"include_usage": True}, "unknown": True},
+    ],
+)
+def test_chat_request_rejects_invalid_stream_options(update: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        OpenAIChatRequest.model_validate(
+            {"model": "test-model", "messages": [{"role": "user", "content": "hello"}]} | update
+        )
 
 
 @pytest.mark.asyncio

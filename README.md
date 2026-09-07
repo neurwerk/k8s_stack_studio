@@ -17,6 +17,11 @@ enforces feature-specific realm roles. The API communicates with PII Engine
 over workload mTLS and integrates with OpenSearch, Keycloak administration,
 the API-key bridge, and AgentGateway's private usage analytics API.
 
+Studio mirrors PII Engine's typed Chat Completions `stream_options` contract:
+omitted or null options are accepted; a non-null object requires `stream: true`
+and a strict boolean `include_usage` field. Unknown option fields are rejected.
+Analysis and evaluation responses preserve these options, including explicit null.
+
 Default service URLs in the API settings are intentional Kubernetes service DNS
 names. Deployments override identity, credentials, certificates, and any
 environment-specific endpoints through `K8S_STUDIO_*` environment variables.
