@@ -145,7 +145,7 @@ class Settings(BaseSettings):
         "http://infra-agentgateway-gateway.infra-agentgateway.svc.cluster.local:15000"
     )
     # Calendar usage periods are calculated in this IANA timezone.
-    usage_timezone: str = "UTC"
+    usage_timezone: str = "Europe/Berlin"
 
     # --- OpenSearch (logs viewer) ---
     # The internal service DNS default is overridden through environment config.

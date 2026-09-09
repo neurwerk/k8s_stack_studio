@@ -16,6 +16,7 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; `q`/`namespace`/`pod`/`size`/`index` filters) |
 | `GET /api/admin/users`, `GET /api/admin/clients` | `studio-user`, `keycloak-admin` | Keycloak administration |
 | `GET /api/users/{user_id}/usage` | `studio-user`, self or `langfuse-admin` | Calls, total tokens, and USD cost from AgentGateway private analytics |
+| `GET /api/users/{user_id}/usage/daily` | `studio-user`, self or `langfuse-admin` | Daily requested-model tokens, calls, and reported USD; inclusive date range up to 90 days |
 | `GET /api/users/{user_id}/agentgateway-permissions` | `studio-user`, self or `api-key-admin` | Transparent bridge `GET /permissions?user_id=...` proxy |
 | API-key list/create/revoke routes | `studio-user`, self or `api-key-admin` | Bridge proxy; creates require immutable `name`, non-empty `permissions`, and `expires_in_days` from 1 to 365; no renewal route |
 
@@ -31,6 +32,9 @@ Usage analytics calls AgentGateway's private admin API through a dedicated,
 lifespan-managed client that ignores ambient proxy settings. The browser never
 calls AgentGateway directly, and the existing `langfuse-admin` role remains the
 cross-user usage authorization contract.
+`K8S_STUDIO_USAGE_TIMEZONE` defaults to `Europe/Berlin`; daily analytics honor
+local calendar days and daylight-saving transitions. The user info page uses
+Recharts 3.10.0 with a Tokens/USD toggle and defaults to the last 30 days.
 PII Engine server verification can be disabled only through the explicit local
 option and only for exact `localhost`, `127.0.0.1`, or `::1` endpoints; workload
 client certificates remain required.
@@ -77,7 +81,7 @@ apps/
 └── web/                         ← Next.js 16 + Tailwind v4 + shadcn/ui
     ├── app/
     │   ├── layout.tsx           ← Root layout (dark sidebar, Geist font)
-    │   ├── page.tsx             ← Landing → /policy-engine
+    │   ├── page.tsx             ← Landing → authenticated user's own info page
     │   ├── policy-engine/       ← Policy Engineer page
     │   ├── logs/                ← Log viewer page
     │   ├── users/               ← User management pages

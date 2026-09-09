@@ -44,6 +44,7 @@ function RoleProbe() {
 
 describe("AuthGuard", () => {
   beforeEach(() => {
+    window.history.replaceState({}, "", "/");
     fetchSession.mockReset();
     authState.current = {
       activeNavigator: undefined,
@@ -122,5 +123,18 @@ describe("AuthGuard", () => {
     await waitFor(() => {
       expect(authState.current.signinRedirect).toHaveBeenCalledTimes(1);
     });
+    expect(authState.current.signinRedirect).toHaveBeenCalledWith({ state: { returnTo: "/" } });
+  });
+
+  it("saves an explicit deep link including its query and fragment", () => {
+    window.history.replaceState({}, "", "/users/other-user?tab=usage&days=7#daily");
+    const { rerender } = render(<AuthGuard>Studio content</AuthGuard>);
+    rerender(<AuthGuard>Studio content</AuthGuard>);
+
+    expect(authState.current.signinRedirect).toHaveBeenCalledTimes(1);
+    expect(authState.current.signinRedirect).toHaveBeenCalledWith({
+      state: { returnTo: "/users/other-user?tab=usage&days=7#daily" },
+    });
+    expect(screen.queryByText("Studio content")).not.toBeInTheDocument();
   });
 });

@@ -36,7 +36,8 @@ export function AuthGuard({ children }: AuthGuardProps) {
   useEffect(() => {
     if (!isLoading && !error && !isAuthenticated && !activeNavigator && !redirectStarted.current) {
       redirectStarted.current = true;
-      void signinRedirect();
+      const { pathname, search, hash } = window.location;
+      void signinRedirect({ state: { returnTo: `${pathname}${search}${hash}` } });
     }
   }, [activeNavigator, error, isAuthenticated, isLoading, signinRedirect]);
 
@@ -124,6 +125,8 @@ export function AuthGuard({ children }: AuthGuardProps) {
   if (currentSessionState?.status !== "admitted") return null;
 
   return (
-    <VerifiedSessionProvider session={currentSessionState.session}>{children}</VerifiedSessionProvider>
+    <VerifiedSessionProvider session={currentSessionState.session}>
+      {children}
+    </VerifiedSessionProvider>
   );
 }
