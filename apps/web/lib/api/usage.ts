@@ -26,3 +26,31 @@ export interface UserUsage {
 export function fetchUserUsage(userId: string): Promise<UserUsage> {
   return apiGet<UserUsage>(`/users/${userId}/usage`);
 }
+
+export interface DailyModelUsage extends UsagePeriod {
+  model: string | null;
+}
+
+export interface UserDailyUsage {
+  timezone: string;
+  start_date: string;
+  end_date: string;
+  today: string;
+  days: { date: string; models: DailyModelUsage[] }[];
+}
+
+export interface UsageDateRange {
+  start: string;
+  end: string;
+}
+
+/** Omit the range to use the server's last 30 calendar days, including today. */
+export function fetchUserDailyUsage(
+  userId: string,
+  range?: UsageDateRange,
+): Promise<UserDailyUsage> {
+  return apiGet<UserDailyUsage>(
+    `/users/${encodeURIComponent(userId)}/usage/daily`,
+    range ? { start: range.start, end: range.end } : undefined,
+  );
+}

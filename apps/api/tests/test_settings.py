@@ -36,6 +36,7 @@ def test_settings_defaults() -> None:
     assert s.opensearch_allow_insecure_local is False
     assert s.opensearch_tls_verify is True
     assert s.agentgateway_admin_url.endswith(":15000")
+    assert s.usage_timezone == "Europe/Berlin"
     assert s.keycloak_server_url == "http://kc:80"
     assert s.keycloak_realm == "realm"
     assert s.keycloak_client_id == "cli"

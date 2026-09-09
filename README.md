@@ -74,8 +74,28 @@ set `K8S_STUDIO_PII_ENGINE_ALLOW_INSECURE_LOCAL=true` only for `localhost`,
 Usage views call the private AgentGateway admin API configured by
 `K8S_STUDIO_AGENTGATEWAY_ADMIN_URL`. The API client ignores ambient proxy
 settings and accepts only an absolute HTTP(S) URL without embedded credentials,
-a query, or a fragment. `K8S_STUDIO_USAGE_TIMEZONE` controls calendar boundaries.
+a query, or a fragment. `K8S_STUDIO_USAGE_TIMEZONE` controls calendar boundaries
+and defaults to `Europe/Berlin`, including daylight-saving transitions.
 Langfuse tracing is separate from this usage integration.
+
+The default landing page is the authenticated user's own info page. Explicit
+local deep links are preserved through login; self-service does not require a
+specialized administrator role beyond Studio admission.
+
+The user info page displays a Recharts 3.10.0 daily stacked chart by requested
+model, with an instant Tokens/USD switch, model visibility controls, and
+selected-range totals. It defaults to 30 calendar days including today and
+refreshes every 30 seconds. Costs are reported sums and may omit unpriced
+requests. Today is partial; unknown models and empty days are retained.
+
+`GET /api/users/{user_id}/usage/daily` accepts optional inclusive `start` and
+`end` dates (`YYYY-MM-DD`), with a maximum of 90 days and no future end date.
+Without `end`, it ends today; without `start`, it starts 29 days before the end.
+It returns `timezone`, `start_date`, `end_date`, `today`, and `days`, each with a
+`date` and `models` containing nullable `model`, `requests`, `total_tokens`, and
+`cost_usd`. Self and `langfuse-admin` authorization matches the retained
+`/usage` period-totals endpoint. Invalid ranges return 422; unavailable or
+invalid gateway summaries return 502 without exposing upstream content.
 
 ## Validation
 
