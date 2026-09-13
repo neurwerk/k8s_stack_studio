@@ -54,15 +54,18 @@ export async function apiPost<TReq, TRes>(path: string, body: TReq): Promise<TRe
 }
 
 /** Generic typed GET request with optional query params. */
-export async function apiGet<TRes>(path: string, params?: Record<string, string>): Promise<TRes> {
+export async function apiGet<TRes>(
+  path: string,
+  params?: Record<string, string> | URLSearchParams,
+  signal?: AbortSignal,
+): Promise<TRes> {
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
   if (params) {
-    Object.entries(params).forEach(([k, v]) => {
-      url.searchParams.set(k, v);
-    });
+    url.search = new URLSearchParams(params).toString();
   }
   const res = await fetch(url.toString(), {
     method: "GET",
+    signal,
     headers: authHeaders(),
   });
   if (!res.ok) {

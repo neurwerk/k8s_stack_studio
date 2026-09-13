@@ -1,5 +1,7 @@
 "use client";
 
+import { UserStatus } from "@/components/user-status";
+
 import { ArrowLeft, Loader2, UserIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -125,15 +127,7 @@ export default function UserDetailPage() {
               <p className="text-sm text-muted-foreground">@{user.username}</p>
             </div>
             <div className="ml-auto">
-              {user.enabled ? (
-                <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
-                  Active
-                </span>
-              ) : (
-                <span className="inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-xs font-medium text-red-700">
-                  Disabled
-                </span>
-              )}
+              <UserStatus user={user} />
             </div>
           </div>
 
@@ -141,10 +135,6 @@ export default function UserDetailPage() {
             <div>
               <p className="text-muted-foreground">Email</p>
               <p>{user.email || "—"}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Email Verified</p>
-              <p>{user.emailVerified ? "Yes" : "No"}</p>
             </div>
             <div>
               <p className="text-muted-foreground">User ID</p>

@@ -15,6 +15,7 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `GET /api/policy-engine/actions`, `GET /api/policy-engine/policy` | `studio-user`, `pii-admin` | Shared PII Engine metadata |
 | `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; `q`/`namespace`/`pod`/`size`/`index` filters) |
 | `GET /api/admin/users`, `GET /api/admin/clients` | `studio-user`, `keycloak-admin` | Keycloak administration |
+| `GET /api/admin/recent-signins` | `studio-user`, `keycloak-admin` | Read-only seven-day successful LOGIN summary for up to 25 user IDs |
 | `GET /api/users/{user_id}/usage` | `studio-user`, self or `langfuse-admin` | Calls, total tokens, and USD cost from AgentGateway private analytics |
 | `GET /api/users/{user_id}/usage/daily` | `studio-user`, self or `langfuse-admin` | Daily requested-model tokens, calls, and reported USD; inclusive date range up to 90 days |
 | `GET /api/users/{user_id}/agentgateway-permissions` | `studio-user`, self or `api-key-admin` | Transparent bridge `GET /permissions?user_id=...` proxy |
@@ -47,6 +48,26 @@ The Next.js frontend consumes the API and renders a dashboard with:
 - **Users / Clients** (`/users`, `/clients`, `keycloak-admin` role) — Keycloak user and client management
 - **API Keys** — per-user API key management
 - **Error / loading states** — spinner while loading, error card when the API is unreachable
+
+The Users list uses `first` (nonnegative offset) and `max` (1-25, default 25)
+on `/api/admin/users`, retaining its array response. Search is debounced and
+requests are cancelled when search/page changes. Status separates account
+Enabled/Disabled/unknown from email verified/unverified/unknown or no email.
+Self-profile account state is unknown because an issued JWT is not evidence of
+the account's current enabled state.
+
+`/api/admin/recent-signins` accepts repeated `user_ids` query parameters and
+returns UTC `window_start`, `window_end`, and a `users` map. Each value has
+`status` (`recorded`, `no_record`, or `unavailable`) and nullable ISO timestamp.
+The rolling window is exactly seven days. Queries forward the administrator's
+own bearer token, require Keycloak `realm-management/view-events`, and filter
+by user, successful `LOGIN`, descending time, max 1, and epoch-millisecond date
+bounds, without a client filter. There are at most four concurrent event
+requests per batch, each with a five-second HTTP timeout. Only normalized
+timestamps reach the browser, not raw events or their details. Activity errors
+do not hide users. No record is not proof that a user never signed in; retention
+and event collection may limit history. Keycloak role provisioning is owned by
+the platform, not Studio.
 
 ## Project structure
 

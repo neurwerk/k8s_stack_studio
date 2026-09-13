@@ -8,11 +8,11 @@ import { apiGet, apiPost } from "@/lib/api/client";
 export interface KeycloakUser {
   id: string;
   username: string;
-  email: string;
+  email?: string | null;
   firstName: string;
   lastName: string;
-  enabled: boolean;
-  emailVerified: boolean;
+  enabled?: boolean | null;
+  emailVerified?: boolean | null;
   createdTimestamp: number;
 }
 
@@ -113,10 +113,36 @@ export function fetchMe(): Promise<Record<string, unknown>> {
 }
 
 /** List all Keycloak users (keycloak-admin role required). */
-export function fetchUsers(search?: string): Promise<KeycloakUser[]> {
-  const params: Record<string, string> = {};
+export function fetchUsers(
+  search?: string,
+  first = 0,
+  signal?: AbortSignal,
+): Promise<KeycloakUser[]> {
+  const params: Record<string, string> = { first: String(first), max: "25" };
   if (search) params.search = search;
-  return apiGet<KeycloakUser[]>("/admin/users", params);
+  return apiGet<KeycloakUser[]>("/admin/users", params, signal);
+}
+
+export interface RecentSignin {
+  status: "recorded" | "no_record" | "unavailable";
+  timestamp: string | null;
+}
+
+export interface RecentSignins {
+  window_start: string;
+  window_end: string;
+  users: Record<string, RecentSignin>;
+}
+
+export function fetchRecentSignins(
+  userIds: string[],
+  signal?: AbortSignal,
+): Promise<RecentSignins> {
+  const params = new URLSearchParams();
+  userIds.forEach((id) => {
+    params.append("user_ids", id);
+  });
+  return apiGet<RecentSignins>("/admin/recent-signins", params, signal);
 }
 
 /** Fetch a single Keycloak user by ID (self or keycloak-admin). */

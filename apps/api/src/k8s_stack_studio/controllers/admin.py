@@ -9,9 +9,12 @@ Endpoints:
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import Field
 
 from k8s_stack_studio.lib.auth import StudioPrincipal
 from k8s_stack_studio.lib.dependencies import (
@@ -81,15 +84,41 @@ async def _require_self_or_admin(user_id: str, request: Request) -> None:
 async def list_users(
     request: Request,
     search: str | None = Query(None, description="Optional search string"),
+    first: int = Query(0, ge=0),
+    max_results: int = Query(25, alias="max", ge=1, le=25),
     _: None = Depends(require_role("keycloak-admin")),
     admin: KeycloakAdminClient = Depends(get_keycloak_admin),
 ) -> list[dict[str, Any]]:
-    """List all Keycloak users (keycloak-admin role required).
+    """List a bounded page of Keycloak users (keycloak-admin role required).
 
     Forwards the caller's bearer token to the Keycloak Admin API.
     """
     user_token = _extract_bearer_token(request)
-    return await admin.list_users(user_token, search=search)
+    return await admin.list_users(user_token, search=search, first=first, max_results=max_results)
+
+
+@router.get("/admin/recent-signins")
+async def recent_signins(
+    request: Request,
+    user_ids: list[Annotated[str, Field(min_length=1, max_length=255)]] = Query(
+        min_length=1, max_length=25
+    ),
+    _: None = Depends(require_role("keycloak-admin")),
+    admin: KeycloakAdminClient = Depends(get_keycloak_admin),
+) -> dict[str, Any]:
+    """Read bounded seven-day LOGIN history for the displayed user page."""
+    token = _extract_bearer_token(request)
+    end = datetime.now(UTC)
+    end = end.replace(microsecond=end.microsecond // 1000 * 1000)
+    start = end - timedelta(days=7)
+    semaphore = asyncio.Semaphore(4)
+
+    async def lookup(user_id: str) -> tuple[str, dict[str, str | None]]:
+        async with semaphore:
+            return user_id, await admin.recent_signin(user_id, token, start, end)
+
+    records = await asyncio.gather(*(lookup(user_id) for user_id in dict.fromkeys(user_ids)))
+    return {"window_start": start, "window_end": end, "users": dict(records)}
 
 
 # ── GET /api/admin/users/{user_id} ───────────────────────────────────────────
@@ -103,8 +132,8 @@ def _principal_to_user_dict(principal: StudioPrincipal) -> dict[str, Any]:
         "email": principal.profile.get("email", ""),
         "firstName": principal.profile.get("given_name", ""),
         "lastName": principal.profile.get("family_name", ""),
-        "enabled": True,  # JWT was issued, so the user is effectively enabled
-        "emailVerified": principal.profile.get("email_verified", False),
+        "enabled": None,  # A previously issued JWT is not current account-state evidence.
+        "emailVerified": principal.profile.get("email_verified"),
         "createdTimestamp": principal.profile.get("iat", 0) * 1000,
     }
 
