@@ -14,6 +14,7 @@ Uses the shared httpx.AsyncClient from the app lifespan for connection pooling.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -74,16 +75,66 @@ class KeycloakAdminClient:
         result = await self._admin_request("GET", f"users/{user_id}", user_token)
         return result if isinstance(result, dict) else {}
 
-    async def list_users(self, user_token: str, search: str | None = None) -> list[dict[str, Any]]:
-        """List all users in the realm, optionally filtered by search string.
+    async def list_users(
+        self, user_token: str, search: str | None = None, first: int = 0, max_results: int = 25
+    ) -> list[dict[str, Any]]:
+        """List a page of realm users, optionally filtered by search string.
 
         Keycloak Admin API: ``GET /admin/realms/{realm}/users``
         """
-        params: dict[str, str] = {}
+        params: dict[str, str] = {"first": str(first), "max": str(max_results)}
         if search:
             params["search"] = search
         result = await self._admin_request("GET", "users", user_token, params=params)
         return result if isinstance(result, list) else []
+
+    async def recent_signin(
+        self, user_id: str, user_token: str, start: datetime, end: datetime
+    ) -> dict[str, str | None]:
+        """Return only a successful LOGIN timestamp, never event details.
+
+        Use epoch milliseconds to avoid server-local calendar-day boundaries.
+        Missing event access or malformed data must not look like an empty history.
+        """
+        unavailable = {"status": "unavailable", "timestamp": None}
+        try:
+            result = await self._admin_request(
+                "GET",
+                "events",
+                user_token,
+                params={
+                    "user": user_id,
+                    "type": "LOGIN",
+                    "max": "1",
+                    "direction": "desc",
+                    "dateFrom": str(int(start.timestamp() * 1000)),
+                    "dateTo": str(int(end.timestamp() * 1000)),
+                },
+                timeout=5,
+            )
+        except (RuntimeError, ValueError):
+            return unavailable
+        if not isinstance(result, list) or len(result) > 1:
+            return unavailable
+        if not result:
+            return {"status": "no_record", "timestamp": None}
+        event = result[0]
+        if not isinstance(event, dict):
+            return unavailable
+        timestamp = event.get("time")
+        if (
+            event.get("type") != "LOGIN"
+            or event.get("userId") != user_id
+            or event.get("error") is not None
+            or type(timestamp) is not int
+        ):
+            return unavailable
+        if timestamp > int(end.timestamp() * 1000) or timestamp < 0:
+            return unavailable
+        if timestamp < int(start.timestamp() * 1000):
+            return {"status": "no_record", "timestamp": None}
+        instant = datetime.fromtimestamp(timestamp / 1000, tz=UTC)
+        return {"status": "recorded", "timestamp": instant.isoformat()}
 
     async def list_public_clients(self, user_token: str) -> list[dict[str, Any]]:
         """List all public OIDC clients in the realm.

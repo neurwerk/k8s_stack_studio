@@ -2,15 +2,18 @@
 
 import { UserIcon } from "lucide-react";
 import Link from "next/link";
-import type { KeycloakUser } from "@/lib/api/admin";
+import type { KeycloakUser, RecentSignins } from "@/lib/api/admin";
+import { UserStatus } from "@/components/user-status";
 
 interface UserTableProps {
   users: KeycloakUser[];
   loading: boolean;
   error: string | null;
+  activity?: RecentSignins | null;
+  activityLoading?: boolean;
 }
 
-export function UserTable({ users, loading, error }: UserTableProps) {
+export function UserTable({ users, loading, error, activity, activityLoading }: UserTableProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -46,6 +49,7 @@ export function UserTable({ users, loading, error }: UserTableProps) {
             <th className="px-4 py-3 font-medium">First Name</th>
             <th className="px-4 py-3 font-medium">Last Name</th>
             <th className="px-4 py-3 font-medium">Status</th>
+            <th className="px-4 py-3 font-medium">Recent sign-in</th>
           </tr>
         </thead>
         <tbody>
@@ -62,24 +66,17 @@ export function UserTable({ users, loading, error }: UserTableProps) {
                   {user.username}
                 </Link>
               </td>
-              <td className="px-4 py-3 text-muted-foreground">
-                {user.email || "—"}
-              </td>
-              <td className="px-4 py-3 text-muted-foreground">
-                {user.firstName || "—"}
-              </td>
-              <td className="px-4 py-3 text-muted-foreground">
-                {user.lastName || "—"}
-              </td>
+              <td className="px-4 py-3 text-muted-foreground">{user.email || "—"}</td>
+              <td className="px-4 py-3 text-muted-foreground">{user.firstName || "—"}</td>
+              <td className="px-4 py-3 text-muted-foreground">{user.lastName || "—"}</td>
               <td className="px-4 py-3">
-                {user.enabled ? (
-                  <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
-                    Active
-                  </span>
+                <UserStatus user={user} />
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {activityLoading ? (
+                  "Loading sign-in..."
                 ) : (
-                  <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
-                    Disabled
-                  </span>
+                  <SigninTime activity={activity} userId={user.id} />
                 )}
               </td>
             </tr>
@@ -87,5 +84,29 @@ export function UserTable({ users, loading, error }: UserTableProps) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function SigninTime({ activity, userId }: { activity?: RecentSignins | null; userId: string }) {
+  const record = activity?.users[userId];
+  if (!record || record.status === "unavailable") return <>Unavailable</>;
+  if (record.status === "no_record") return <>No record in last 7 days</>;
+  const instant = new Date(record.timestamp ?? "");
+  const end = new Date(activity?.window_end ?? "");
+  if (!Number.isFinite(instant.getTime()) || !Number.isFinite(end.getTime()))
+    return <>Unavailable</>;
+  const seconds = Math.max(0, Math.floor((end.getTime() - instant.getTime()) / 1000));
+  const unit =
+    seconds >= 86400 ? "day" : seconds >= 3600 ? "hour" : seconds >= 60 ? "minute" : "second";
+  const divisor = unit === "day" ? 86400 : unit === "hour" ? 3600 : unit === "minute" ? 60 : 1;
+  const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(
+    -Math.floor(seconds / divisor),
+    unit,
+  );
+  const exact = instant.toISOString().replace("T", " ").replace("Z", " UTC");
+  return (
+    <time dateTime={instant.toISOString()} title={exact} aria-label={`${relative}; ${exact}`}>
+      {relative}
+    </time>
   );
 }
