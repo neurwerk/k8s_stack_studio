@@ -7,6 +7,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
+import k8s_stack_studio.main as studio_main
 from k8s_stack_studio.main import create_app, create_mgmt_app
 
 
@@ -40,3 +41,27 @@ async def test_mgmt_app_health_endpoint() -> None:
         resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+
+def test_main_requires_lifespan_support(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail startup rather than serving without lifespan-managed clients."""
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def fake_run(*args: object, **kwargs: object) -> None:
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(studio_main.uvicorn, "run", fake_run)
+    studio_main.main()
+
+    assert calls == [
+        (
+            ("k8s_stack_studio.main:create_app",),
+            {
+                "host": "0.0.0.0",
+                "port": 4010,
+                "factory": True,
+                "log_level": "info",
+                "lifespan": "on",
+            },
+        )
+    ]
