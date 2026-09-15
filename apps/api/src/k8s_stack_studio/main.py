@@ -169,6 +169,7 @@ def main() -> None:
         port=settings.port,
         factory=True,
         log_level=settings.log_level,
+        lifespan="on",
     )
 
 

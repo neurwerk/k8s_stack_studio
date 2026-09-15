@@ -33,7 +33,9 @@ environment-specific endpoints through `K8S_STUDIO_*` environment variables.
 - Python 3.12
 - [uv](https://docs.astral.sh/uv/)
 
-The full application also requires reachable OIDC and backend integrations.
+The full application requires reachable OIDC and backend integrations. The API
+does not start unless its Keycloak authentication initialization succeeds, so
+Kubernetes retries it instead of exposing endpoints without initialized clients.
 Studio does not retrieve credentials or certificates from a cluster. Provide
 local certificate paths and credentials through your own ignored env file.
 
