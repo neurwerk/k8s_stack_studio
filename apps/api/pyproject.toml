@@ -109,7 +109,6 @@ source = ["src"]
 omit = ["tests/*"]
 
 [tool.coverage.report]
-fail_under = 0   # TODO(2026-08): Phase 4 — raise to 80 after test suite is complete
 show_missing = true
 
 [dependency-groups]
