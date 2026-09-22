@@ -9,6 +9,25 @@ The repository is a pnpm/Turbo monorepo containing:
 - `apps/web`: Next.js 16 and React 19 frontend.
 - `apps/api`: FastAPI backend managed with uv.
 
+## Log links
+
+Logs require `studio-user` and `opensearch-admin`. Studio queries OpenSearch with
+the read-only `studio-logs-read` identity over verified TLS; browsers never
+connect directly to OpenSearch.
+
+`GET /api/logs` supports `q`, `namespace`, `pod`, `size`, `index`, and optional
+paired timezone-aware `start`/`end` timestamps. Bounds are inclusive, normalized
+to UTC, and require `start < end`; malformed or incomplete ranges return 422.
+Neither bound preserves the existing newest-first search, with no maximum span.
+
+Alert links use `/logs?namespace=example&at=1790022537`: the UI-only Unix-seconds
+shortcut selects exactly ten minutes before through five minutes after the event,
+even when opened later. Shareable searches use `namespace`, `pod`, `q`, `start`,
+and `end` (RFC3339); valid explicit bounds override `at`. Invalid time links
+display an error without searching. From/To controls show local time, and Search
+writes UTC bounds to the URL and removes `at`. Search starts only after the
+verified administrator role is available. Never put raw log entries into links.
+
 ## Architecture
 
 The browser loads deployment-specific OIDC settings from `/env.js`. The web app

@@ -26,6 +26,8 @@ export interface LogsFilter {
   namespace?: string;
   pod?: string;
   size?: number;
+  start?: string;
+  end?: string;
 }
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -36,6 +38,8 @@ export function fetchLogs(filter: LogsFilter = {}): Promise<LogsResponse> {
   if (filter.q) params.q = filter.q;
   if (filter.namespace) params.namespace = filter.namespace;
   if (filter.pod) params.pod = filter.pod;
+  if (filter.start) params.start = filter.start;
+  if (filter.end) params.end = filter.end;
   params.size = String(filter.size ?? 100);
   return apiGet<LogsResponse>("/logs", params);
 }
