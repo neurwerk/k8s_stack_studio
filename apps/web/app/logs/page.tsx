@@ -1,20 +1,86 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { fetchLogs } from "@/lib/api/logs";
 import { useIsOpensearchAdmin } from "@/lib/auth/roles";
-import type { LogEntry } from "@/lib/api/logs";
+import type { LogEntry, LogsFilter } from "@/lib/api/logs";
+
+function localTime(value?: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+    .toISOString().slice(0, -1);
+}
+
+function timestamp(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
+    throw new Error("Use timestamps with a timezone for start and end.");
+  }
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error("Invalid log time range.");
+  const day = Number(value.slice(8, 10));
+  const month = Number(value.slice(5, 7));
+  const year = Number(value.slice(0, 4));
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (year < 1 || day < 1 || day > days || Number(value.slice(11, 13)) > 23) {
+    throw new Error("Invalid log date.");
+  }
+  return date.toISOString();
+}
+
+function readFilters(params: URLSearchParams): { filter: LogsFilter; error: string | null } {
+  const filter: LogsFilter = {
+    q: params.get("q") || undefined,
+    namespace: params.get("namespace") || undefined,
+    pod: params.get("pod") || undefined,
+    size: 100,
+  };
+  try {
+    if (params.has("start") || params.has("end")) {
+      filter.start = timestamp(params.get("start") ?? "");
+      filter.end = timestamp(params.get("end") ?? "");
+    } else if (params.has("at")) {
+      const raw = params.get("at") ?? "";
+      const at = Number(raw);
+      if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw) || !Number.isFinite(at)) {
+        throw new Error("Invalid alert timestamp.");
+      }
+      filter.start = timestamp(new Date((at - 600) * 1000).toISOString());
+      filter.end = timestamp(new Date((at + 300) * 1000).toISOString());
+    }
+    if (filter.start && filter.end && Date.parse(filter.start) >= Date.parse(filter.end)) {
+      throw new Error("From must be before To.");
+    }
+    return { filter, error: null };
+  } catch {
+    return { filter, error: "Invalid time link. Set both From and To to a valid, ascending range." };
+  }
+}
 
 export default function LogsPage() {
+  return <Suspense fallback={<div className="p-6">Loading…</div>}><LogsRoute /></Suspense>;
+}
+
+function LogsRoute() {
+  const params = useSearchParams();
+  return <LogsView key={params.toString()} queryString={params.toString()} />;
+}
+
+function LogsView({ queryString }: { queryString: string }) {
+  const router = useRouter();
+  const [initial] = useState(() => readFilters(new URLSearchParams(queryString)));
   const isOpensearchAdmin = useIsOpensearchAdmin();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [q, setQ] = useState("");
-  const [namespace, setNamespace] = useState("");
-  const [pod, setPod] = useState("");
+  const [error, setError] = useState<string | null>(initial.error);
+  const [q, setQ] = useState(initial.filter.q ?? "");
+  const [namespace, setNamespace] = useState(initial.filter.namespace ?? "");
+  const [pod, setPod] = useState(initial.filter.pod ?? "");
+  const [start, setStart] = useState(localTime(initial.filter.start));
+  const [end, setEnd] = useState(localTime(initial.filter.end));
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
   const toggleRow = (i: number) => {
@@ -29,16 +95,11 @@ export default function LogsPage() {
     });
   };
 
-  const load = useCallback(() => {
+  const load = useCallback((filter: LogsFilter) => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetchLogs({
-      q: q || undefined,
-      namespace: namespace || undefined,
-      pod: pod || undefined,
-      size: 100,
-    })
+    fetchLogs(filter)
       .then((data) => {
         if (!cancelled) {
           setEntries(data.hits);
@@ -52,13 +113,39 @@ export default function LogsPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [q, namespace, pod]);
+  }, []);
 
-  // Initial load (last 100 logs, unfiltered) — only once the role is known
+  // Validate URL bounds before any authorized search.
   useEffect(() => {
-    if (isOpensearchAdmin) load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpensearchAdmin]);
+    if (isOpensearchAdmin && !initial.error) return load(initial.filter);
+    setLoading(false);
+  }, [isOpensearchAdmin, initial, load]);
+
+  const search = () => {
+    try {
+      if (Boolean(start) !== Boolean(end) || (initial.error && (!start || !end))) {
+        throw new Error("Set both From and To.");
+      }
+      const filter: LogsFilter = { q: q || undefined, namespace: namespace || undefined, pod: pod || undefined, size: 100 };
+      if (start && end) {
+        // Keep the exact linked instant across daylight-saving clock changes.
+        filter.start = start === localTime(initial.filter.start) ? initial.filter.start : new Date(start).toISOString();
+        filter.end = end === localTime(initial.filter.end) ? initial.filter.end : new Date(end).toISOString();
+        if (!filter.start || !filter.end || Date.parse(filter.start) >= Date.parse(filter.end)) {
+          throw new Error("From must be before To.");
+        }
+      }
+      const params = new URLSearchParams();
+      for (const key of ["namespace", "pod", "q", "start", "end"] as const) {
+        const value = filter[key];
+        if (value) params.set(key, value);
+      }
+      if (params.toString() === queryString) load(filter);
+      else router.replace(`/logs${params.size ? `?${params.toString()}` : ""}`, { scroll: false });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Invalid log time range.");
+    }
+  };
 
   if (!isOpensearchAdmin) {
     return (
@@ -88,7 +175,7 @@ export default function LogsPage() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          load();
+          search();
         }}
         className="mb-4 flex flex-wrap items-center gap-2"
       >
@@ -113,6 +200,16 @@ export default function LogsPage() {
           onChange={(e) => { setPod(e.target.value); }}
           className="w-44 rounded-md border border-border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
         />
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          From (local time)
+          <input type="datetime-local" step="0.001" value={start} onChange={(e) => { setStart(e.target.value); }}
+            className="max-w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground" />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          To (local time)
+          <input type="datetime-local" step="0.001" value={end} onChange={(e) => { setEnd(e.target.value); }}
+            className="max-w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground" />
+        </label>
         <button
           type="submit"
           className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"

@@ -9,6 +9,7 @@ for an explicitly configured loopback development endpoint.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -47,6 +48,8 @@ class OpenSearchClient:
         pod: str | None = None,
         size: int = 100,
         index: str = DEFAULT_INDEX,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> dict[str, Any]:
         """Build the OpenSearch ``_search`` request body.
 
@@ -64,6 +67,17 @@ class OpenSearchClient:
             filters.append({"term": {"kubernetes.namespace_name.keyword": namespace}})
         if pod:
             filters.append({"term": {"kubernetes.pod_name.keyword": pod}})
+        if start is not None and end is not None:
+            filters.append(
+                {
+                    "range": {
+                        "@timestamp": {
+                            "gte": start.astimezone(UTC).isoformat(),
+                            "lte": end.astimezone(UTC).isoformat(),
+                        }
+                    }
+                }
+            )
 
         bool_query: dict[str, Any] = {"must": must or [{"match_all": {}}]}
         if filters:
@@ -83,13 +97,17 @@ class OpenSearchClient:
         pod: str | None = None,
         size: int = 100,
         index: str = DEFAULT_INDEX,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> dict[str, Any]:
         """Search logs and return ``{"total": int, "hits": [LogEntry...]}``.
 
         Raises ``httpx.HTTPError`` on connection/HTTP failures — the controller
         maps this to a 502.
         """
-        body = self.build_search_body(q=q, namespace=namespace, pod=pod, size=size)
+        body = self.build_search_body(
+            q=q, namespace=namespace, pod=pod, size=size, start=start, end=end
+        )
         url = f"{self._base}/{index}/_search"
 
         if self._client is not None:

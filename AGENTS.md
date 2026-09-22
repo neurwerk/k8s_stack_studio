@@ -21,6 +21,16 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `GET /api/users/{user_id}/agentgateway-permissions` | `studio-user`, self or `api-key-admin` | Transparent bridge `GET /permissions?user_id=...` proxy |
 | API-key list/create/revoke routes | `studio-user`, self or `api-key-admin` | Bridge proxy; creates require immutable `name`, non-empty `permissions`, and `expires_in_days` from 1 to 365; no renewal route |
 
+The logs endpoint accepts paired timezone-aware `start` and `end` bounds, with
+`start < end`; invalid or incomplete ranges return 422. Bounds are normalized
+to UTC and applied inclusively to `@timestamp`, alongside existing filters.
+Omitting both retains the newest-first unbounded-time search.
+`/logs` accepts `namespace`, `pod`, `q`, `start`, and `end`; its UI-only `at`
+Unix-seconds shortcut selects exactly ten minutes before through five minutes
+after the event. Valid explicit bounds take precedence. Invalid time links
+show an error without searching. From/To controls use local time; manual searches
+write explicit UTC bounds to the URL and remove `at`.
+
 The logs endpoint queries OpenSearch with the dedicated read-only
 `studio-logs-read` internal user (basic auth, password patched into
 `frontend-studio-api-secret` by the monitor-opensearch init Job). TLS is

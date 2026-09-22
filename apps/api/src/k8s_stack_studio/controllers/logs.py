@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import AwareDatetime
 
 from k8s_stack_studio.lib.dependencies import get_opensearch, require_role
 from k8s_stack_studio.lib.opensearch import DEFAULT_INDEX, OpenSearchClient
@@ -28,13 +29,19 @@ async def search_logs(
     pod: str | None = Query(None, description="Exact Kubernetes pod name filter"),
     size: int = Query(100, ge=1, le=1000, description="Max number of log entries"),
     index: str = Query(DEFAULT_INDEX, description="Index pattern to search"),
+    start: AwareDatetime | None = Query(None, description="Inclusive start with timezone"),
+    end: AwareDatetime | None = Query(None, description="Inclusive end with timezone"),
     _: None = Depends(require_role("opensearch-admin")),
     opensearch: OpenSearchClient = Depends(get_opensearch),
 ) -> dict[str, Any]:
     """Return the newest log entries matching the given filters."""
+    if (start is None) != (end is None):
+        raise HTTPException(status_code=422, detail="Supply both start and end")
+    if start is not None and end is not None and start >= end:
+        raise HTTPException(status_code=422, detail="start must be before end")
     try:
         return await opensearch.search_logs(
-            q=q, namespace=namespace, pod=pod, size=size, index=index
+            q=q, namespace=namespace, pod=pod, size=size, index=index, start=start, end=end
         )
     except httpx.HTTPStatusError as e:
         raise HTTPException(
