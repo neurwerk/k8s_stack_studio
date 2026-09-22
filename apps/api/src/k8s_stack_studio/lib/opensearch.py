@@ -10,16 +10,18 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, get_args
 
 import httpx
 
 from k8s_stack_studio.config.settings import Settings
+from k8s_stack_studio.models.logs import FailureType, LogLevel
 
 _logger = logging.getLogger(__name__)
 
 # Default index pattern — Fluent-Bit ships all pod logs here.
 DEFAULT_INDEX = "fluent-bit-*"
+KNOWN_LOG_LEVELS = [level for level in get_args(LogLevel) if level != "UNKNOWN"]
 
 
 class OpenSearchClient:
@@ -50,6 +52,8 @@ class OpenSearchClient:
         index: str = DEFAULT_INDEX,
         start: datetime | None = None,
         end: datetime | None = None,
+        level: LogLevel | None = None,
+        failure_type: FailureType | None = None,
     ) -> dict[str, Any]:
         """Build the OpenSearch ``_search`` request body.
 
@@ -67,6 +71,14 @@ class OpenSearchClient:
             filters.append({"term": {"kubernetes.namespace_name.keyword": namespace}})
         if pod:
             filters.append({"term": {"kubernetes.pod_name.keyword": pod}})
+        if level == "UNKNOWN":
+            filters.append(
+                {"bool": {"must_not": [{"terms": {"stack_log.level.keyword": KNOWN_LOG_LEVELS}}]}}
+            )
+        elif level:
+            filters.append({"term": {"stack_log.level.keyword": level}})
+        if failure_type:
+            filters.append({"term": {"stack_log.failure_type.keyword": failure_type}})
         if start is not None and end is not None:
             filters.append(
                 {
@@ -99,6 +111,8 @@ class OpenSearchClient:
         index: str = DEFAULT_INDEX,
         start: datetime | None = None,
         end: datetime | None = None,
+        level: LogLevel | None = None,
+        failure_type: FailureType | None = None,
     ) -> dict[str, Any]:
         """Search logs and return ``{"total": int, "hits": [LogEntry...]}``.
 
@@ -106,7 +120,14 @@ class OpenSearchClient:
         maps this to a 502.
         """
         body = self.build_search_body(
-            q=q, namespace=namespace, pod=pod, size=size, start=start, end=end
+            q=q,
+            namespace=namespace,
+            pod=pod,
+            size=size,
+            start=start,
+            end=end,
+            level=level,
+            failure_type=failure_type,
         )
         url = f"{self._base}/{index}/_search"
 
@@ -133,6 +154,11 @@ class OpenSearchClient:
         for hit in data.get("hits", {}).get("hits", []):
             src = hit.get("_source", {})
             k8s = src.get("kubernetes", {}) or {}
+            classification = src.get("stack_log")
+            if not isinstance(classification, dict):
+                classification = {}
+            stored_level = classification.get("level")
+            stored_type = classification.get("failure_type")
             hits.append(
                 {
                     "timestamp": src.get("@timestamp", ""),
@@ -141,6 +167,8 @@ class OpenSearchClient:
                     "pod": k8s.get("pod_name", ""),
                     "container": k8s.get("container_name", ""),
                     "index": hit.get("_index", ""),
+                    "level": stored_level if stored_level in get_args(LogLevel) else "UNKNOWN",
+                    "failure_type": stored_type if stored_type in get_args(FailureType) else None,
                 }
             )
 
