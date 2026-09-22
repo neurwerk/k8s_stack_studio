@@ -3,9 +3,19 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { fetchLogs } from "@/lib/api/logs";
+import { FAILURE_TYPES, LOG_LEVELS, fetchLogs } from "@/lib/api/logs";
 import { useIsOpensearchAdmin } from "@/lib/auth/roles";
-import type { LogEntry, LogsFilter } from "@/lib/api/logs";
+import type { FailureType, LogEntry, LogLevel, LogsFilter } from "@/lib/api/logs";
+
+const LEVEL_COLORS: Record<LogLevel, string> = {
+  TRACE: "bg-muted text-muted-foreground",
+  DEBUG: "bg-muted text-muted-foreground",
+  INFO: "bg-blue-500/15 text-blue-500",
+  WARNING: "bg-amber-500/15 text-amber-500",
+  ERROR: "bg-red-500/15 text-red-500",
+  FATAL: "bg-red-700 text-white",
+  UNKNOWN: "border border-border text-muted-foreground",
+};
 
 function localTime(value?: string): string {
   if (!value) return "";
@@ -53,6 +63,22 @@ function readFilters(params: URLSearchParams): { filter: LogsFilter; error: stri
     if (filter.start && filter.end && Date.parse(filter.start) >= Date.parse(filter.end)) {
       throw new Error("From must be before To.");
     }
+    const level = params.get("level");
+    const failureType = params.get("failure_type");
+    let invalidFilter = false;
+    if (level === null || LOG_LEVELS.some((value) => value === level)) {
+      filter.level = (level ?? undefined) as LogLevel | undefined;
+    } else {
+      invalidFilter = true;
+    }
+    if (failureType === null || Object.hasOwn(FAILURE_TYPES, failureType)) {
+      filter.failure_type = (failureType ?? undefined) as FailureType | undefined;
+    } else {
+      invalidFilter = true;
+    }
+    if (invalidFilter) {
+      return { filter, error: "Invalid log filter link. Choose a valid log level and failure type." };
+    }
     return { filter, error: null };
   } catch {
     return { filter, error: "Invalid time link. Set both From and To to a valid, ascending range." };
@@ -81,6 +107,8 @@ function LogsView({ queryString }: { queryString: string }) {
   const [pod, setPod] = useState(initial.filter.pod ?? "");
   const [start, setStart] = useState(localTime(initial.filter.start));
   const [end, setEnd] = useState(localTime(initial.filter.end));
+  const [level, setLevel] = useState<LogLevel | "">(initial.filter.level ?? "");
+  const [failureType, setFailureType] = useState<FailureType | "">(initial.filter.failure_type ?? "");
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
   const toggleRow = (i: number) => {
@@ -123,10 +151,12 @@ function LogsView({ queryString }: { queryString: string }) {
 
   const search = () => {
     try {
-      if (Boolean(start) !== Boolean(end) || (initial.error && (!start || !end))) {
+      if (Boolean(start) !== Boolean(end) || (initial.error?.startsWith("Invalid time") && (!start || !end))) {
         throw new Error("Set both From and To.");
       }
       const filter: LogsFilter = { q: q || undefined, namespace: namespace || undefined, pod: pod || undefined, size: 100 };
+      filter.level = level || undefined;
+      filter.failure_type = failureType || undefined;
       if (start && end) {
         // Keep the exact linked instant across daylight-saving clock changes.
         filter.start = start === localTime(initial.filter.start) ? initial.filter.start : new Date(start).toISOString();
@@ -136,7 +166,7 @@ function LogsView({ queryString }: { queryString: string }) {
         }
       }
       const params = new URLSearchParams();
-      for (const key of ["namespace", "pod", "q", "start", "end"] as const) {
+      for (const key of ["namespace", "pod", "q", "start", "end", "level", "failure_type"] as const) {
         const value = filter[key];
         if (value) params.set(key, value);
       }
@@ -171,6 +201,10 @@ function LogsView({ queryString }: { queryString: string }) {
         </span>
       </div>
 
+      <p className="mb-4 text-sm text-muted-foreground">
+        Log level comes from the application; failure type comes from monitoring classification.
+        Older logs may show UNKNOWN and Unclassified.
+      </p>
       {/* Filter bar */}
       <form
         onSubmit={(e) => {
@@ -179,8 +213,25 @@ function LogsView({ queryString }: { queryString: string }) {
         }}
         className="mb-4 flex flex-wrap items-center gap-2"
       >
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Log level
+          <select value={level} onChange={(e) => { setLevel(e.target.value as LogLevel | ""); }}
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground">
+            <option value="">All levels</option>
+            {LOG_LEVELS.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+          Failure type
+          <select value={failureType} onChange={(e) => { setFailureType(e.target.value as FailureType | ""); }}
+            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground">
+            <option value="">All types</option>
+            {Object.entries(FAILURE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
         <input
           type="text"
+          aria-label="Query"
           placeholder="Query (e.g. error AND timeout)…"
           value={q}
           onChange={(e) => { setQ(e.target.value); }}
@@ -189,6 +240,7 @@ function LogsView({ queryString }: { queryString: string }) {
         <input
           type="text"
           placeholder="Namespace…"
+          aria-label="Namespace"
           value={namespace}
           onChange={(e) => { setNamespace(e.target.value); }}
           className="w-44 rounded-md border border-border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -196,6 +248,7 @@ function LogsView({ queryString }: { queryString: string }) {
         <input
           type="text"
           placeholder="Pod…"
+          aria-label="Pod"
           value={pod}
           onChange={(e) => { setPod(e.target.value); }}
           className="w-44 rounded-md border border-border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -230,6 +283,8 @@ function LogsView({ queryString }: { queryString: string }) {
           <thead className="border-b border-border bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="whitespace-nowrap px-3 py-2">Timestamp</th>
+              <th className="whitespace-nowrap px-3 py-2">Log level</th>
+              <th className="whitespace-nowrap px-3 py-2">Failure type</th>
               <th className="px-3 py-2">Namespace</th>
               <th className="px-3 py-2">Pod</th>
               <th className="px-3 py-2">Log</th>
@@ -238,10 +293,19 @@ function LogsView({ queryString }: { queryString: string }) {
           <tbody>
             {entries.map((entry, i) => {
               const expanded = expandedRows.has(i);
+              const entryLevel = entry.level ?? "UNKNOWN";
               return (
                 <tr key={i} className="border-b border-border last:border-0">
                   <td className="whitespace-nowrap px-3 py-1.5 align-top font-mono text-xs text-muted-foreground">
                     {entry.timestamp}
+                  </td>
+                  <td className="px-3 py-1.5 align-top text-xs">
+                    <span className={`inline-block rounded px-2 py-0.5 font-medium ${LEVEL_COLORS[entryLevel]}`}>{entryLevel}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
+                    <span className="inline-block rounded bg-muted px-2 py-0.5 text-muted-foreground">
+                      {entry.failure_type ? FAILURE_TYPES[entry.failure_type] : "Unclassified"}
+                    </span>
                   </td>
                   <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
                     {entry.namespace}
@@ -280,7 +344,7 @@ function LogsView({ queryString }: { queryString: string }) {
             {!loading && entries.length === 0 && (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={6}
                   className="px-3 py-6 text-center text-muted-foreground"
                 >
                   No log entries found.

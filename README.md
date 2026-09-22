@@ -15,16 +15,19 @@ Logs require `studio-user` and `opensearch-admin`. Studio queries OpenSearch wit
 the read-only `studio-logs-read` identity over verified TLS; browsers never
 connect directly to OpenSearch.
 
-`GET /api/logs` supports `q`, `namespace`, `pod`, `size`, `index`, and optional
-paired timezone-aware `start`/`end` timestamps. Bounds are inclusive, normalized
-to UTC, and require `start < end`; malformed or incomplete ranges return 422.
-Neither bound preserves the existing newest-first search, with no maximum span.
+`GET /api/logs` supports `q`, `namespace`, `pod`, `level`, `failure_type`, `size`,
+`index`, and optional paired timezone-aware `start`/`end` timestamps. Log level
+and failure type are exact collector-owned filters; invalid values return 422.
+Older entries without collector metadata return `UNKNOWN` and no failure type.
+Time bounds are inclusive, normalized to UTC, and require `start < end`;
+malformed or incomplete ranges return 422. Omitting both preserves the existing
+newest-first search, with no maximum span.
 
 Alert links use `/logs?namespace=example&at=1790022537`: the UI-only Unix-seconds
 shortcut selects exactly ten minutes before through five minutes after the event,
-even when opened later. Shareable searches use `namespace`, `pod`, `q`, `start`,
-and `end` (RFC3339); valid explicit bounds override `at`. Invalid time links
-display an error without searching. From/To controls show local time, and Search
+even when opened later. Shareable searches use `namespace`, `pod`, `q`, `level`,
+`failure_type`, `start`, and `end` (RFC3339); valid explicit bounds override
+`at`. Invalid time links display an error without searching. From/To controls show local time, and Search
 writes UTC bounds to the URL and removes `at`. Search starts only after the
 verified administrator role is available. Never put raw log entries into links.
 

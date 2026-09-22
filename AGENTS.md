@@ -13,7 +13,7 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `POST /api/policy-engine/analyze` | `studio-user`, `pii-admin` | Proxy to PII Engine `/v1/studio/analyze-request` over dedicated mTLS |
 | `POST /api/policy-engine/evaluate` | `studio-user`, `pii-admin` | Strict proxy to model-free PII Engine `/v1/studio/evaluate-policy` over dedicated mTLS |
 | `GET /api/policy-engine/actions`, `GET /api/policy-engine/policy` | `studio-user`, `pii-admin` | Shared PII Engine metadata |
-| `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; `q`/`namespace`/`pod`/`size`/`index` filters) |
+| `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; text, Kubernetes, classification, time, size, and index filters) |
 | `GET /api/admin/users`, `GET /api/admin/clients` | `studio-user`, `keycloak-admin` | Keycloak administration |
 | `GET /api/admin/recent-signins` | `studio-user`, `keycloak-admin` | Read-only seven-day successful LOGIN summary for up to 25 user IDs |
 | `GET /api/users/{user_id}/usage` | `studio-user`, self or `langfuse-admin` | Calls, total tokens, and USD cost from AgentGateway private analytics |
@@ -25,11 +25,13 @@ The logs endpoint accepts paired timezone-aware `start` and `end` bounds, with
 `start < end`; invalid or incomplete ranges return 422. Bounds are normalized
 to UTC and applied inclusively to `@timestamp`, alongside existing filters.
 Omitting both retains the newest-first unbounded-time search.
-`/logs` accepts `namespace`, `pod`, `q`, `start`, and `end`; its UI-only `at`
-Unix-seconds shortcut selects exactly ten minutes before through five minutes
+`/logs` accepts `namespace`, `pod`, `q`, `level`, `failure_type`, `start`, and
+`end`; its UI-only `at` Unix-seconds shortcut selects exactly ten minutes before through five minutes
 after the event. Valid explicit bounds take precedence. Invalid time links
 show an error without searching. From/To controls use local time; manual searches
-write explicit UTC bounds to the URL and remove `at`.
+write explicit UTC bounds to the URL and remove `at`. Log level is normalized
+collector metadata; failure type is present only for records accepted by the
+application-error classifier. Older records display as UNKNOWN and Unclassified.
 
 The logs endpoint queries OpenSearch with the dedicated read-only
 `studio-logs-read` internal user (basic auth, password patched into
@@ -54,7 +56,7 @@ The Next.js frontend consumes the API and renders a dashboard with:
 
 - **Sidebar** — collapsible dark sidebar with icon navigation
 - **PII Policy** (`/policy-engine`, `pii-admin` role) — config panel, YAML preview, strict policy validation, detailed PII diagnostics, and deterministic model-free simulation
-- **Logs** (`/logs`, `opensearch-admin` role) — OpenSearch log viewer with filter bar (query, namespace, pod)
+- **Logs** (`/logs`, `opensearch-admin` role) — OpenSearch log viewer with text, namespace, pod, level, failure-type, and time filters
 - **Users / Clients** (`/users`, `/clients`, `keycloak-admin` role) — Keycloak user and client management
 - **API Keys** — per-user API key management
 - **Error / loading states** — spinner while loading, error card when the API is unreachable

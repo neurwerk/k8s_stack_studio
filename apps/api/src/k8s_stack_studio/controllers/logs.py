@@ -18,6 +18,7 @@ from pydantic import AwareDatetime
 
 from k8s_stack_studio.lib.dependencies import get_opensearch, require_role
 from k8s_stack_studio.lib.opensearch import DEFAULT_INDEX, OpenSearchClient
+from k8s_stack_studio.models.logs import FailureType, LogLevel
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
@@ -31,6 +32,8 @@ async def search_logs(
     index: str = Query(DEFAULT_INDEX, description="Index pattern to search"),
     start: AwareDatetime | None = Query(None, description="Inclusive start with timezone"),
     end: AwareDatetime | None = Query(None, description="Inclusive end with timezone"),
+    level: LogLevel | None = Query(None, description="Normalized application log level"),
+    failure_type: FailureType | None = Query(None, description="Collector failure classification"),
     _: None = Depends(require_role("opensearch-admin")),
     opensearch: OpenSearchClient = Depends(get_opensearch),
 ) -> dict[str, Any]:
@@ -41,7 +44,15 @@ async def search_logs(
         raise HTTPException(status_code=422, detail="start must be before end")
     try:
         return await opensearch.search_logs(
-            q=q, namespace=namespace, pod=pod, size=size, index=index, start=start, end=end
+            q=q,
+            namespace=namespace,
+            pod=pod,
+            size=size,
+            index=index,
+            start=start,
+            end=end,
+            level=level,
+            failure_type=failure_type,
         )
     except httpx.HTTPStatusError as e:
         raise HTTPException(
