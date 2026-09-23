@@ -8,6 +8,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ApiKeyManager } from "@/components/api-key-manager";
 import { UserUsage } from "@/components/user-usage";
+import { UserAccess } from "@/components/user-access";
 import { fetchUser } from "@/lib/api/admin";
 import {
   useCurrentUserId,
@@ -165,6 +166,7 @@ export default function UserDetailPage() {
       {(user || canManageKeys) && (
         <ApiKeyManager userId={user?.id ?? userId} canManage={canManageKeys} />
       )}
+      {isKeycloakAdmin && user && <UserAccess key={user.id} userId={user.id} />}
       {canViewUsage && <UserUsage userId={user?.id ?? userId} />}
     </div>
   );

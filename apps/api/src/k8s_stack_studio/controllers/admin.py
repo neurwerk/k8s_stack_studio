@@ -1,10 +1,10 @@
-"""Admin routes — user management and client discovery.
+"""Admin routes for users and read-only Keycloak access discovery.
 
 Endpoints:
   - GET /api/me                    — current user's JWT claims
   - GET /api/admin/users           — list all Keycloak users (keycloak-admin)
   - GET /api/admin/users/{user_id} — single user detail (self or keycloak-admin)
-  - GET /api/admin/clients         — list public OIDC clients (keycloak-admin)
+  - GET /api/admin/clients         — list safe OIDC client metadata (keycloak-admin)
 """
 
 from __future__ import annotations
@@ -23,6 +23,14 @@ from k8s_stack_studio.lib.dependencies import (
     require_role,
 )
 from k8s_stack_studio.lib.keycloak_admin import KeycloakAdminClient
+from k8s_stack_studio.models.admin import (
+    AdminClientAccess,
+    AdminClientPage,
+    AdminGroupDetail,
+    AdminGroupPage,
+    AdminRolePage,
+    AdminUserAccess,
+)
 
 router = APIRouter(prefix="/api", tags=["admin"])
 
@@ -178,12 +186,77 @@ async def get_user_detail(
 @router.get("/admin/clients")
 async def list_clients(
     request: Request,
+    first: int = Query(0, ge=0),
+    max_results: int = Query(25, alias="max", ge=1, le=25),
     _: None = Depends(require_role("keycloak-admin")),
     admin: KeycloakAdminClient = Depends(get_keycloak_admin),
-) -> list[dict[str, Any]]:
-    """List all public OIDC clients (keycloak-admin role required).
+) -> AdminClientPage:
+    """List safe metadata for viewable OIDC clients.
 
     Forwards the caller's bearer token to the Keycloak Admin API.
     """
     user_token = _extract_bearer_token(request)
-    return await admin.list_public_clients(user_token)
+    return await admin.list_clients(user_token, first=first, max_results=max_results)
+
+
+@router.get("/admin/clients/{client_id}/access")
+async def get_client_access(
+    client_id: str,
+    request: Request,
+    _: None = Depends(require_role("keycloak-admin")),
+    admin: KeycloakAdminClient = Depends(get_keycloak_admin),
+) -> AdminClientAccess:
+    """Read a client's defined roles, token scope, and service-account roles."""
+    return await admin.get_client_access(client_id, _extract_bearer_token(request))
+
+
+@router.get("/admin/groups")
+async def list_groups(
+    request: Request,
+    search: str | None = Query(None),
+    first: int = Query(0, ge=0),
+    max_results: int = Query(25, alias="max", ge=1, le=25),
+    _: None = Depends(require_role("keycloak-admin")),
+    admin: KeycloakAdminClient = Depends(get_keycloak_admin),
+) -> AdminGroupPage:
+    """List a bounded page of realm groups."""
+    return await admin.list_groups(
+        _extract_bearer_token(request), search=search, first=first, max_results=max_results
+    )
+
+
+@router.get("/admin/groups/{group_id}")
+async def get_group_access(
+    group_id: str,
+    request: Request,
+    _: None = Depends(require_role("keycloak-admin")),
+    admin: KeycloakAdminClient = Depends(get_keycloak_admin),
+) -> AdminGroupDetail:
+    """Read one group's members and role mappings."""
+    return await admin.get_group_access(group_id, _extract_bearer_token(request))
+
+
+@router.get("/admin/roles")
+async def list_realm_roles(
+    request: Request,
+    search: str | None = Query(None),
+    first: int = Query(0, ge=0),
+    max_results: int = Query(25, alias="max", ge=1, le=25),
+    _: None = Depends(require_role("keycloak-admin")),
+    admin: KeycloakAdminClient = Depends(get_keycloak_admin),
+) -> AdminRolePage:
+    """List a bounded page of realm roles."""
+    return await admin.list_realm_roles(
+        _extract_bearer_token(request), search=search, first=first, max_results=max_results
+    )
+
+
+@router.get("/admin/users/{user_id}/access")
+async def get_user_access(
+    user_id: str,
+    request: Request,
+    _: None = Depends(require_role("keycloak-admin")),
+    admin: KeycloakAdminClient = Depends(get_keycloak_admin),
+) -> AdminUserAccess:
+    """Read a user's group membership plus direct and effective roles."""
+    return await admin.get_user_access(user_id, _extract_bearer_token(request))
