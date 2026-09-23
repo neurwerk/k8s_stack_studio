@@ -16,14 +16,73 @@ export interface KeycloakUser {
   createdTimestamp: number;
 }
 
-/** Public OIDC client from Keycloak Admin API. */
+/** Safe OIDC client metadata returned by Studio. */
 export interface KeycloakClient {
   id: string;
-  clientId: string;
+  client_id: string;
   name: string;
   description: string;
   enabled: boolean;
-  publicClient: boolean;
+  public: boolean;
+  service_accounts_enabled: boolean;
+  full_scope_allowed: boolean;
+}
+
+export interface AdminPage<T> {
+  items: T[];
+  first: number;
+  max: number;
+  has_more: boolean;
+}
+
+export interface AdminRole {
+  id: string;
+  name: string;
+  description: string;
+  composite: boolean;
+}
+
+export interface AdminGroup {
+  id: string;
+  name: string;
+  path: string;
+  subgroup_count: number;
+}
+
+export interface AdminClientRoles {
+  id: string;
+  client_id: string;
+  roles: AdminRole[];
+}
+
+export interface AdminRoleMappings {
+  realm_roles: AdminRole[];
+  clients: AdminClientRoles[];
+}
+
+export interface AdminUserAccess {
+  groups: AdminGroup[];
+  groups_truncated: boolean;
+  direct: AdminRoleMappings;
+  effective_realm_roles: AdminRole[];
+}
+
+export interface AdminGroupDetail {
+  group: AdminGroup;
+  subgroups: AdminGroup[];
+  subgroups_truncated: boolean;
+  members: { id: string; username: string; email: string }[];
+  members_truncated: boolean;
+  direct: AdminRoleMappings;
+  effective_realm_roles: AdminRole[];
+}
+
+export interface AdminClientAccess {
+  client: KeycloakClient;
+  defined_roles: AdminRole[];
+  roles_truncated: boolean;
+  token_scope_roles: AdminRoleMappings;
+  service_account_roles: AdminRoleMappings | null;
 }
 
 /** An API key managed by the keycloak-api-key-bridge. */
@@ -150,9 +209,45 @@ export function fetchUser(userId: string): Promise<KeycloakUser> {
   return apiGet<KeycloakUser>(`/admin/users/${userId}`);
 }
 
-/** List all public OIDC clients (keycloak-admin role required). */
-export function fetchClients(): Promise<KeycloakClient[]> {
-  return apiGet<KeycloakClient[]>("/admin/clients");
+/** List viewable OIDC clients (keycloak-admin role required). */
+export function fetchClients(first = 0, signal?: AbortSignal): Promise<AdminPage<KeycloakClient>> {
+  return apiGet<AdminPage<KeycloakClient>>(
+    "/admin/clients",
+    { first: String(first), max: "25" },
+    signal,
+  );
+}
+
+export function fetchGroups(
+  search?: string,
+  first = 0,
+  signal?: AbortSignal,
+): Promise<AdminPage<AdminGroup>> {
+  const params: Record<string, string> = { first: String(first), max: "25" };
+  if (search) params.search = search;
+  return apiGet<AdminPage<AdminGroup>>("/admin/groups", params, signal);
+}
+
+export function fetchGroup(groupId: string): Promise<AdminGroupDetail> {
+  return apiGet<AdminGroupDetail>(`/admin/groups/${encodeURIComponent(groupId)}`);
+}
+
+export function fetchRealmRoles(
+  search?: string,
+  first = 0,
+  signal?: AbortSignal,
+): Promise<AdminPage<AdminRole>> {
+  const params: Record<string, string> = { first: String(first), max: "25" };
+  if (search) params.search = search;
+  return apiGet<AdminPage<AdminRole>>("/admin/roles", params, signal);
+}
+
+export function fetchUserAccess(userId: string): Promise<AdminUserAccess> {
+  return apiGet<AdminUserAccess>(`/admin/users/${encodeURIComponent(userId)}/access`);
+}
+
+export function fetchClientAccess(clientId: string): Promise<AdminClientAccess> {
+  return apiGet<AdminClientAccess>(`/admin/clients/${encodeURIComponent(clientId)}/access`);
 }
 
 /** List API keys for a user (self or api-key-admin). */
