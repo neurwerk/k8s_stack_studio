@@ -39,6 +39,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const keyRequestId = useRef(0);
   const permissionRequestId = useRef(0);
+  const selectAllPermissionsRef = useRef<HTMLInputElement>(null);
 
   const loadKeys = useCallback(async () => {
     const requestId = ++keyRequestId.current;
@@ -115,10 +116,16 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
   const validExpiry = Number.isInteger(expiry) && expiry >= 1 && expiry <= 365;
   const validKeyName = API_KEY_NAME_PATTERN.test(newKeyName);
   const canCreate =
-    validKeyName &&
-    selectedPermissions.length > 0 &&
-    validExpiry &&
-    !permissionsLoading;
+    validKeyName && selectedPermissions.length > 0 && validExpiry && !permissionsLoading;
+  const allPermissionsSelected =
+    permissions.length > 0 && selectedPermissions.length === permissions.length;
+
+  useEffect(() => {
+    if (selectAllPermissionsRef.current) {
+      selectAllPermissionsRef.current.indeterminate =
+        selectedPermissions.length > 0 && !allPermissionsSelected;
+    }
+  }, [allPermissionsSelected, selectedPermissions.length]);
 
   const handleCreate = async () => {
     if (!canCreate) return;
@@ -289,26 +296,43 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
               </p>
             )}
             {permissions.length > 0 && (
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                {permissions.map((permission) => (
-                  <label
-                    key={permission}
-                    className="flex items-center gap-2 rounded border border-border bg-background p-2 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedPermissions.includes(permission)}
-                      onChange={(event) => {
-                        setSelectedPermissions((current) =>
-                          event.target.checked
-                            ? [...current, permission]
-                            : current.filter((item) => item !== permission),
-                        );
-                      }}
-                    />
-                    <span className="break-all font-mono text-xs">{permission}</span>
-                  </label>
-                ))}
+              <div className="mt-2">
+                <label className="flex items-center gap-2 rounded border border-border bg-muted/50 p-2 text-sm font-medium">
+                  <input
+                    ref={selectAllPermissionsRef}
+                    type="checkbox"
+                    checked={allPermissionsSelected}
+                    disabled={permissionsLoading}
+                    onChange={(event) => {
+                      setSelectedPermissions(event.target.checked ? [...permissions] : []);
+                    }}
+                  />
+                  <span>
+                    Select all permissions · {selectedPermissions.length} of {permissions.length}{" "}
+                    selected
+                  </span>
+                </label>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {permissions.map((permission) => (
+                    <label
+                      key={permission}
+                      className="flex items-center gap-2 rounded border border-border bg-background p-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPermissions.includes(permission)}
+                        onChange={(event) => {
+                          setSelectedPermissions((current) =>
+                            event.target.checked
+                              ? [...current, permission]
+                              : current.filter((item) => item !== permission),
+                          );
+                        }}
+                      />
+                      <span className="break-all font-mono text-xs">{permission}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
           </fieldset>
@@ -358,10 +382,10 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
       )}
 
       {loading && (
-          <div
-            className="flex items-center justify-center py-8 text-muted-foreground"
-            role="status"
-            aria-live="polite"
+        <div
+          className="flex items-center justify-center py-8 text-muted-foreground"
+          role="status"
+          aria-live="polite"
         >
           <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> Loading API keys...
         </div>

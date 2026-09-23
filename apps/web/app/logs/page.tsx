@@ -1,8 +1,8 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { FAILURE_TYPES, LOG_LEVELS, fetchLogs } from "@/lib/api/logs";
 import { useIsOpensearchAdmin } from "@/lib/auth/roles";
 import type { FailureType, LogEntry, LogLevel, LogsFilter } from "@/lib/api/logs";
@@ -20,8 +20,7 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
 function localTime(value?: string): string {
   if (!value) return "";
   const date = new Date(value);
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-    .toISOString().slice(0, -1);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, -1);
 }
 
 function timestamp(value: string): string {
@@ -38,6 +37,14 @@ function timestamp(value: string): string {
     throw new Error("Invalid log date.");
   }
   return date.toISOString();
+}
+
+function formatLog(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
 }
 
 function readFilters(params: URLSearchParams): { filter: LogsFilter; error: string | null } {
@@ -77,16 +84,26 @@ function readFilters(params: URLSearchParams): { filter: LogsFilter; error: stri
       invalidFilter = true;
     }
     if (invalidFilter) {
-      return { filter, error: "Invalid log filter link. Choose a valid log level and failure type." };
+      return {
+        filter,
+        error: "Invalid log filter link. Choose a valid log level and failure type.",
+      };
     }
     return { filter, error: null };
   } catch {
-    return { filter, error: "Invalid time link. Set both From and To to a valid, ascending range." };
+    return {
+      filter,
+      error: "Invalid time link. Set both From and To to a valid, ascending range.",
+    };
   }
 }
 
 export default function LogsPage() {
-  return <Suspense fallback={<div className="p-6">Loading…</div>}><LogsRoute /></Suspense>;
+  return (
+    <Suspense fallback={<div className="p-6">Loading…</div>}>
+      <LogsRoute />
+    </Suspense>
+  );
 }
 
 function LogsRoute() {
@@ -108,8 +125,11 @@ function LogsView({ queryString }: { queryString: string }) {
   const [start, setStart] = useState(localTime(initial.filter.start));
   const [end, setEnd] = useState(localTime(initial.filter.end));
   const [level, setLevel] = useState<LogLevel | "">(initial.filter.level ?? "");
-  const [failureType, setFailureType] = useState<FailureType | "">(initial.filter.failure_type ?? "");
+  const [failureType, setFailureType] = useState<FailureType | "">(
+    initial.filter.failure_type ?? "",
+  );
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [copiedRow, setCopiedRow] = useState<number | null>(null);
 
   const toggleRow = (i: number) => {
     setExpandedRows((prev) => {
@@ -140,7 +160,9 @@ function LogsView({ queryString }: { queryString: string }) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Validate URL bounds before any authorized search.
@@ -151,22 +173,42 @@ function LogsView({ queryString }: { queryString: string }) {
 
   const search = () => {
     try {
-      if (Boolean(start) !== Boolean(end) || (initial.error?.startsWith("Invalid time") && (!start || !end))) {
+      if (
+        Boolean(start) !== Boolean(end) ||
+        (initial.error?.startsWith("Invalid time") && (!start || !end))
+      ) {
         throw new Error("Set both From and To.");
       }
-      const filter: LogsFilter = { q: q || undefined, namespace: namespace || undefined, pod: pod || undefined, size: 100 };
+      const filter: LogsFilter = {
+        q: q || undefined,
+        namespace: namespace || undefined,
+        pod: pod || undefined,
+        size: 100,
+      };
       filter.level = level || undefined;
       filter.failure_type = failureType || undefined;
       if (start && end) {
         // Keep the exact linked instant across daylight-saving clock changes.
-        filter.start = start === localTime(initial.filter.start) ? initial.filter.start : new Date(start).toISOString();
-        filter.end = end === localTime(initial.filter.end) ? initial.filter.end : new Date(end).toISOString();
+        filter.start =
+          start === localTime(initial.filter.start)
+            ? initial.filter.start
+            : new Date(start).toISOString();
+        filter.end =
+          end === localTime(initial.filter.end) ? initial.filter.end : new Date(end).toISOString();
         if (!filter.start || !filter.end || Date.parse(filter.start) >= Date.parse(filter.end)) {
           throw new Error("From must be before To.");
         }
       }
       const params = new URLSearchParams();
-      for (const key of ["namespace", "pod", "q", "start", "end", "level", "failure_type"] as const) {
+      for (const key of [
+        "namespace",
+        "pod",
+        "q",
+        "start",
+        "end",
+        "level",
+        "failure_type",
+      ] as const) {
         const value = filter[key];
         if (value) params.set(key, value);
       }
@@ -183,9 +225,8 @@ function LogsView({ queryString }: { queryString: string }) {
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
           <p className="font-semibold">Access Denied</p>
           <p className="mt-1">
-            You need the{" "}
-            <code className="rounded bg-red-100 px-1">opensearch-admin</code>{" "}
-            role to view logs.
+            You need the <code className="rounded bg-red-100 px-1">opensearch-admin</code> role to
+            view logs.
           </p>
         </div>
       </div>
@@ -211,64 +252,112 @@ function LogsView({ queryString }: { queryString: string }) {
           e.preventDefault();
           search();
         }}
-        className="mb-4 flex flex-wrap items-center gap-2"
+        className="mb-4 space-y-3"
       >
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Log level
-          <select value={level} onChange={(e) => { setLevel(e.target.value as LogLevel | ""); }}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground">
-            <option value="">All levels</option>
-            {LOG_LEVELS.map((value) => <option key={value} value={value}>{value}</option>)}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Failure type
-          <select value={failureType} onChange={(e) => { setFailureType(e.target.value as FailureType | ""); }}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground">
-            <option value="">All types</option>
-            {Object.entries(FAILURE_TYPES).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
-        </label>
-        <input
-          type="text"
-          aria-label="Query"
-          placeholder="Query (e.g. error AND timeout)…"
-          value={q}
-          onChange={(e) => { setQ(e.target.value); }}
-          className="w-72 rounded-md border border-border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-        <input
-          type="text"
-          placeholder="Namespace…"
-          aria-label="Namespace"
-          value={namespace}
-          onChange={(e) => { setNamespace(e.target.value); }}
-          className="w-44 rounded-md border border-border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-        <input
-          type="text"
-          placeholder="Pod…"
-          aria-label="Pod"
-          value={pod}
-          onChange={(e) => { setPod(e.target.value); }}
-          className="w-44 rounded-md border border-border bg-background px-3 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          From (local time)
-          <input type="datetime-local" step="0.001" value={start} onChange={(e) => { setStart(e.target.value); }}
-            className="max-w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground" />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          To (local time)
-          <input type="datetime-local" step="0.001" value={end} onChange={(e) => { setEnd(e.target.value); }}
-            className="max-w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground" />
-        </label>
-        <button
-          type="submit"
-          className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          Search
-        </button>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,2fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(9rem,1fr)_minmax(11rem,1fr)]">
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Query
+            <input
+              type="text"
+              placeholder="e.g. error AND timeout…"
+              value={q}
+              onChange={(e) => {
+                setQ(e.target.value);
+              }}
+              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Namespace
+            <input
+              type="text"
+              placeholder="Namespace…"
+              value={namespace}
+              onChange={(e) => {
+                setNamespace(e.target.value);
+              }}
+              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Pod
+            <input
+              type="text"
+              placeholder="Pod…"
+              value={pod}
+              onChange={(e) => {
+                setPod(e.target.value);
+              }}
+              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Log level
+            <select
+              value={level}
+              onChange={(e) => {
+                setLevel(e.target.value as LogLevel | "");
+              }}
+              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+            >
+              <option value="">All levels</option>
+              {LOG_LEVELS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Failure type
+            <select
+              value={failureType}
+              onChange={(e) => {
+                setFailureType(e.target.value as FailureType | "");
+              }}
+              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+            >
+              <option value="">All types</option>
+              {Object.entries(FAILURE_TYPES).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,18rem)_minmax(14rem,18rem)_auto]">
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            From (local time)
+            <input
+              type="datetime-local"
+              step="0.001"
+              value={start}
+              onChange={(e) => {
+                setStart(e.target.value);
+              }}
+              className="h-9 max-w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            To (local time)
+            <input
+              type="datetime-local"
+              step="0.001"
+              value={end}
+              onChange={(e) => {
+                setEnd(e.target.value);
+              }}
+              className="h-9 max-w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
+            />
+          </label>
+          <button
+            type="submit"
+            className="h-9 self-end rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Search
+          </button>
+        </div>
       </form>
 
       {error && (
@@ -279,7 +368,15 @@ function LogsView({ queryString }: { queryString: string }) {
 
       {/* Log table */}
       <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[1000px] table-fixed text-left text-sm">
+          <colgroup>
+            <col className="w-48" />
+            <col className="w-28" />
+            <col className="w-40" />
+            <col className="w-40" />
+            <col className="w-56" />
+            <col />
+          </colgroup>
           <thead className="border-b border-border bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
               <th className="whitespace-nowrap px-3 py-2">Timestamp</th>
@@ -295,58 +392,111 @@ function LogsView({ queryString }: { queryString: string }) {
               const expanded = expandedRows.has(i);
               const entryLevel = entry.level ?? "UNKNOWN";
               return (
-                <tr key={i} className="border-b border-border last:border-0">
-                  <td className="whitespace-nowrap px-3 py-1.5 align-top font-mono text-xs text-muted-foreground">
-                    {entry.timestamp}
-                  </td>
-                  <td className="px-3 py-1.5 align-top text-xs">
-                    <span className={`inline-block rounded px-2 py-0.5 font-medium ${LEVEL_COLORS[entryLevel]}`}>{entryLevel}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
-                    <span className="inline-block rounded bg-muted px-2 py-0.5 text-muted-foreground">
-                      {entry.failure_type ? FAILURE_TYPES[entry.failure_type] : "Unclassified"}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
-                    {entry.namespace}
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-1.5 align-top font-mono text-xs">
-                    {entry.pod}
-                  </td>
-                  <td className="px-3 py-1.5 font-mono text-xs">
-                    <div className="flex items-start gap-1">
+                <Fragment key={`${entry.index}-${entry.timestamp}-${i}`}>
+                  <tr className={expanded ? "bg-muted/30" : "border-b border-border"}>
+                    <td className="whitespace-nowrap px-3 py-1.5 align-top font-mono text-xs text-muted-foreground">
+                      {entry.timestamp}
+                    </td>
+                    <td className="px-3 py-1.5 align-top text-xs">
                       <span
-                        className={
-                          expanded
-                            ? "whitespace-pre-wrap break-all"
-                            : "line-clamp-2 break-all"
-                        }
+                        className={`inline-block rounded px-2 py-0.5 font-medium ${LEVEL_COLORS[entryLevel]}`}
                       >
-                        {entry.log}
+                        {entryLevel}
                       </span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
+                      <span className="inline-block rounded bg-muted px-2 py-0.5 text-muted-foreground">
+                        {entry.failure_type ? FAILURE_TYPES[entry.failure_type] : "Unclassified"}
+                      </span>
+                    </td>
+                    <td className="truncate px-3 py-1.5 align-top text-xs" title={entry.namespace}>
+                      {entry.namespace || "—"}
+                    </td>
+                    <td
+                      className="truncate px-3 py-1.5 align-top font-mono text-xs"
+                      title={entry.pod}
+                    >
+                      {entry.pod || "—"}
+                    </td>
+                    <td className="px-3 py-1.5 font-mono text-xs">
                       <button
-                        onClick={() => { toggleRow(i); }}
-                        className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        aria-label={expanded ? "Collapse log" : "Expand log"}
-                        title={expanded ? "Show less" : "Show full log"}
+                        type="button"
+                        onClick={() => {
+                          toggleRow(i);
+                        }}
+                        className="flex w-full items-center gap-2 rounded text-left text-muted-foreground hover:text-foreground"
+                        aria-expanded={expanded}
                       >
+                        <span className="min-w-0 flex-1 truncate text-foreground">{entry.log}</span>
                         {expanded ? (
-                          <ChevronUp className="h-3.5 w-3.5" />
+                          <ChevronUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                         ) : (
-                          <ChevronDown className="h-3.5 w-3.5" />
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                         )}
                       </button>
-                    </div>
-                  </td>
-                </tr>
+                    </td>
+                  </tr>
+                  {expanded && (
+                    <tr className="border-b border-border bg-muted/20">
+                      <td colSpan={6} className="p-3">
+                        <div className="rounded-md border border-border bg-background p-4">
+                          <div className="mb-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
+                            <div>
+                              <span className="font-medium text-foreground">Timestamp:</span>{" "}
+                              {entry.timestamp}
+                            </div>
+                            <div className="break-all">
+                              <span className="font-medium text-foreground">Namespace:</span>{" "}
+                              {entry.namespace || "—"}
+                            </div>
+                            <div className="break-all">
+                              <span className="font-medium text-foreground">Pod:</span>{" "}
+                              {entry.pod || "—"}
+                            </div>
+                            <div className="break-all">
+                              <span className="font-medium text-foreground">Container:</span>{" "}
+                              {entry.container || "—"}
+                            </div>
+                          </div>
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <span className="text-xs font-medium text-muted-foreground">
+                              Full log
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void navigator.clipboard
+                                  .writeText(entry.log)
+                                  .then(() => {
+                                    setCopiedRow(i);
+                                  })
+                                  .catch(() => {
+                                    setCopiedRow(null);
+                                  });
+                              }}
+                              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
+                            >
+                              {copiedRow === i ? (
+                                <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                              )}
+                              {copiedRow === i ? "Copied" : "Copy original log"}
+                            </button>
+                          </div>
+                          <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground">
+                            {formatLog(entry.log)}
+                          </pre>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
             {!loading && entries.length === 0 && (
               <tr>
-                <td
-                  colSpan={6}
-                  className="px-3 py-6 text-center text-muted-foreground"
-                >
+                <td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">
                   No log entries found.
                 </td>
               </tr>
