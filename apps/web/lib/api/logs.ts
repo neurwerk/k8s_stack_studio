@@ -43,6 +43,7 @@ export interface LogsFilter {
   namespace?: string;
   pod?: string;
   size?: number;
+  offset?: number;
   start?: string;
   end?: string;
   level?: LogLevel;
@@ -62,5 +63,6 @@ export function fetchLogs(filter: LogsFilter = {}): Promise<LogsResponse> {
   if (filter.level) params.level = filter.level;
   if (filter.failure_type) params.failure_type = filter.failure_type;
   params.size = String(filter.size ?? 100);
+  params.offset = String(filter.offset ?? 0);
   return apiGet<LogsResponse>("/logs", params);
 }
