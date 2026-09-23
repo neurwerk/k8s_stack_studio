@@ -29,11 +29,30 @@ export interface EntityPolicyEntry {
   patterns: string[];
 }
 
+export type AttachmentPolicyVersion = 1 | 2 | 3;
+export type AttachmentMode = "block" | "extract" | "process" | "passthrough";
+export type ImageForwarding =
+  | "none"
+  | "if-no-pii-detected"
+  | "if-policy-allows"
+  | "pii-unchecked";
+export type FaceAction = "block" | "text-only" | "reroute";
+
+export interface ModelAttachmentConfig {
+  mode: AttachmentMode;
+  piiEnabled: boolean;
+  imageForwarding: ImageForwarding;
+  faceProtectionEnabled: boolean;
+  supportsImages: boolean;
+}
+
 export interface ConfigState {
   llmPolicyEngine: {
     enabled: boolean;
     extProcTimeout: string;
     extProcPort: number;
+    attachmentPolicyVersion: AttachmentPolicyVersion;
+    attachment: ModelAttachmentConfig;
   };
   piiEngine: {
     pii: {
@@ -52,7 +71,7 @@ export interface ConfigState {
       hashWindowHours: number;
       entityPolicies: EntityPolicyEntry[];
     };
-    attachments: { policy: string };
+    attachments: { policy: "block"; faces: { action: FaceAction; routeClass: string } };
     safety: { enabled: string[]; custom: SafetyRule[] };
     classifier: { defaultClass: string; classes: ClassifierClass[] };
     session: { enabled: boolean; ttlHours: number };
@@ -125,12 +144,24 @@ export const CREDENTIAL_PATTERNS = [
 
 export function createDefaultState(): ConfigState {
   return {
-    llmPolicyEngine: { enabled: true, extProcTimeout: "60s", extProcPort: 9000 },
+    llmPolicyEngine: {
+      enabled: true,
+      extProcTimeout: "630s",
+      extProcPort: 9000,
+      attachmentPolicyVersion: 1,
+      attachment: {
+        mode: "block",
+        piiEnabled: true,
+        imageForwarding: "none",
+        faceProtectionEnabled: false,
+        supportsImages: false,
+      },
+    },
     piiEngine: {
       pii: {
         analyzerLanguages: ["en"],
         scoreThreshold: 0.45,
-        timeout: 60,
+        timeout: 600,
         defaultAction: "block",
         defaultOperator: { type: "mask", masking_char: "*", chars_to_mask: 100, from_end: true },
         analyzerEntities: [],
@@ -147,7 +178,7 @@ export function createDefaultState(): ConfigState {
           },
         ],
       },
-      attachments: { policy: "block" },
+      attachments: { policy: "block", faces: { action: "block", routeClass: "" } },
       safety: { enabled: SAFETY_RULES.map((rule) => rule.key), custom: [] },
       classifier: { defaultClass: "general", classes: [] },
       session: { enabled: true, ttlHours: 24 },
@@ -157,7 +188,7 @@ export function createDefaultState(): ConfigState {
         masked: "Note: Sensitive data in this conversation was anonymized.",
         showWhenNoPiiDetected: true,
       },
-      routing: { defaultTarget: "local/llama3.2:3b", targets: [] },
+      routing: { defaultTarget: "local", targets: [] },
       debug: false,
       logFormat: "text",
     },
@@ -189,8 +220,13 @@ function normalizedEntityPolicy(entry: EntityPolicyEntry): Record<string, unknow
 
 /** Convert editable UI state into the engine-owned request-local policy schema. */
 export function toPolicyOverride(policy: ConfigState["piiEngine"]): Record<string, unknown> {
+  const faces: Record<string, string> = { action: policy.attachments.faces.action };
+  if (policy.attachments.faces.action === "reroute" && policy.attachments.faces.routeClass) {
+    faces.routeClass = policy.attachments.faces.routeClass;
+  }
   return {
     ...policy,
+    attachments: { policy: policy.attachments.policy, faces },
     pii: {
       ...policy.pii,
       entityPolicies: policy.pii.entityPolicies.map(normalizedEntityPolicy),
@@ -223,7 +259,11 @@ function appendEntityPolicies(policy: ConfigState["piiEngine"]["pii"], lines: st
   }
 }
 
-function appendPolicy(policy: ConfigState["piiEngine"], lines: string[]): void {
+function appendPolicy(
+  policy: ConfigState["piiEngine"],
+  lines: string[],
+  includeFaces: boolean,
+): void {
   const pii = policy.pii;
   lines.push(
     "# Shared policy core owned by pii-engine",
@@ -258,6 +298,17 @@ function appendPolicy(policy: ConfigState["piiEngine"], lines: string[]): void {
     `${indent(2)}attachments:`,
     `${indent(3)}policy: ${yamlString(policy.attachments.policy)}`,
   );
+  if (includeFaces) {
+    lines.push(
+      `${indent(3)}faces:`,
+      `${indent(4)}action: ${yamlString(policy.attachments.faces.action)}`,
+    );
+    if (policy.attachments.faces.action === "reroute" && policy.attachments.faces.routeClass) {
+      lines.push(
+        `${indent(4)}routeClass: ${yamlString(policy.attachments.faces.routeClass)}`,
+      );
+    }
+  }
   lines.push(`${indent(2)}safety:`, `${indent(3)}enabled:`);
   if (policy.safety.enabled.length === 0) lines.push(`${indent(4)}[]`);
   else lines.push(...policy.safety.enabled.map((rule) => `${indent(4)}- ${yamlString(rule)}`));
@@ -306,17 +357,54 @@ function appendPolicy(policy: ConfigState["piiEngine"], lines: string[]): void {
   );
 }
 
-/** Generate values using the chart and PII Engine policy schema. */
-export function generateYaml(state: ConfigState): string {
+/** Generate AgentGateway-wide values. Model rows are deliberately separate. */
+export function generateAgentGatewayYaml(state: ConfigState): string {
   const lines = [
-    "# AgentGateway transport configuration",
     "guardrails:",
     `${indent(1)}llmPolicyEngine:`,
     `${indent(2)}enabled: ${state.llmPolicyEngine.enabled}`,
     `${indent(2)}extProcTimeout: ${yamlString(state.llmPolicyEngine.extProcTimeout)}`,
     `${indent(2)}extProcPort: ${state.llmPolicyEngine.extProcPort}`,
-    "",
+    `${indent(2)}attachmentPolicyVersion: ${state.llmPolicyEngine.attachmentPolicyVersion}`,
   ];
-  appendPolicy(state.piiEngine, lines);
   return `${lines.join("\n")}\n`;
+}
+
+/** Generate fields to merge into every intended existing model row. */
+export function generateModelAttachmentYaml(state: ConfigState): string {
+  const { attachmentPolicyVersion: version, attachment } = state.llmPolicyEngine;
+  const lines = [
+    `attachmentMode: ${yamlString(attachment.mode)}`,
+    `piiEnabled: ${attachment.piiEnabled}`,
+  ];
+  if (version > 1 && (attachment.mode === "process" || attachment.mode === "extract")) {
+    lines.push(
+      `faceProtectionEnabled: ${attachment.faceProtectionEnabled}`,
+      `imageForwarding: ${yamlString(attachment.imageForwarding)}`,
+    );
+    if (version === 3) lines.push(`supportsImages: ${attachment.supportsImages}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** Generate the client-owned PII policy values. */
+export function generatePiiPolicyYaml(state: ConfigState): string {
+  const lines: string[] = [];
+  appendPolicy(state.piiEngine, lines, state.llmPolicyEngine.attachmentPolicyVersion === 3);
+  return `${lines.join("\n")}\n`;
+}
+
+/** Generate a combined reference preview. */
+export function generateYaml(state: ConfigState): string {
+  return [
+    "# AgentGateway values",
+    generateAgentGatewayYaml(state).trimEnd(),
+    "",
+    "# Merge these fields into each intended existing model row",
+    generateModelAttachmentYaml(state).trimEnd(),
+    "",
+    "# PII policy",
+    generatePiiPolicyYaml(state).trimEnd(),
+    "",
+  ].join("\n");
 }
