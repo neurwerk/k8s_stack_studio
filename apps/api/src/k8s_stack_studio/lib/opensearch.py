@@ -49,6 +49,7 @@ class OpenSearchClient:
         namespace: str | None = None,
         pod: str | None = None,
         size: int = 100,
+        offset: int = 0,
         index: str = DEFAULT_INDEX,
         start: datetime | None = None,
         end: datetime | None = None,
@@ -95,12 +96,15 @@ class OpenSearchClient:
         if filters:
             bool_query["filter"] = filters
 
-        return {
+        body = {
             "size": size,
             "sort": [{"@timestamp": {"order": "desc"}}],
             "query": {"bool": bool_query},
             "track_total_hits": True,
         }
+        if offset:
+            body["from"] = offset
+        return body
 
     async def search_logs(
         self,
@@ -108,6 +112,7 @@ class OpenSearchClient:
         namespace: str | None = None,
         pod: str | None = None,
         size: int = 100,
+        offset: int = 0,
         index: str = DEFAULT_INDEX,
         start: datetime | None = None,
         end: datetime | None = None,
@@ -124,6 +129,7 @@ class OpenSearchClient:
             namespace=namespace,
             pod=pod,
             size=size,
+            offset=offset,
             start=start,
             end=end,
             level=level,

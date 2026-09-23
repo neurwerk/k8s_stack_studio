@@ -7,6 +7,9 @@ import { FAILURE_TYPES, LOG_LEVELS, fetchLogs } from "@/lib/api/logs";
 import { useIsOpensearchAdmin } from "@/lib/auth/roles";
 import type { FailureType, LogEntry, LogLevel, LogsFilter } from "@/lib/api/logs";
 
+const PAGE_SIZE = 100;
+const MAX_RESULTS = 10_000;
+
 const LEVEL_COLORS: Record<LogLevel, string> = {
   TRACE: "bg-muted text-muted-foreground",
   DEBUG: "bg-muted text-muted-foreground",
@@ -48,12 +51,19 @@ function formatLog(value: string): string {
 }
 
 function readFilters(params: URLSearchParams): { filter: LogsFilter; error: string | null } {
+  const pageValue = params.get("page");
+  const page = pageValue === null ? 1 : Number(pageValue);
+  const offset = (page - 1) * PAGE_SIZE;
   const filter: LogsFilter = {
     q: params.get("q") || undefined,
     namespace: params.get("namespace") || undefined,
     pod: params.get("pod") || undefined,
-    size: 100,
+    size: PAGE_SIZE,
+    offset,
   };
+  if (!Number.isSafeInteger(page) || page < 1 || offset >= MAX_RESULTS) {
+    return { filter, error: "Invalid log page. Choose a page from 1 to 100." };
+  }
   try {
     if (params.has("start") || params.has("end")) {
       filter.start = timestamp(params.get("start") ?? "");
@@ -130,6 +140,9 @@ function LogsView({ queryString }: { queryString: string }) {
   );
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [copiedRow, setCopiedRow] = useState<number | null>(null);
+  const page = Math.floor((initial.filter.offset ?? 0) / PAGE_SIZE) + 1;
+  const lastVisibleEntry = Math.min(page * PAGE_SIZE, total);
+  const canGoNext = lastVisibleEntry < Math.min(total, MAX_RESULTS);
 
   const toggleRow = (i: number) => {
     setExpandedRows((prev) => {
@@ -183,7 +196,7 @@ function LogsView({ queryString }: { queryString: string }) {
         q: q || undefined,
         namespace: namespace || undefined,
         pod: pod || undefined,
-        size: 100,
+        size: PAGE_SIZE,
       };
       filter.level = level || undefined;
       filter.failure_type = failureType || undefined;
@@ -219,6 +232,15 @@ function LogsView({ queryString }: { queryString: string }) {
     }
   };
 
+  const goToPage = (nextPage: number) => {
+    const nextParams = new URLSearchParams(queryString);
+    if (nextPage === 1) nextParams.delete("page");
+    else nextParams.set("page", String(nextPage));
+    router.replace(`/logs${nextParams.size ? `?${nextParams.toString()}` : ""}`, {
+      scroll: false,
+    });
+  };
+
   if (!isOpensearchAdmin) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -238,7 +260,11 @@ function LogsView({ queryString }: { queryString: string }) {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Logs</h1>
         <span className="text-sm text-muted-foreground">
-          {loading ? "Loading…" : `${entries.length} of ${total} entries`}
+          {loading
+            ? "Loading…"
+            : total === 0
+              ? "0 entries"
+              : `${(page - 1) * PAGE_SIZE + 1}-${lastVisibleEntry} of ${total} entries`}
         </span>
       </div>
 
@@ -503,6 +529,29 @@ function LogsView({ queryString }: { queryString: string }) {
             )}
           </tbody>
         </table>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            goToPage(page - 1);
+          }}
+          disabled={loading || page === 1}
+          className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Previous
+        </button>
+        <span className="text-sm text-muted-foreground">Page {page}</span>
+        <button
+          type="button"
+          onClick={() => {
+            goToPage(page + 1);
+          }}
+          disabled={loading || !canGoNext}
+          className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Next
+        </button>
       </div>
     </div>
   );

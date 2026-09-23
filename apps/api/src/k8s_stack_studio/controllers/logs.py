@@ -29,6 +29,7 @@ async def search_logs(
     namespace: str | None = Query(None, description="Exact Kubernetes namespace filter"),
     pod: str | None = Query(None, description="Exact Kubernetes pod name filter"),
     size: int = Query(100, ge=1, le=1000, description="Max number of log entries"),
+    offset: int = Query(0, ge=0, le=9999, description="Number of matching entries to skip"),
     index: str = Query(DEFAULT_INDEX, description="Index pattern to search"),
     start: AwareDatetime | None = Query(None, description="Inclusive start with timezone"),
     end: AwareDatetime | None = Query(None, description="Inclusive end with timezone"),
@@ -42,12 +43,15 @@ async def search_logs(
         raise HTTPException(status_code=422, detail="Supply both start and end")
     if start is not None and end is not None and start >= end:
         raise HTTPException(status_code=422, detail="start must be before end")
+    if offset + size > 10000:
+        raise HTTPException(status_code=422, detail="offset plus size must not exceed 10000")
     try:
         return await opensearch.search_logs(
             q=q,
             namespace=namespace,
             pod=pod,
             size=size,
+            offset=offset,
             index=index,
             start=start,
             end=end,

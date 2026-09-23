@@ -13,7 +13,7 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `POST /api/policy-engine/analyze` | `studio-user`, `pii-admin` | Proxy to PII Engine `/v1/studio/analyze-request` over dedicated mTLS |
 | `POST /api/policy-engine/evaluate` | `studio-user`, `pii-admin` | Strict proxy to model-free PII Engine `/v1/studio/evaluate-policy` over dedicated mTLS |
 | `GET /api/policy-engine/actions`, `GET /api/policy-engine/policy` | `studio-user`, `pii-admin` | Shared PII Engine metadata |
-| `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; text, Kubernetes, classification, time, size, and index filters) |
+| `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; text, Kubernetes, classification, time, size, offset, and index filters) |
 | `GET /api/admin/users`, `GET /api/admin/clients` | `studio-user`, `keycloak-admin` | Keycloak administration |
 | `GET /api/admin/groups`, `GET /api/admin/roles` | `studio-user`, `keycloak-admin` | Read-only Keycloak groups and realm roles |
 | Admin user, group, and client access routes | `studio-user`, `keycloak-admin` | Read-only memberships, role mappings, client roles, and service-account access |
@@ -28,10 +28,12 @@ The logs endpoint accepts paired timezone-aware `start` and `end` bounds, with
 to UTC and applied inclusively to `@timestamp`, alongside existing filters.
 Omitting both retains the newest-first unbounded-time search.
 `/logs` accepts `namespace`, `pod`, `q`, `level`, `failure_type`, `start`, and
-`end`; its UI-only `at` Unix-seconds shortcut selects exactly ten minutes before through five minutes
+`end`, plus a UI-only positive `page`; its UI-only `at` Unix-seconds shortcut selects exactly ten minutes before through five minutes
 after the event. Valid explicit bounds take precedence. Invalid time links
 show an error without searching. From/To controls use local time; manual searches
-write explicit UTC bounds to the URL and remove `at`. Log level is normalized
+write explicit UTC bounds to the URL, remove `at`, and reset to page 1. Previous
+and Next retain the active URL filters and paginate within OpenSearch's 10,000-result
+window. Log level is normalized
 collector metadata; failure type is present only for records accepted by the
 application-error classifier. Older records display as UNKNOWN and Unclassified.
 
