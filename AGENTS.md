@@ -15,6 +15,8 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `GET /api/policy-engine/actions`, `GET /api/policy-engine/policy` | `studio-user`, `pii-admin` | Shared PII Engine metadata |
 | `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; text, Kubernetes, classification, time, size, and index filters) |
 | `GET /api/admin/users`, `GET /api/admin/clients` | `studio-user`, `keycloak-admin` | Keycloak administration |
+| `GET /api/admin/groups`, `GET /api/admin/roles` | `studio-user`, `keycloak-admin` | Read-only Keycloak groups and realm roles |
+| Admin user, group, and client access routes | `studio-user`, `keycloak-admin` | Read-only memberships, role mappings, client roles, and service-account access |
 | `GET /api/admin/recent-signins` | `studio-user`, `keycloak-admin` | Read-only seven-day successful LOGIN summary for up to 25 user IDs |
 | `GET /api/users/{user_id}/usage` | `studio-user`, self or `langfuse-admin` | Calls, total tokens, and USD cost from AgentGateway private analytics |
 | `GET /api/users/{user_id}/usage/daily` | `studio-user`, self or `langfuse-admin` | Daily requested-model tokens, calls, and reported USD; inclusive date range up to 90 days |
@@ -57,7 +59,7 @@ The Next.js frontend consumes the API and renders a dashboard with:
 - **Sidebar** — collapsible dark sidebar with icon navigation
 - **PII Policy** (`/policy-engine`, `pii-admin` role) — config panel, YAML preview, strict policy validation, detailed PII diagnostics, and deterministic model-free simulation
 - **Logs** (`/logs`, `opensearch-admin` role) — OpenSearch log viewer with text, namespace, pod, level, failure-type, and time filters
-- **Users / Clients** (`/users`, `/clients`, `keycloak-admin` role) — Keycloak user and client management
+- **Users / Groups / Realm Roles / Clients** (`keycloak-admin` role) — read-only Keycloak access views and existing user controls
 - **API Keys** — per-user API key management
 - **Error / loading states** — spinner while loading, error card when the API is unreachable
 

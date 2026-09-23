@@ -3,10 +3,12 @@
 import {
   ChevronLeft,
   ChevronRight,
+  FolderTree,
   Key,
   LogOut,
   ScrollText,
   Shield,
+  ShieldCheck,
   User,
   Users,
 } from "lucide-react";
@@ -38,14 +40,14 @@ function NavItems({ collapsed }: NavItemsProps) {
   const adminItems = isAdmin
     ? [
         { href: "/users", label: "Users", icon: Users },
+        { href: "/groups", label: "Groups", icon: FolderTree },
+        { href: "/roles", label: "Realm Roles", icon: ShieldCheck },
         { href: "/clients", label: "Clients", icon: Key },
       ]
     : [];
 
   // Logs viewer (opensearch-admin role)
-  const logsItems = isOpensearchAdmin
-    ? [{ href: "/logs", label: "Logs", icon: ScrollText }]
-    : [];
+  const logsItems = isOpensearchAdmin ? [{ href: "/logs", label: "Logs", icon: ScrollText }] : [];
 
   // Personal items (always visible for authenticated users)
   const personalItems = currentUserId
@@ -175,15 +177,13 @@ export function Sidebar() {
           </span>
         )}
         <button
-          onClick={() => { setCollapsed(!collapsed); }}
+          onClick={() => {
+            setCollapsed(!collapsed);
+          }}
           className="ml-auto rounded-md p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? (
-            <ChevronRight className="h-4 w-4" />
-          ) : (
-            <ChevronLeft className="h-4 w-4" />
-          )}
+          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </button>
       </div>
 
