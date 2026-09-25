@@ -82,11 +82,11 @@ export default function PolicyEnginePage() {
 
       <div className="space-y-6">
         {/* ── Config Accordion ─────────────────────────────────────────── */}
-        <div className="rounded-lg border border-border bg-muted/5 overflow-hidden">
+        <div className="card overflow-hidden border border-border bg-card">
           <div className="flex items-center">
             <button
               onClick={() => { setShowConfig(!showConfig); }}
-              className="flex-1 flex items-center justify-between px-4 py-3 text-sm font-medium text-foreground hover:bg-muted/10 transition-colors"
+              className="flex-1 flex items-center justify-between px-4 py-3 text-sm font-medium text-foreground hover:bg-muted transition-colors"
             >
               <span className="flex items-center gap-2">
                 <Settings2 className="h-4 w-4 text-muted-foreground" />
@@ -125,7 +125,7 @@ export default function PolicyEnginePage() {
         <ConfigPreview state={config} />
 
         {/* ── User input ─────────────────────────────────────────────────── */}
-        <div className="rounded-lg border border-border bg-muted/5 overflow-hidden">
+        <div className="card overflow-hidden border border-border bg-card">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/20 border-b border-border">
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
@@ -144,7 +144,7 @@ export default function PolicyEnginePage() {
                       updateTestText(TEST_TEMPLATES[val].text);
                   }
                 }}
-                className="rounded-lg border border-border bg-background px-4 py-2 text-sm text-muted-foreground focus:outline-none focus:ring-1 focus:ring-sidebar-primary"
+                 className="select select-bordered bg-base-100 text-sm"
               >
                 <option value="">Examples...</option>
                 {getTemplateGroups().map(({ group, keys }) => (
@@ -166,13 +166,13 @@ export default function PolicyEnginePage() {
                 setTemplate("");
               }}
               rows={4}
-              className="w-full rounded-lg border border-border bg-background px-4 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-sidebar-primary resize-y"
+               className="textarea textarea-bordered w-full bg-base-100 font-mono text-sm resize-y"
               placeholder="Enter text to test against the policy engine..."
             />
             {error && (
-              <div className="rounded border border-red-500/30 bg-red-500/5 p-3 flex items-start gap-2" role="alert">
-                <XCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-                <span className="text-sm text-red-600">{error}</span>
+               <div className="alert alert-error flex items-start gap-2" role="alert">
+                 <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                 <span className="text-sm">{error}</span>
               </div>
             )}
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -184,7 +184,7 @@ export default function PolicyEnginePage() {
                     setUseDraftPolicy(event.target.checked);
                     clearEvaluation();
                   }}
-                  className="h-3.5 w-3.5 rounded border-border accent-sidebar-primary"
+                   className="checkbox checkbox-primary checkbox-sm"
                 />
                 Evaluate with the draft policy shown above
               </label>
@@ -192,7 +192,7 @@ export default function PolicyEnginePage() {
                 onClick={() => { void handleEvaluate(); }}
                 disabled={loading || !testText.trim()}
                 aria-busy={loading}
-                className="inline-flex items-center gap-2 rounded-lg bg-sidebar-primary px-4 py-2 text-sm font-medium text-sidebar-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 shrink-0"
+                 className="btn btn-primary shrink-0 gap-2"
               >
                 {loading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

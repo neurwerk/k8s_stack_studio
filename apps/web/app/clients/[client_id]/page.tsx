@@ -26,15 +26,15 @@ export default function ClientDetailPage() {
 
   if (!isAdmin)
     return (
-      <div className="flex h-full items-center justify-center text-sm text-red-700">
+      <div className="flex h-full items-center justify-center text-sm text-error">
         The keycloak-admin role is required.
       </div>
     );
-  if (error) return <div className="p-6 text-sm text-red-700">{error}</div>;
+  if (error) return <div className="alert alert-error m-6 text-sm" role="alert">{error}</div>;
   if (!detail) return <div className="p-6 text-sm text-muted-foreground">Loading client…</div>;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
       <Link
         href="/clients"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -48,18 +48,18 @@ export default function ClientDetailPage() {
           {detail.client.description || detail.client.name || "OIDC client"}
         </p>
         <div className="mt-2 flex gap-2 text-xs">
-          <span className="rounded bg-muted px-2 py-1">
+          <span className="badge badge-ghost">
             {detail.client.public ? "Public" : "Confidential"}
           </span>
-          <span className="rounded bg-muted px-2 py-1">
+          <span className="badge badge-ghost">
             {detail.client.enabled ? "Enabled" : "Disabled"}
           </span>
           {detail.client.service_accounts_enabled && (
-            <span className="rounded bg-muted px-2 py-1">Service account</span>
+            <span className="badge badge-ghost">Service account</span>
           )}
         </div>
       </div>
-      <section className="rounded-lg border border-border p-4">
+      <section className="card border border-border bg-card p-4 sm:p-6">
         <h2 className="mb-1 text-lg font-semibold">Roles defined by this client</h2>
         <p className="mb-4 text-sm text-muted-foreground">
           These roles exist for this application. Their existence does not assign them to anyone.
@@ -69,7 +69,7 @@ export default function ClientDetailPage() {
           <p className="mt-2 text-xs text-muted-foreground">Only the first 100 roles are shown.</p>
         )}
       </section>
-      <section className="rounded-lg border border-border p-4">
+      <section className="card border border-border bg-card p-4 sm:p-6">
         <h2 className="mb-1 text-lg font-semibold">Roles allowed into tokens</h2>
         <p className="mb-4 text-sm text-muted-foreground">
           Direct role scope mappings for this client.
@@ -79,7 +79,7 @@ export default function ClientDetailPage() {
         </p>
         <RoleMappings mappings={detail.token_scope_roles} />
       </section>
-      <section className="rounded-lg border border-border p-4">
+      <section className="card border border-border bg-card p-4 sm:p-6">
         <h2 className="mb-1 text-lg font-semibold">Service account assignments</h2>
         <p className="mb-4 text-sm text-muted-foreground">
           Roles directly assigned to the client service account.

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# k8s-stack-studio-web — Next.js frontend for the AI Stack Studio dashboard.
+# k8s-stack-studio-web — Next.js frontend for the neurwerk studio dashboard.
 #
 # Multi-stage build:
 #   1. Build stage:  install dependencies, run `next build`
@@ -35,7 +35,7 @@ RUN pnpm --filter web run build
 FROM node:22-alpine AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/neurwerk/k8s_stack_studio"
-LABEL org.opencontainers.image.description="k8s-stack-studio-web — AI Stack Studio frontend"
+LABEL org.opencontainers.image.description="k8s-stack-studio-web — neurwerk studio frontend"
 LABEL org.opencontainers.image.licenses="MIT"
 
 WORKDIR /app

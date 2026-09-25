@@ -284,7 +284,7 @@ export function StepArrow({
 
 function ValidationIssues({ result }: { result: Extract<EvaluateResponse, { valid: false }> }) {
   return (
-    <section className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4" role="status">
+     <section className="alert alert-warning block p-4" role="status">
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
         <div>
@@ -327,7 +327,7 @@ function AnalysisSummary({ result }: { result: ValidEvaluateResponse }) {
       : "Current-request scan skipped; pre-analysis policy decision used";
 
   return (
-    <section className="rounded-lg border border-border bg-muted/5 p-4">
+    <section className="card border border-border bg-card p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Shield className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-sm font-medium">PII Engine evaluation</h2>
@@ -367,7 +367,7 @@ function AnalysisSummary({ result }: { result: ValidEvaluateResponse }) {
 
 function Findings({ request, result }: { request: SupportedRequest; result: ValidEvaluateResponse }) {
   return (
-    <section className="rounded-lg border border-border bg-muted/5 p-4">
+    <section className="card border border-border bg-card p-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-medium">Logical detections in original text</h2>
         <span className="text-[10px] text-muted-foreground">
@@ -382,7 +382,7 @@ function Findings({ request, result }: { request: SupportedRequest; result: Vali
             {groupedLeafVisualizations(request, result.diagnostics.logical_detections, "logical")}
           </div>
           <div className="mt-4 overflow-x-auto">
-            <table aria-label="Logical detections" className="w-full min-w-[780px] text-left text-[11px]">
+            <table aria-label="Logical detections" className="table table-xs w-full min-w-[780px] text-left">
               <thead className="border-b border-border text-muted-foreground">
                 <tr><th className="py-2 pr-3">Entity</th><th className="pr-3">Confidence</th><th className="pr-3">Source</th><th className="pr-3">Span / path</th><th className="pr-3">Configured</th><th>Effective</th></tr>
               </thead>
@@ -408,7 +408,7 @@ function Findings({ request, result }: { request: SupportedRequest; result: Vali
 
 function EffectiveRegions({ request, result }: { request: SupportedRequest; result: ValidEvaluateResponse }) {
   return (
-    <section className="rounded-lg border border-border bg-muted/5 p-4">
+    <section className="card border border-border bg-card p-4">
       <h2 className="text-sm font-medium">Effective overlap regions</h2>
       {result.diagnostics.effective_regions.length === 0 ? (
         <p className="mt-3 text-xs text-muted-foreground">No effective PII regions.</p>
@@ -418,7 +418,7 @@ function EffectiveRegions({ request, result }: { request: SupportedRequest; resu
             {groupedLeafVisualizations(request, result.diagnostics.effective_regions, "effective")}
           </div>
           <div className="mt-4 overflow-x-auto">
-            <table aria-label="Effective regions" className="w-full min-w-[720px] text-left text-[11px]">
+            <table aria-label="Effective regions" className="table table-xs w-full min-w-[720px] text-left">
               <thead className="border-b border-border text-muted-foreground">
                 <tr><th className="py-2 pr-3">Winning entity</th><th className="pr-3">Action</th><th className="pr-3">Members</th><th className="pr-3">Span / path</th><th>Overlap</th></tr>
               </thead>
@@ -457,13 +457,13 @@ export function PolicyTester({
       <Findings request={request} result={result} />
       <EffectiveRegions request={request} result={result} />
 
-      <section className="rounded-lg border border-border bg-muted/5 p-4">
+      <section className="card border border-border bg-card p-4">
         <h2 className="text-sm font-medium">Aggregate transformation report</h2>
         {result.report.rows.length === 0 ? (
           <p className="mt-3 text-xs text-muted-foreground">No entity report rows.</p>
         ) : (
           <div className="mt-3 overflow-x-auto">
-            <table aria-label="Aggregate transformation report" className="w-full min-w-[600px] text-left text-[11px]">
+            <table aria-label="Aggregate transformation report" className="table table-xs w-full min-w-[600px] text-left">
               <thead className="border-b border-border text-muted-foreground"><tr><th className="py-2 pr-3">Entity</th><th className="pr-3">Action</th><th className="pr-3">Detected</th><th className="pr-3">Transformed</th><th>Unique transformed</th></tr></thead>
               <tbody>{result.report.rows.map((row) => <tr key={row.entity_type} className="border-b border-border/60"><td className="py-2 pr-3 font-medium">{row.entity_type}</td><td className="pr-3">{row.action}</td><td className="pr-3">{row.detected_count}</td><td className="pr-3">{row.transformed_count}</td><td>{row.unique_transformed_count}</td></tr>)}</tbody>
             </table>
@@ -477,7 +477,7 @@ export function PolicyTester({
         label={result.decision === "block" ? "Request blocked before model forwarding" : "Model-visible request generated"}
       />
 
-      <section className="rounded-lg border border-border bg-muted/5 p-4">
+       <section className="card border border-border bg-card p-4">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Code2 className="h-4 w-4 text-muted-foreground" /> What would be sent to the model
         </div>

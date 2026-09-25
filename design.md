@@ -1,15 +1,15 @@
 # Studio design system
 
-Status: design direction for the upcoming UI refactor. This document does not describe the current implementation.
+Status: design reference for the neurwerk studio interface and its ongoing UI implementation.
 
 ## Goal
 
-Make AI Stack Studio feel like part of the neurwerk family while remaining an efficient operations dashboard. Use **daisyUI 5 on Tailwind CSS 4** for common controls and a **light-first neurwerk theme**. Keep product-specific layouts, charts, code viewers, and policy diagnostics purpose-built rather than forcing them into marketing-page patterns.
+Make neurwerk studio feel like part of the neurwerk family while remaining an efficient operations dashboard. Use **daisyUI 5 on Tailwind CSS 4** for common controls and a **light-first neurwerk theme**. Keep product-specific layouts, charts, code viewers, and policy diagnostics purpose-built rather than forcing them into marketing-page patterns.
 
 ## Sources of truth
 
 - Brand reference: `../../www/base/` and `../../www/consult/src/` (sibling repository at `/Users/pvonhafe/neurwerk.com/www/`). Both use the same color tokens, Inter/JetBrains Mono, spacing scale, light surfaces, and indigo-to-lavender accents. In particular, consult `css/config/_colors.css`, `_fonts.css`, `_spacing.css`, `css/objects/_buttons.css`, `_features.css`, and `css/utilities/_gradient.css` in either site.
-- Studio implementation: `apps/web/app/globals.css`, `apps/web/app/layout.tsx`, `apps/web/components/`, and `apps/web/app/`. Studio currently uses inline, shadcn-inspired controls, Geist fonts, and a forced `.dark` root; some screens also contain hard-coded dark colors.
+- Studio implementation: `apps/web/app/globals.css`, `apps/web/app/layout.tsx`, `apps/web/components/`, and `apps/web/app/`. Some specialized controls remain purpose-built; daisyUI provides the common component styling.
 - Use the **shared brand tokens**, not the marketing site's fixed navigation or oversized hero sections. Studio is a signed-in application with more data and denser workflows.
 
 ## Visual principles
@@ -48,7 +48,7 @@ Spacing follows the site's 4/8/12/16/24/32/48px progression. Default control hei
 ## daisyUI integration contract
 
 - Add daisyUI 5 as a Tailwind v4 plugin in `apps/web/app/globals.css` via `@plugin "daisyui"`; define one named custom **light** theme using `@plugin "daisyui/theme"` with `default: true`, `prefersdark: false`, and `color-scheme: light`. Set the daisyUI base, content, primary, secondary, neutral, and semantic status colors plus radius/size variables from the tokens above.
-- At the root, use the named theme (`data-theme`) and remove the forced `className="dark"`. Avoid a second conflicting source of truth for `--color-primary`, `--color-secondary`, etc.: daisyUI owns its theme variables; any retained Studio `bg-background`, `text-foreground`, `border-border`, `bg-sidebar`, or chart tokens must map explicitly to the same theme or be migrated away. Tailwind utility classes remain useful for layout, responsive behavior, and one-off spacing.
+- At the root, use the named theme (`data-theme`) without a forced `.dark` class. Avoid a second conflicting source of truth for `--color-primary`, `--color-secondary`, etc.: daisyUI owns its theme variables; retained Studio `bg-background`, `text-foreground`, `border-border`, `bg-sidebar`, and chart tokens map to that theme. Tailwind utility classes remain useful for layout, responsive behavior, and one-off spacing. daisyUI's `--border` is a width; chart strokes use `--border-color`.
 - Prefer daisyUI `btn`, `input`, `select`, `textarea`, `checkbox`, `badge`, `alert`, `card`, `tabs`, `table`, `loading`, and `skeleton` patterns where appropriate. Choose semantic variants (`primary`, `neutral`, `error`, etc.) consistently. App-specific widgets and data visualizations remain React components; daisyUI is a styling layer, not a replacement for application logic.
 - Scope custom CSS to genuine brand or app needs (navigation, visualization, code, rich policy details). Do not import the marketing site's global CSS: its global `nav`/section selectors and layout rules are unsuitable for Studio.
 

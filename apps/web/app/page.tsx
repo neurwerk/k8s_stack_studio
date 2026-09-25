@@ -14,7 +14,7 @@ export default function Home() {
 
   return (
     <div className="flex h-full items-center justify-center" role="status" aria-live="polite">
-      <div className="text-muted-foreground animate-pulse">Loading...</div>
+      <div className="flex items-center gap-3 text-muted-foreground"><span className="loading loading-spinner loading-sm" />Loading...</div>
     </div>
   );
 }

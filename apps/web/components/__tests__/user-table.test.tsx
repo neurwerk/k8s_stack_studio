@@ -28,7 +28,7 @@ describe("user status and sign-ins", () => {
     expect(screen.getByText(account)).toBeInTheDocument();
     const badge = screen.getByText(email);
     expect(badge).toBeInTheDocument();
-    if (emailVerified === false) expect(badge).toHaveClass("bg-amber-100");
+    if (emailVerified === false) expect(badge).toHaveClass("badge-warning");
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
   });
 

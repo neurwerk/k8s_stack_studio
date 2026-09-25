@@ -1,4 +1,4 @@
-"""FastAPI application entry point for the AI Stack Studio backend.
+"""FastAPI application entry point for the neurwerk studio backend.
 
 Runs two separate ASGI apps on different ports:
   - App port (4010):     authenticated API → exposed via HTTPRoute
@@ -74,7 +74,7 @@ def create_app() -> FastAPI:
         _logger.info("Studio API shutting down")
 
     app = FastAPI(
-        title="AI Stack Studio",
+        title="neurwerk studio",
         version=get_version("k8s-stack-studio"),
         docs_url="/docs",
         redoc_url="/redoc",

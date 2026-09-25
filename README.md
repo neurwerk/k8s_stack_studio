@@ -1,6 +1,6 @@
-# AI Stack Studio
+# neurwerk studio
 
-AI Stack Studio is a web dashboard and authenticated API for operating AI
+neurwerk studio is a web dashboard and authenticated API for operating AI
 platform services. It provides policy inspection and testing, log search, user
 and OIDC-client administration, API-key management, and per-user usage views.
 

@@ -55,14 +55,14 @@ export default function AuthCallback() {
   if (auth.error) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="text-destructive">Sign-in failed: {auth.error.message}</div>
+        <div className="alert alert-error max-w-md" role="alert">Sign-in failed: {auth.error.message}</div>
       </div>
     );
   }
 
   return (
     <div className="flex h-full items-center justify-center">
-      <div className="text-muted-foreground animate-pulse">Completing sign-in…</div>
+      <div className="flex items-center gap-3 text-muted-foreground"><span className="loading loading-spinner loading-sm" />Completing sign-in…</div>
     </div>
   );
 }

@@ -18,7 +18,7 @@ def test_create_app_returns_fastapi(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("K8S_STUDIO_KEYCLOAK_CLIENT_ID", "studio")
     app = create_app()
     assert isinstance(app, FastAPI)
-    assert app.title == "AI Stack Studio"
+    assert app.title == "neurwerk studio"
     paths = set(app.openapi()["paths"])
     assert "/api/policy-engine/evaluate" in paths
     assert "/api/policy-engine/test-llm" not in paths

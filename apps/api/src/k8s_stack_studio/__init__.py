@@ -1,1 +1,1 @@
-"""k8s_stack_studio — AI Stack Studio backend."""
+"""k8s_stack_studio — neurwerk studio backend."""

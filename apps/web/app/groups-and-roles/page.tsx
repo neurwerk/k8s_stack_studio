@@ -7,7 +7,7 @@ export default function GroupsAndRolesPage() {
 
   if (!isAdmin) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-red-700">
+      <div className="flex h-full items-center justify-center text-sm text-error">
         The keycloak-admin role is required.
       </div>
     );

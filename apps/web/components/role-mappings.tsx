@@ -7,7 +7,7 @@ export function RoleList({ roles }: { roles: AdminRole[] }) {
       {roles.map((role) => (
         <span
           key={role.id}
-          className="rounded border border-border bg-muted px-2 py-1 font-mono text-xs"
+          className="badge badge-ghost h-auto max-w-full break-all py-1 font-mono text-xs"
           title={role.description || undefined}
         >
           {role.name}

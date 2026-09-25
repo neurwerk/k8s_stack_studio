@@ -10,11 +10,11 @@ import { fetchUser } from "@/lib/api/admin";
 import { fetchAllDailyUsage, fetchUsagePeople, fetchUserDailyUsage } from "@/lib/api/usage";
 import type { UsageDateRange, UsagePeople, UserDailyUsage } from "@/lib/api/usage";
 import { useCurrentUserId, useHasRole, useIsKeycloakAdmin } from "@/lib/auth/roles";
-import { modelColor, modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
+import { modelColors, modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
 import type { PersonMetric, UsagePreset } from "@/lib/usage-dashboard";
 
-const panel = "min-w-0 rounded-2xl border border-border bg-card p-4 shadow-sm dark:border-[#304159] dark:bg-[#1b2d43] sm:p-6";
-const control = "h-10 min-w-0 rounded-lg border border-border bg-background px-3 text-sm text-foreground dark:border-[#405673] dark:bg-[#14243a]";
+const panel = "card min-w-0 border border-border bg-card p-4 sm:p-6";
+const control = "select select-bordered min-w-0 bg-base-100 text-sm";
 
 function count(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
@@ -123,6 +123,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const today = shown?.usage.today ?? result?.usage.today;
   const people = shown?.people?.users ?? [];
   const summary = shown ? usageSummary(shown.usage) : null;
+  const colors = modelColors(summary?.models.map((model) => model.model) ?? []);
   const trend = shown && summary
     ? modelTrend(shown.usage, summary.models.map((model) => model.model), trendMetric)
     : [];
@@ -142,7 +143,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           <p className="mt-1 text-sm text-muted-foreground">AgentGateway requests, reported tokens and USD.</p>
         </div>
         <button type="button" onClick={() => { setRefresh((value) => value + 1); }}
-          className={`${control} inline-flex items-center gap-2 hover:bg-muted`}>
+          className="btn btn-outline inline-flex items-center gap-2">
           <RefreshCw className="h-4 w-4" aria-hidden="true" /> Refresh
         </button>
       </div>
@@ -177,11 +178,11 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           setPreset("custom");
         }}>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">From
-            <input aria-label="From" type="date" className={control} value={draftStart}
+            <input aria-label="From" type="date" className="input input-bordered bg-base-100" value={draftStart}
               max={today} onChange={(event) => { setDraftStart(event.target.value); setPreset("custom"); }} />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">To
-            <input aria-label="To" type="date" className={control} value={draftEnd}
+            <input aria-label="To" type="date" className="input input-bordered bg-base-100" value={draftEnd}
               max={today} onChange={(event) => { setDraftEnd(event.target.value); setPreset("custom"); }} />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">Range
@@ -203,7 +204,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               <option value="custom">Custom</option>
             </select>
           </label>
-          <button type="submit" className={`${control} hover:bg-muted`}>Apply</button>
+          <button type="submit" className="btn btn-primary">Apply</button>
           <span className="pb-2 text-xs text-muted-foreground">
             {shown ? shown.usage.timezone : "Up to 90 days"}
           </span>
@@ -248,7 +249,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               </label>
             </div>
             <div className="mt-5 overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
+              <table className="table w-full min-w-[640px] text-left text-sm">
                 <thead className="border-b border-border text-xs uppercase text-muted-foreground">
                   <tr><th className="py-3 pr-4">Model</th><th className="px-3 text-right">Tokens</th>
                     <th className="px-3 text-right">Reported USD</th><th className="pl-3 text-right">Requests</th></tr>
@@ -259,7 +260,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                       <td className="max-w-xs py-3 pr-4 font-medium">
                         <span className="break-all">{model.model ?? "Unknown model"}</span>
                         <div className="mt-2 h-1.5 rounded-full bg-muted">
-                          <div className="h-full rounded-full bg-[#a5f3d0]"
+                          <div className="h-full rounded-full bg-primary"
                             style={{ width: usageBarWidth(model[modelMetric], maxModelMetric) }} />
                         </div>
                       </td>
@@ -294,7 +295,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                     className="grid w-full items-center gap-2 text-left text-sm hover:text-primary sm:grid-cols-[minmax(8rem,13rem)_minmax(0,1fr)_6rem]"
                     title={person.user_id}>
                     <span className="truncate">{label(person.user_id)}</span>
-                    <span className="h-3 rounded-full bg-muted"><span className="block h-full rounded-full bg-[#a5f3d0]"
+                     <span className="h-3 rounded-full bg-muted"><span className="block h-full rounded-full bg-primary"
                       style={{ width: usageBarWidth(person[metric], ranked[0]?.[metric] ?? 0) }} /></span>
                     <span className="text-right tabular-nums">{metric === "cost_usd" ? dollars(person.cost_usd) : count(person[metric])}</span>
                   </button>
@@ -322,7 +323,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                 aria-label={`Daily ${trendMetric === "cost_usd" ? "USD" : trendMetric === "requests" ? "requests" : "tokens"} by requested model`}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <BarChart data={trend} accessibilityLayer margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke="var(--border)" />
+                     <CartesianGrid vertical={false} stroke="var(--border-color)" />
                     <XAxis dataKey="date" tickFormatter={dayLabel} minTickGap={32}
                       tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
                     <YAxis width={65} allowDecimals={trendMetric !== "requests"}
@@ -333,13 +334,14 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                       axisLine={false} tickLine={false} />
                     <Tooltip
                       cursor={{ fill: "var(--muted)", opacity: 0.3 }}
-                      contentStyle={{ background: "var(--card)", borderColor: "var(--border)", borderRadius: 8 }}
+                       contentStyle={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border-color)", borderRadius: 8 }}
                       labelFormatter={(value) => typeof value === "string" ? value : typeof value === "number" ? String(value) : ""}
                       formatter={(value, name) => [trendMetric === "cost_usd" ? dollars(Number(value)) : count(Number(value)), String(name)]}
                     />
                     {summary.models.map((model, index) => (
                       <Bar key={JSON.stringify(model.model)} name={model.model ?? "Unknown model"}
-                        dataKey={`model${String(index)}`} stackId="usage" fill={modelColor(model.model)}
+                        dataKey={`model${String(index)}`} stackId="usage" fill={colors.get(model.model)}
+                        stroke="var(--card)" strokeWidth={1}
                         maxBarSize={36} isAnimationActive={false}
                         shape={(props) => (
                           <Rectangle {...props} radius={topStackIndexes[props.index] === index ? [4, 4, 0, 0] : 0} />
@@ -353,8 +355,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           <section className={panel} aria-label="Daily usage">
             <h2 className="text-xl font-semibold">Daily usage</h2>
             <div className="mt-4 max-h-[32rem] overflow-auto">
-              <table className="w-full min-w-[560px] text-left text-sm">
-                <thead className="sticky top-0 border-b border-border bg-card text-xs uppercase text-muted-foreground dark:bg-[#1b2d43]">
+               <table className="table w-full min-w-[560px] text-left text-sm">
+                 <thead className="sticky top-0 border-b border-border bg-card text-xs uppercase text-muted-foreground">
                   <tr><th className="py-3">Date</th><th className="px-3 text-right">Tokens</th>
                     <th className="px-3 text-right">Reported USD</th><th className="pl-3 text-right">Requests</th></tr>
                 </thead>

@@ -9,15 +9,15 @@ import { getActions } from "@/lib/api/policy-engine";
 import { FALLBACK_ACTIONS } from "@/lib/actions-fallback";
 
 const SEVERITY_STYLES: Record<ActionDef["severity"], string> = {
-  pass: "bg-green-500/10 text-green-500 border-green-500/20",
-  fail: "bg-red-500/10 text-red-500 border-red-500/20",
-  info: "bg-blue-500/10 text-blue-500 border-blue-500/20",
-  warn: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
+  pass: "badge-success badge-outline",
+  fail: "badge-error badge-outline",
+  info: "badge-info badge-outline",
+  warn: "badge-warning badge-outline",
 };
 
 function Badge({ label, severity }: { label: string; severity: ActionDef["severity"] }) {
   return (
-    <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-medium ${SEVERITY_STYLES[severity]}`}>
+    <span className={`badge badge-sm font-medium ${SEVERITY_STYLES[severity]}`}>
       {label}
     </span>
   );
@@ -45,10 +45,10 @@ export function ActionsReference() {
   const items = actions ?? FALLBACK_ACTIONS;
 
   return (
-    <div className="rounded-lg border border-border bg-muted/5 overflow-hidden">
+    <div className="card overflow-hidden border border-border bg-card">
       <button
         onClick={() => { setShow(!show); }}
-        className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-foreground hover:bg-muted/10 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-foreground hover:bg-muted transition-colors"
       >
         <span className="flex items-center gap-2">
           <BookOpen className="h-4 w-4 text-muted-foreground" />

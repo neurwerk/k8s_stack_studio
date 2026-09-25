@@ -24,7 +24,7 @@ export function UserTable({ users, loading, error, activity, activityLoading }: 
 
   if (error) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+      <div className="alert alert-error text-sm" role="alert">
         {error}
       </div>
     );
@@ -40,8 +40,8 @@ export function UserTable({ users, loading, error, activity, activityLoading }: 
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
+    <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <table className="table w-full text-left text-sm">
         <thead>
           <tr className="border-b border-border text-muted-foreground">
             <th className="px-4 py-3 font-medium">Username</th>

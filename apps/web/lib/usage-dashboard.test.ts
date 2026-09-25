@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import type { UserDailyUsage } from "@/lib/api/usage";
-import { modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
+import { modelColors, modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
 
 describe("usage dashboard calendar and aggregation", () => {
+  it("assigns distinct series colors for colliding model names in either chart order", () => {
+    const models = ["gpt-4o", "gpt-4.1-mini", "gpt-5-mini", ...Array.from({ length: 20 }, (_, i) => `model-${String(i)}`), null];
+    const colors = modelColors(models);
+    expect(new Set(colors.values()).size).toBe(models.length);
+    expect(colors.get(null)).toBe("#5f5f6b");
+    expect([...modelColors([...models].reverse())]).toEqual([...colors]);
+  });
+
   it("uses calendar labels through month and daylight-saving boundaries", () => {
     expect(presetRange("2026-03-01", "last_month")).toEqual({ start: "2026-02-01", end: "2026-02-28" });
     expect(presetRange("2026-03-31", "7d")).toEqual({ start: "2026-03-25", end: "2026-03-31" });

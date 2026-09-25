@@ -40,10 +40,10 @@ export function ConfigPreview({ state }: { state: ConfigState }) {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-muted/5 overflow-hidden">
+    <div className="card overflow-hidden border border-border bg-card">
       <button
         onClick={() => { setCollapsed(!collapsed); }}
-        className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-foreground hover:bg-muted/10 transition-colors"
+         className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-foreground hover:bg-muted transition-colors"
       >
         <span className="flex items-center gap-2">
           <Code className="h-4 w-4 text-muted-foreground" />
@@ -66,13 +66,13 @@ export function ConfigPreview({ state }: { state: ConfigState }) {
                 </div>
                 <button
                   onClick={() => { void handleCopy(output.id, output.yaml); }}
-                  className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                   className="btn btn-outline btn-xs gap-1.5"
                 >
                   {copied === output.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied === output.id ? "Copied" : "Copy"}
                 </button>
               </div>
-              <pre className="max-h-[320px] overflow-auto whitespace-pre p-3 font-mono text-[11px] text-muted-foreground">
+               <pre className="max-h-[320px] overflow-auto whitespace-pre bg-[var(--code-background)] p-3 font-mono text-xs text-[var(--code-foreground)]">
                 {output.yaml}
               </pre>
             </section>

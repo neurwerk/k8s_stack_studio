@@ -43,9 +43,11 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
   return (
     <>
       {/* Main navigation */}
-      <nav className="flex-1 space-y-1 p-2">
+      <nav aria-label="Main" className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
         <Link
           href="/usage"
+          aria-label="Usage"
+          aria-current={pathname === "/usage" ? "page" : undefined}
           className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
             pathname === "/usage"
               ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
@@ -68,6 +70,8 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
         {isAdmin && (
           <Link
             href="/users"
+            aria-label="Users"
+            aria-current={pathname === "/users" ? "page" : undefined}
             className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
               pathname === "/users"
                 ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
@@ -81,6 +85,8 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
         {isOpensearchAdmin && (
           <Link
             href="/logs"
+            aria-label="Logs"
+            aria-current={pathname === "/logs" ? "page" : undefined}
             className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
               pathname === "/logs"
                 ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
@@ -104,6 +110,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
           <Link
             href={`/users/${currentUserId}`}
             aria-label="Profile"
+            aria-current={pathname === `/users/${currentUserId}` ? "page" : undefined}
             className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
               pathname === `/users/${currentUserId}`
                 ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
@@ -155,6 +162,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
               <Link
                 href="/policy-engine"
                 aria-label="PII Policy"
+                aria-current={pathname === "/policy-engine" ? "page" : undefined}
                 className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                   pathname === "/policy-engine"
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
@@ -206,7 +214,7 @@ function VersionFooter({ collapsed }: { collapsed: boolean }) {
         className={`flex items-center text-[10px] text-sidebar-foreground/40 ${
           collapsed ? "justify-center" : "px-3"
         }`}
-        title={`AI Stack Studio v${version.version}`}
+        title={`neurwerk studio v${version.version}`}
       >
         {collapsed ? (
           <span className="font-mono">v{version.version.split(".")[0]}</span>
@@ -223,22 +231,28 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200 ${
+      aria-label="Studio navigation"
+      className={`flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200 ${
         collapsed ? "w-16" : "w-16 sm:w-60"
       }`}
     >
       {/* Header */}
-      <div className="flex h-14 items-center justify-between border-b border-sidebar-border px-4">
+      <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-3 sm:px-4">
         {!collapsed && (
-          <span className="hidden text-sm font-semibold tracking-tight sm:inline">
-            AI Stack Studio
-          </span>
+          <div className="hidden items-center gap-2.5 sm:flex" aria-label="neurwerk studio">
+            <span className="text-base tracking-tight text-[#0a0a1a]" aria-hidden="true">
+              <strong className="font-bold">neur</strong><span className="font-light text-[#6b6f88]">werk</span>
+            </span>
+            <span className="h-5 w-px bg-sidebar-border" aria-hidden="true" />
+            <span className="text-xs font-medium tracking-wide text-sidebar-foreground/70">studio</span>
+          </div>
         )}
         <button
+          type="button"
           onClick={() => {
             setCollapsed(!collapsed);
           }}
-          className="ml-auto rounded-md p-1 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="ml-auto rounded-md p-1.5 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}

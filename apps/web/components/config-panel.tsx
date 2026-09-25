@@ -57,7 +57,7 @@ export function ConfigPanel({ state, onChange }: { state: ConfigState; onChange:
   const attachmentVersion = state.llmPolicyEngine.attachmentPolicyVersion;
   const processingAttachments = attachment.mode === "process" || attachment.mode === "extract";
 
-  return <div className="space-y-5">
+  return <div className="policy-config space-y-5">
     <Section title="PII Engine Policy">
       <div className="flex flex-wrap items-center gap-2 text-[10px]"><Globe className="h-3.5 w-3.5" /><label>Languages</label><select multiple value={engine.pii.analyzerLanguages} onChange={(event) => updatePii({ analyzerLanguages: Array.from(event.target.selectedOptions, (option) => option.value) })}><option value="en">English</option><option value="de">German</option><option value="nl">Dutch</option></select><span>Default action</span><select value={engine.pii.defaultAction} onChange={(event) => updatePii({ defaultAction: event.target.value })}>{VALID_ACTIONS.filter((action) => action !== "reversible_replace").map((action) => <option key={action}>{action}</option>)}</select></div>
       <label className="flex items-center gap-2 text-[10px] text-muted-foreground"><input type="checkbox" checked={engine.pii.maskOnReroute} onChange={(event) => updatePii({ maskOnReroute: event.target.checked })} />Mask PII before local reroute</label>

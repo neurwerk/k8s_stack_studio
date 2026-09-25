@@ -26,15 +26,15 @@ export default function GroupDetailPage() {
 
   if (!isAdmin)
     return (
-      <div className="flex h-full items-center justify-center text-sm text-red-700">
+      <div className="flex h-full items-center justify-center text-sm text-error">
         The keycloak-admin role is required.
       </div>
     );
-  if (error) return <div className="p-6 text-sm text-red-700">{error}</div>;
+  if (error) return <div className="alert alert-error m-6 text-sm" role="alert">{error}</div>;
   if (!detail) return <div className="p-6 text-sm text-muted-foreground">Loading group…</div>;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
       <Link
         href="/groups"
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -46,7 +46,7 @@ export default function GroupDetailPage() {
         <h1 className="text-2xl font-semibold">{detail.group.name}</h1>
         <p className="font-mono text-xs text-muted-foreground">{detail.group.path}</p>
       </div>
-      <section className="rounded-lg border border-border p-4">
+      <section className="card border border-border bg-card p-4 sm:p-6">
         <h2 className="mb-3 text-lg font-semibold">Subgroups</h2>
         {!detail.subgroups.length && <p className="text-sm text-muted-foreground">None</p>}
         <div className="space-y-2">
@@ -67,7 +67,7 @@ export default function GroupDetailPage() {
           </p>
         )}
       </section>
-      <section className="rounded-lg border border-border p-4">
+      <section className="card border border-border bg-card p-4 sm:p-6">
         <h2 className="mb-3 text-lg font-semibold">Members</h2>
         {!detail.members.length && <p className="text-sm text-muted-foreground">None</p>}
         <div className="space-y-2">
@@ -86,12 +86,12 @@ export default function GroupDetailPage() {
           <p className="mt-2 text-xs text-muted-foreground">Only the first 25 members are shown.</p>
         )}
       </section>
-      <section className="rounded-lg border border-border p-4">
+      <section className="card border border-border bg-card p-4 sm:p-6">
         <h2 className="mb-1 text-lg font-semibold">Direct role assignments</h2>
         <p className="mb-4 text-sm text-muted-foreground">Roles attached directly to this group.</p>
         <RoleMappings mappings={detail.direct} />
       </section>
-      <section className="rounded-lg border border-border p-4">
+      <section className="card border border-border bg-card p-4 sm:p-6">
         <h2 className="mb-1 text-lg font-semibold">Effective realm roles</h2>
         <p className="mb-4 text-sm text-muted-foreground">
           Includes composite roles returned by Keycloak. Parent groups may grant additional access

@@ -11,13 +11,13 @@ const PAGE_SIZE = 100;
 const MAX_RESULTS = 10_000;
 
 const LEVEL_COLORS: Record<LogLevel, string> = {
-  TRACE: "bg-muted text-muted-foreground",
-  DEBUG: "bg-muted text-muted-foreground",
-  INFO: "bg-blue-500/15 text-blue-500",
-  WARNING: "bg-amber-500/15 text-amber-500",
-  ERROR: "bg-red-500/15 text-red-500",
-  FATAL: "bg-red-700 text-white",
-  UNKNOWN: "border border-border text-muted-foreground",
+  TRACE: "badge-ghost",
+  DEBUG: "badge-ghost",
+  INFO: "badge-info",
+  WARNING: "badge-warning",
+  ERROR: "badge-error",
+  FATAL: "badge-error",
+  UNKNOWN: "badge-outline",
 };
 
 function localTime(value?: string): string {
@@ -268,10 +268,10 @@ function LogsView({ queryString }: { queryString: string }) {
   if (!isOpensearchAdmin) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
+        <div className="alert alert-error max-w-md flex-col p-6 text-center text-sm">
           <p className="font-semibold">Access Denied</p>
           <p className="mt-1">
-            You need the <code className="rounded bg-red-100 px-1">opensearch-admin</code> role to
+            You need the <code className="font-mono">opensearch-admin</code> role to
             view logs.
           </p>
         </div>
@@ -280,7 +280,7 @@ function LogsView({ queryString }: { queryString: string }) {
   }
 
   return (
-    <div className="p-6">
+    <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Logs</h1>
         <span className="text-sm text-muted-foreground">
@@ -302,7 +302,7 @@ function LogsView({ queryString }: { queryString: string }) {
           e.preventDefault();
           search();
         }}
-        className="mb-4 space-y-3"
+        className="card mb-4 space-y-3 border border-border bg-card p-4 sm:p-6"
       >
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(16rem,2fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(9rem,1fr)_minmax(11rem,1fr)]">
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -314,7 +314,7 @@ function LogsView({ queryString }: { queryString: string }) {
               onChange={(e) => {
                 setQ(e.target.value);
               }}
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="input input-bordered w-full bg-base-100 text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -326,7 +326,7 @@ function LogsView({ queryString }: { queryString: string }) {
               onChange={(e) => {
                 setNamespace(e.target.value);
               }}
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="input input-bordered w-full bg-base-100 text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -338,7 +338,7 @@ function LogsView({ queryString }: { queryString: string }) {
               onChange={(e) => {
                 setPod(e.target.value);
               }}
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="input input-bordered w-full bg-base-100 text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -348,7 +348,7 @@ function LogsView({ queryString }: { queryString: string }) {
               onChange={(e) => {
                 setLevel(e.target.value as LogLevel | "");
               }}
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+              className="select select-bordered w-full bg-base-100 text-sm"
             >
               <option value="">All levels</option>
               {LOG_LEVELS.map((value) => (
@@ -365,7 +365,7 @@ function LogsView({ queryString }: { queryString: string }) {
               onChange={(e) => {
                 setFailureType(e.target.value as FailureType | "");
               }}
-              className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+              className="select select-bordered w-full bg-base-100 text-sm"
             >
               <option value="">All types</option>
               {Object.entries(FAILURE_TYPES).map(([value, label]) => (
@@ -386,7 +386,7 @@ function LogsView({ queryString }: { queryString: string }) {
               onChange={(e) => {
                 setStart(e.target.value);
               }}
-              className="h-9 max-w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
+              className="input input-bordered max-w-full bg-base-100 text-sm"
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -398,12 +398,12 @@ function LogsView({ queryString }: { queryString: string }) {
               onChange={(e) => {
                 setEnd(e.target.value);
               }}
-              className="h-9 max-w-full rounded-md border border-border bg-background px-3 text-sm text-foreground"
+              className="input input-bordered max-w-full bg-base-100 text-sm"
             />
           </label>
           <button
             type="submit"
-            className="h-9 w-fit self-end justify-self-start rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="btn btn-primary w-fit self-end justify-self-start"
           >
             Search
           </button>
@@ -411,14 +411,14 @@ function LogsView({ queryString }: { queryString: string }) {
       </form>
 
       {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="alert alert-error mb-4 text-sm" role="alert">
           {error}
         </div>
       )}
 
       {/* Log table */}
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[1000px] table-fixed text-left text-sm">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <table className="table w-full min-w-[1000px] table-fixed text-left text-sm">
           <colgroup>
             <col className="w-48" />
             <col className="w-28" />
@@ -456,13 +456,13 @@ function LogsView({ queryString }: { queryString: string }) {
                     </td>
                     <td className="px-3 py-1.5 align-top text-xs">
                       <span
-                        className={`inline-block rounded px-2 py-0.5 font-medium ${LEVEL_COLORS[entryLevel]}`}
+                         className={`badge badge-sm font-medium ${LEVEL_COLORS[entryLevel]}`}
                       >
                         {entryLevel}
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs">
-                      <span className="inline-block rounded bg-muted px-2 py-0.5 text-muted-foreground">
+                       <span className="badge badge-ghost badge-sm text-muted-foreground">
                         {entry.failure_type ? FAILURE_TYPES[entry.failure_type] : "Unclassified"}
                       </span>
                     </td>
@@ -531,7 +531,7 @@ function LogsView({ queryString }: { queryString: string }) {
                                     setCopiedRow(null);
                                   });
                               }}
-                              className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
+                               className="btn btn-outline btn-xs gap-1.5"
                             >
                               {copiedRow === i ? (
                                 <Check className="h-3.5 w-3.5" aria-hidden="true" />
@@ -541,7 +541,7 @@ function LogsView({ queryString }: { queryString: string }) {
                               {copiedRow === i ? "Copied" : "Copy original log"}
                             </button>
                           </div>
-                          <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground">
+                           <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--code-background)] p-3 font-mono text-xs leading-relaxed text-[var(--code-foreground)]">
                             {formatLog(entry.log)}
                           </pre>
                         </div>
@@ -568,7 +568,7 @@ function LogsView({ queryString }: { queryString: string }) {
             goToPage(page - 1);
           }}
           disabled={loading || page === 1}
-          className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+           className="btn btn-outline btn-sm"
         >
           Previous
         </button>
@@ -579,7 +579,7 @@ function LogsView({ queryString }: { queryString: string }) {
             goToPage(page + 1);
           }}
           disabled={loading || !canGoNext}
-          className="rounded-md border border-border px-3 py-2 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+           className="btn btn-outline btn-sm"
         >
           Next
         </button>

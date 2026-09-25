@@ -70,7 +70,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
   if (isLoading || (isAuthenticated && !currentSessionState)) {
     return (
       <div className="flex h-full items-center justify-center" role="status" aria-live="polite">
-        <div className="text-muted-foreground animate-pulse">Loading…</div>
+        <div className="flex items-center gap-3 text-muted-foreground"><span className="loading loading-spinner loading-sm" />Loading…</div>
       </div>
     );
   }
@@ -79,7 +79,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
         <div
-          className="max-w-md rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center text-sm"
+          className="card max-w-md border border-border bg-card p-6 text-center text-sm"
           role="alert"
         >
           <p className="font-semibold text-destructive">Authentication unavailable</p>
@@ -99,12 +99,12 @@ export function AuthGuard({ children }: AuthGuardProps) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
         <div
-          className="max-w-md rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center text-sm"
+          className="card max-w-md border border-border bg-card p-6 text-center text-sm"
           role="alert"
         >
           <h1 className="font-semibold text-destructive">Access denied</h1>
           <p className="mt-1 text-muted-foreground">
-            Your account is authenticated but is not allowed to use Studio. Contact an administrator
+            Your account is authenticated but is not allowed to use neurwerk studio. Contact an administrator
             to request the studio-user role.
           </p>
           <button
@@ -113,7 +113,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
               void signoutRedirect();
             }}
             disabled={isSigningOut}
-            className="mt-4 rounded-md border border-border bg-background px-3 py-2 font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn btn-outline mt-4"
           >
             {isSigningOut ? "Logging out…" : "Log out and use another account"}
           </button>
