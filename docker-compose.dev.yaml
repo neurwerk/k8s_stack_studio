@@ -1,0 +1,192 @@
+name: studio-dev
+
+x-simulator: &simulator
+  image: studio-simulator:local
+  build:
+    context: .
+    dockerfile: dev/simulators/Dockerfile
+  volumes:
+    - ./.dev-local/tls:/tls:ro
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Run start_dev.sh}
+    volumes:
+      - keycloak-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U keycloak -d keycloak"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.5.6
+    command: [start-dev]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Run start_dev.sh}
+      KC_BOOTSTRAP_ADMIN_USERNAME: bootstrap-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run start_dev.sh}
+      KC_HOSTNAME: http://localhost:4081
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:4081:8080"
+    volumes:
+      - ./dev/keycloak-health.sh:/opt/dev/keycloak-health.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, bash, /opt/dev/keycloak-health.sh]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 40
+
+  keycloak-setup:
+    image: quay.io/keycloak/keycloak:26.5.6
+    entrypoint: [bash, /opt/dev/setup-keycloak.sh]
+    environment:
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run start_dev.sh}
+      DEV_USER_PASSWORD: ${DEV_USER_PASSWORD:?Run start_dev.sh}
+      BRIDGE_CLIENT_SECRET: ${BRIDGE_CLIENT_SECRET:?Run start_dev.sh}
+    volumes:
+      - ./dev/setup-keycloak.sh:/opt/dev/setup-keycloak.sh:ro
+      - ./dev/studio-client.json:/opt/dev/studio-client.json:ro
+      - ./dev/bridge-audience.json:/opt/dev/bridge-audience.json:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    restart: "no"
+
+  pii-sim:
+    <<: *simulator
+    command: [python, /app/server.py, pii]
+    healthcheck:
+      test: [CMD, python, /app/health.py, "8443"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  usage-sim:
+    <<: *simulator
+    command: [python, /app/server.py, usage]
+    healthcheck:
+      test: [CMD, python, /app/health.py, "15000"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  logs-sim:
+    <<: *simulator
+    command: [python, /app/server.py, logs]
+    environment:
+      STUDIO_LOGS_PASSWORD: ${STUDIO_LOGS_PASSWORD:?Run start_dev.sh}
+    healthcheck:
+      test: [CMD, python, /app/health.py, "9200"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  bridge:
+    image: ghcr.io/neurwerk/k8s-stack-keycloak-api-key-bridge:0.7.0
+    # This release publishes linux/amd64 only; Docker Desktop emulates it on ARM Macs.
+    platform: linux/amd64
+    environment:
+      KEYCLOAK_API_KEY_BRIDGE_KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_API_KEY_BRIDGE_KEYCLOAK_REALM: studio-dev
+      KEYCLOAK_API_KEY_BRIDGE_KEYCLOAK_ISSUER: http://localhost:4081/realms/studio-dev
+      KEYCLOAK_API_KEY_BRIDGE_KEYCLOAK_CLIENT_ID: studio-dev-bridge
+      KEYCLOAK_API_KEY_BRIDGE_KEYCLOAK_CLIENT_SECRET: ${BRIDGE_CLIENT_SECRET:?Run start_dev.sh}
+      KEYCLOAK_API_KEY_BRIDGE_DATABASE_URL: sqlite:////app/data/api_keys.db
+    volumes:
+      - bridge-data:/app/data
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      start_period: 10s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: dev/Dockerfile.api
+    environment:
+      K8S_STUDIO_KEYCLOAK_SERVER_URL: http://keycloak:8080
+      K8S_STUDIO_KEYCLOAK_REALM: studio-dev
+      K8S_STUDIO_KEYCLOAK_CLIENT_ID: studio
+      K8S_STUDIO_KEYCLOAK_API_KEY_BRIDGE_URL: http://bridge:8000
+      K8S_STUDIO_PII_ENGINE_URL: https://pii-sim:8443
+      K8S_STUDIO_PII_ENGINE_CA_CERT: /tls/ca.crt
+      K8S_STUDIO_PII_ENGINE_CLIENT_CERT: /tls/studio.crt
+      K8S_STUDIO_PII_ENGINE_CLIENT_KEY: /tls/studio.key
+      K8S_STUDIO_OPENSEARCH_URL: https://logs-sim:9200
+      K8S_STUDIO_OPENSEARCH_CA_CERT: /tls/ca.crt
+      K8S_STUDIO_OPENSEARCH_USER: studio-logs-read
+      K8S_STUDIO_OPENSEARCH_PASSWORD: ${STUDIO_LOGS_PASSWORD:?Run start_dev.sh}
+      K8S_STUDIO_AGENTGATEWAY_ADMIN_URL: http://usage-sim:15000
+    volumes:
+      - ./apps/api/src:/workspace/apps/api/src:ro
+      - ./.dev-local/tls:/tls:ro
+    ports:
+      - "127.0.0.1:4010:4010"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      bridge:
+        condition: service_healthy
+      pii-sim:
+        condition: service_healthy
+      logs-sim:
+        condition: service_healthy
+      usage-sim:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4010/api/version', timeout=3)"]
+      interval: 3s
+      timeout: 5s
+      start_period: 15s
+      retries: 30
+
+  web:
+    build:
+      context: .
+      dockerfile: dev/Dockerfile.web
+    environment:
+      OIDC_AUTHORITY: http://localhost:4081/realms/studio-dev
+      OIDC_CLIENT_ID: studio
+      STUDIO_API_URL: http://api:4010
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "127.0.0.1:3001:3000"
+    volumes:
+      - ./apps/web:/workspace/apps/web
+      - web-root-modules:/workspace/node_modules
+      - web-modules:/workspace/apps/web/node_modules
+      - web-next:/workspace/apps/web/.next
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/api/version').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 30
+
+volumes:
+  keycloak-data:
+  bridge-data:
+  web-root-modules:
+  web-modules:
+  web-next:

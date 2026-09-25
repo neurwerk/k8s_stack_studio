@@ -1,0 +1,10 @@
+{
+  "name": "studio-dev-bridge-audience",
+  "protocol": "openid-connect",
+  "protocolMapper": "oidc-audience-mapper",
+  "config": {
+    "included.client.audience": "studio-dev-bridge",
+    "access.token.claim": "true",
+    "id.token.claim": "false"
+  }
+}

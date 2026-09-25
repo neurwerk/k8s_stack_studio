@@ -50,45 +50,73 @@ environment-specific endpoints through `K8S_STUDIO_*` environment variables.
 
 ## Requirements
 
-- Node.js 22 or later
-- pnpm 9.15.4
-- Python 3.12
-- [uv](https://docs.astral.sh/uv/)
-
-The full application requires reachable OIDC and backend integrations. The API
-does not start unless its Keycloak authentication initialization succeeds, so
-Kubernetes retries it instead of exposing endpoints without initialized clients.
-Studio does not retrieve credentials or certificates from a cluster. Provide
-local certificate paths and credentials through your own ignored env file.
+Local development needs Docker Compose (default Docker context), Python 3, and
+OpenSSL on the host. Application runtimes run in containers. The API does not
+start unless Keycloak authentication initializes successfully.
 
 ## Local Development
 
-Install dependencies:
-
-```bash
-pnpm install
-uv sync --project apps/api --dev
-```
-
-Create `.env.local` from `.env.example`, replace the reserved example values,
-and provide paths to local PII Engine client certificates. Then start both
-applications:
+Start the isolated development stack:
 
 ```bash
 ./start_dev.sh
 ```
 
-The web application listens on `http://localhost:3000` and the API on
-`http://localhost:4010`. To work on the UI without starting the API, run:
+The web application listens on **http://localhost:3001**, the API on
+`http://localhost:4010`, and Keycloak on **http://localhost:4081**. Use
+`localhost` for login, matching the registered redirect and issuer. The first
+start creates ignored `.dev-local/credentials.env` and locally signed workload
+certificates under `.dev-local/tls/`; the `DEV_USER_PASSWORD` in that env file
+is the initial password for `developer`, `viewer`, and `no-access`. `developer`
+has all Studio feature roles and delegated Keycloak read access; `viewer` has
+only Studio admission; `no-access` has no Studio access. Existing passwords and
+API keys are retained on subsequent starts.
+
+The launcher waits for PostgreSQL, Keycloak, and the application, rerunning
+idempotent Keycloak configuration on each launch. `Ctrl+C` stops containers
+without deleting their volumes. Other commands:
 
 ```bash
-pnpm --filter web dev
+./start_dev.sh up --detach
+./start_dev.sh logs
+./start_dev.sh ps
+./start_dev.sh setup  # recheck realm and account setup
+./start_dev.sh stop
+./start_dev.sh down   # retains database and API-key volumes
 ```
 
+Keycloak and the API-key bridge are real services. The bridge persists keys in
+its own SQLite volume. Three separate dev-only services built from
+`dev/simulators/` provide synthetic responses for PII Engine, AgentGateway
+analytics, and OpenSearch. The browser always talks through Studio's ordinary
+authenticated API. The PII sample recognizes **only** the literal demo addresses
+`john@example.com` and `a@example.com` with `pass`, `mask`, or `block`; other
+actions return an explicit unsupported-sample result. It is not a policy
+validator or a real PII detector. Usage and logs are synthetic, including
+current example dates; they are not observations from a gateway or Kubernetes
+cluster. The PII connection still requires a
+locally signed Studio client certificate; OpenSearch uses verified local TLS
+and a generated basic-auth password. No cluster credentials are accessed.
+
+Optional automated local smoke check (requires host `uv` and Python 3.12):
+
+```bash
+uv run --project apps/api python dev/smoke.py
+uv run --project apps/api python dev/smoke.py --keys  # also creates and revokes a demo API key
+```
+
+The smoke check exercises browser-style PKCE login, Studio roles, the real
+bridge, and sample integrations without printing passwords or tokens. It does
+not replace visual browser testing.
+
+For direct host-based work on the web or API, install Node.js 22, pnpm 9.15.4,
+Python 3.12, and [uv](https://docs.astral.sh/uv/). `.env.example` describes the
+separate manual integration settings. `pnpm --filter web dev` alone runs the UI
+on port 3000, with its default proxy to `localhost:4010`.
+
 OpenSearch verifies TLS with the system trust store by default, or with the CA
-file configured by `K8S_STUDIO_OPENSEARCH_CA_CERT`. A self-signed loopback-only
-development endpoint may set `K8S_STUDIO_OPENSEARCH_ALLOW_INSECURE_LOCAL=true`.
-The API rejects that option for non-loopback hosts.
+file configured by `K8S_STUDIO_OPENSEARCH_CA_CERT`. The API rejects an insecure
+development option for non-loopback hosts.
 
 PII Engine also verifies its server certificate by default while always using
 the configured workload client certificate. Local development may explicitly

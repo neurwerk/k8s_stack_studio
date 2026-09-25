@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: "http://localhost:4010/api/:path*",
+        destination: `${process.env.STUDIO_API_URL ?? "http://localhost:4010"}/api/:path*`,
       },
     ];
   },

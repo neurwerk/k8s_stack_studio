@@ -62,3 +62,4 @@ Thumbs.db
 # Local artifacts
 *.log
 tmp/
+.dev-local/
