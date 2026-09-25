@@ -264,7 +264,9 @@ def search_logs(payload: dict) -> dict:
     for offset, (level, failure, message, namespace, pod) in enumerate(records):
         timestamp = now - timedelta(minutes=offset * 4)
         source = {
-            "@timestamp": timestamp.isoformat(),
+            "@timestamp": timestamp.isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            ),
             "log": message,
             "kubernetes": {
                 "namespace_name": namespace,
