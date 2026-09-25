@@ -30,6 +30,7 @@ from k8s_stack_studio.models.admin import (
     AdminGroupPage,
     AdminRolePage,
     AdminUserAccess,
+    UserGroups,
 )
 
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -260,3 +261,13 @@ async def get_user_access(
 ) -> AdminUserAccess:
     """Read a user's group membership plus direct and effective roles."""
     return await admin.get_user_access(user_id, _extract_bearer_token(request))
+
+
+@router.get("/users/me/groups")
+async def get_own_groups(
+    request: Request,
+    _: str = Depends(get_current_user_id),
+    admin: KeycloakAdminClient = Depends(get_keycloak_admin),
+) -> UserGroups:
+    """Read the verified caller's own Keycloak memberships, including LDAP-synced paths."""
+    return await admin.get_own_groups(_extract_bearer_token(request))

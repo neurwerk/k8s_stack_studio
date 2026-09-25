@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import { BarChart3, RefreshCw } from "lucide-react";
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Rectangle, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
 import { fetchUser } from "@/lib/api/admin";
 import { fetchAllDailyUsage, fetchUsagePeople, fetchUserDailyUsage } from "@/lib/api/usage";
 import type { UsageDateRange, UsagePeople, UserDailyUsage } from "@/lib/api/usage";
 import { useCurrentUserId, useHasRole, useIsKeycloakAdmin } from "@/lib/auth/roles";
-import { presetRange, rankPeople, usageSummary, validRange } from "@/lib/usage-dashboard";
+import { modelColor, modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
 import type { PersonMetric, UsagePreset } from "@/lib/usage-dashboard";
 
 const panel = "min-w-0 rounded-2xl border border-border bg-card p-4 shadow-sm dark:border-[#304159] dark:bg-[#1b2d43] sm:p-6";
@@ -54,7 +54,9 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [preset, setPreset] = useState<UsagePreset>("month");
   const [draftStart, setDraftStart] = useState("");
   const [draftEnd, setDraftEnd] = useState("");
-  const [metric, setMetric] = useState<PersonMetric>("total_tokens");
+  const [metric, setMetric] = useState<PersonMetric>("cost_usd");
+  const [modelMetric, setModelMetric] = useState<PersonMetric>("cost_usd");
+  const [trendMetric, setTrendMetric] = useState<PersonMetric>("cost_usd");
   const [refresh, setRefresh] = useState(0);
   const [result, setResult] = useState<UsageResult>();
   const [names, setNames] = useState<Record<string, string>>({});
@@ -121,7 +123,14 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const today = shown?.usage.today ?? result?.usage.today;
   const people = shown?.people?.users ?? [];
   const summary = shown ? usageSummary(shown.usage) : null;
+  const trend = shown && summary
+    ? modelTrend(shown.usage, summary.models.map((model) => model.model), trendMetric)
+    : [];
+  const topStackIndexes = trend.map((day) =>
+    summary?.models.findLastIndex((_, index) => Number(day[`model${String(index)}`]) > 0) ?? -1);
   const ranked = rankPeople(people, metric);
+  const rankedModels = rankModels(summary?.models ?? [], modelMetric);
+  const maxModelMetric = rankedModels[0]?.[modelMetric] ?? 0;
   const label = (id: string) => names[id] ?? (id === userId ? "You" : `${id.slice(0, 8)}…`);
   const activeIds = new Set(people.map((person) => person.user_id));
 
@@ -196,7 +205,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           </label>
           <button type="submit" className={`${control} hover:bg-muted`}>Apply</button>
           <span className="pb-2 text-xs text-muted-foreground">
-            {shown ? `${shown.usage.timezone} · Today is partial` : "Up to 90 days"}
+            {shown ? shown.usage.timezone : "Up to 90 days"}
           </span>
           {dateError && <p role="alert" className="w-full text-sm text-destructive">{dateError}</p>}
         </form>
@@ -227,15 +236,17 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               </div>
             ))}
           </section>
-          <p className={`${panel} text-sm text-muted-foreground`}>
-            <strong className="text-foreground">What do these numbers mean?</strong>{" "}
-            Requests are recorded gateway calls; tokens and USD are upstream-reported totals.
-            USD may omit unpriced requests. Dates follow {shown.usage.timezone}.
-          </p>
-
           <section className={panel} aria-label="Usage by model">
-            <h2 className="text-xl font-semibold">Models</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Usage totals for the selected range.</p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold">Models</h2>
+              <label className="text-xs text-muted-foreground">Rank by{" "}
+                <select className={control} value={modelMetric}
+                  onChange={(event) => { setModelMetric(event.target.value as PersonMetric); }}>
+                  <option value="total_tokens">Tokens</option><option value="cost_usd">USD</option>
+                  <option value="requests">Requests</option>
+                </select>
+              </label>
+            </div>
             <div className="mt-5 overflow-x-auto">
               <table className="w-full min-w-[640px] text-left text-sm">
                 <thead className="border-b border-border text-xs uppercase text-muted-foreground">
@@ -243,13 +254,13 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                     <th className="px-3 text-right">Reported USD</th><th className="pl-3 text-right">Requests</th></tr>
                 </thead>
                 <tbody>
-                  {summary.models.map((model) => (
+                  {rankedModels.map((model) => (
                     <tr key={model.model ?? "unknown"} className="border-b border-border/70 last:border-0">
                       <td className="max-w-xs py-3 pr-4 font-medium">
                         <span className="break-all">{model.model ?? "Unknown model"}</span>
                         <div className="mt-2 h-1.5 rounded-full bg-muted">
-                          <div className="h-full rounded-full bg-[#a5f3d0]" style={{ width: `${String(Math.max(2,
-                            model.total_tokens / Math.max(1, summary.models[0]?.total_tokens ?? 1) * 100))}%` }} />
+                          <div className="h-full rounded-full bg-[#a5f3d0]"
+                            style={{ width: usageBarWidth(model[modelMetric], maxModelMetric) }} />
                         </div>
                       </td>
                       <td className="px-3 text-right tabular-nums">{count(model.total_tokens)}</td>
@@ -284,47 +295,61 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                     title={person.user_id}>
                     <span className="truncate">{label(person.user_id)}</span>
                     <span className="h-3 rounded-full bg-muted"><span className="block h-full rounded-full bg-[#a5f3d0]"
-                      style={{ width: `${String(Math.max(2, person[metric] / Math.max(1, ranked[0]?.[metric] ?? 1) * 100))}%` }} /></span>
+                      style={{ width: usageBarWidth(person[metric], ranked[0]?.[metric] ?? 0) }} /></span>
                     <span className="text-right tabular-nums">{metric === "cost_usd" ? dollars(person.cost_usd) : count(person[metric])}</span>
                   </button>
                 ))}
                 {ranked.length === 0 && <p className="text-sm text-muted-foreground">No attributed users in this range.</p>}
               </div>
-              <p className="mt-4 text-xs text-muted-foreground">People are identified by verified gateway principals. Unattributed requests can appear in totals but not here.</p>
             </section>
           )}
 
-          <div className="grid gap-5 xl:grid-cols-2">
-            <section className={panel} aria-label="Token trend">
-              <h2 className="mb-4 text-xl font-semibold">Token trend</h2>
-              <div className="h-64 w-full min-w-0 sm:h-72">
+          <section className={panel} aria-label="Usage trend">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold">Usage Trend</h2>
+              <label className="text-xs text-muted-foreground">Show{" "}
+                <select className={control} value={trendMetric}
+                  onChange={(event) => { setTrendMetric(event.target.value as PersonMetric); }}>
+                  <option value="total_tokens">Tokens</option><option value="cost_usd">USD</option>
+                  <option value="requests">Requests</option>
+                </select>
+              </label>
+            </div>
+            {summary.models.length === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">No usage in this range.</p>
+            ) : (
+              <div className="mt-4 h-64 w-full min-w-0 sm:h-72"
+                aria-label={`Daily ${trendMetric === "cost_usd" ? "USD" : trendMetric === "requests" ? "requests" : "tokens"} by requested model`}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <AreaChart data={summary.daily} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <BarChart data={trend} accessibilityLayer margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                     <CartesianGrid vertical={false} stroke="var(--border)" />
-                    <XAxis dataKey="date" tickFormatter={dayLabel} minTickGap={24} tick={{ fontSize: 11 }} />
-                    <YAxis width={55} tickFormatter={(value: number) => new Intl.NumberFormat("en-US", { notation: "compact" }).format(value)} tick={{ fontSize: 11 }} />
-                    <Tooltip labelFormatter={(value) => typeof value === "string" ? value : typeof value === "number" ? String(value) : ""} formatter={(value) => [count(Number(value)), "Tokens"]} />
-                    <Area type="monotone" dataKey="total_tokens" stroke="#a5f3d0" fill="#a5f3d0" fillOpacity={0.2} isAnimationActive={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </section>
-            <section className={panel} aria-label="Request trend">
-              <h2 className="mb-4 text-xl font-semibold">Request trend</h2>
-              <div className="h-64 w-full min-w-0 sm:h-72">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <BarChart data={summary.daily} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke="var(--border)" />
-                    <XAxis dataKey="date" tickFormatter={dayLabel} minTickGap={24} tick={{ fontSize: 11 }} />
-                    <YAxis width={42} allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <Tooltip labelFormatter={(value) => typeof value === "string" ? value : typeof value === "number" ? String(value) : ""} formatter={(value) => [count(Number(value)), "Requests"]} />
-                    <Bar dataKey="requests" fill="#b7a4f7" radius={[4, 4, 0, 0]} maxBarSize={30} isAnimationActive={false} />
+                    <XAxis dataKey="date" tickFormatter={dayLabel} minTickGap={32}
+                      tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+                    <YAxis width={65} allowDecimals={trendMetric !== "requests"}
+                      tickFormatter={(value: number) => new Intl.NumberFormat("en-US", {
+                        notation: "compact", maximumFractionDigits: trendMetric === "cost_usd" ? 4 : trendMetric === "requests" ? 0 : 1,
+                        ...(trendMetric === "cost_usd" ? { style: "currency", currency: "USD" } : {}),
+                      }).format(value)} tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                      axisLine={false} tickLine={false} />
+                    <Tooltip
+                      cursor={{ fill: "var(--muted)", opacity: 0.3 }}
+                      contentStyle={{ background: "var(--card)", borderColor: "var(--border)", borderRadius: 8 }}
+                      labelFormatter={(value) => typeof value === "string" ? value : typeof value === "number" ? String(value) : ""}
+                      formatter={(value, name) => [trendMetric === "cost_usd" ? dollars(Number(value)) : count(Number(value)), String(name)]}
+                    />
+                    {summary.models.map((model, index) => (
+                      <Bar key={JSON.stringify(model.model)} name={model.model ?? "Unknown model"}
+                        dataKey={`model${String(index)}`} stackId="usage" fill={modelColor(model.model)}
+                        maxBarSize={36} isAnimationActive={false}
+                        shape={(props) => (
+                          <Rectangle {...props} radius={topStackIndexes[props.index] === index ? [4, 4, 0, 0] : 0} />
+                        )} />
+                    ))}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-            </section>
-          </div>
-
+            )}
+          </section>
           <section className={panel} aria-label="Daily usage">
             <h2 className="text-xl font-semibold">Daily usage</h2>
             <div className="mt-4 max-h-[32rem] overflow-auto">
@@ -335,7 +360,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                 </thead>
                 <tbody>{[...summary.daily].reverse().map((day) => (
                   <tr key={day.date} className="border-b border-border/70 last:border-0">
-                    <td className="py-3">{dayLabel(day.date)}{day.date === shown.usage.today ? " · Today (partial)" : ""}</td>
+                    <td className="py-3">{dayLabel(day.date)}</td>
                     <td className="px-3 text-right tabular-nums">{count(day.total_tokens)}</td>
                     <td className="px-3 text-right tabular-nums">{dollars(day.cost_usd)}</td>
                     <td className="pl-3 text-right tabular-nums">{count(day.requests)}</td>

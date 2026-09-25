@@ -264,7 +264,7 @@ def policy_result(payload: dict, *, evaluate: bool) -> dict:
 
 
 def search_logs(payload: dict) -> dict:
-    """Apply Studio's search filters to a few synthetic recent pod records."""
+    """Apply Studio's search filters to pageable synthetic recent pod records."""
     now = datetime.now(UTC)
     records = [
         ("INFO", None, "Studio dev environment started", "studio-dev", "studio-api"),
@@ -288,7 +288,12 @@ def search_logs(payload: dict) -> dict:
         None,
     )
     hits = []
-    for offset, (level, failure, message, namespace, pod) in enumerate(records):
+    for offset in range(225):
+        if offset < len(records):
+            level, failure, message, namespace, pod = records[offset]
+        else:
+            level, failure, namespace, pod = "INFO", None, "studio-dev", "studio-api"
+            message = f"Synthetic background log event {offset + 1}"
         timestamp = now - timedelta(minutes=offset * 4)
         source = {
             "@timestamp": timestamp.isoformat(timespec="milliseconds").replace(

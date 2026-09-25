@@ -67,6 +67,11 @@ export interface AdminUserAccess {
   effective_realm_roles: AdminRole[];
 }
 
+export interface UserGroups {
+  groups: AdminGroup[];
+  groups_truncated: boolean;
+}
+
 export interface AdminGroupDetail {
   group: AdminGroup;
   subgroups: AdminGroup[];
@@ -245,6 +250,10 @@ export function fetchRealmRoles(
 
 export function fetchUserAccess(userId: string): Promise<AdminUserAccess> {
   return apiGet<AdminUserAccess>(`/admin/users/${encodeURIComponent(userId)}/access`);
+}
+
+export function fetchOwnGroups(): Promise<UserGroups> {
+  return apiGet<UserGroups>("/users/me/groups");
 }
 
 export function fetchClientAccess(clientId: string): Promise<AdminClientAccess> {

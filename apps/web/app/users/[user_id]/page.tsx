@@ -7,16 +7,21 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ApiKeyManager } from "@/components/api-key-manager";
-import { UserUsage } from "@/components/user-usage";
 import { UserAccess } from "@/components/user-access";
-import { fetchUser } from "@/lib/api/admin";
+import { fetchOwnGroups, fetchUser, fetchUserAccess } from "@/lib/api/admin";
 import {
   useCurrentUserId,
-  useHasRole,
   useIsApiKeyAdmin,
   useIsKeycloakAdmin,
+  useUserRoles,
 } from "@/lib/auth/roles";
-import type { KeycloakUser } from "@/lib/api/admin";
+import type { AdminUserAccess, KeycloakUser, UserGroups } from "@/lib/api/admin";
+
+function visibleRoles(roles: string[]): string[] {
+  return [...new Set(roles.filter((role) =>
+    role !== "offline_access" && role !== "uma_authorization" &&
+    !role.startsWith("default-roles-")))].sort();
+}
 
 export default function UserDetailPage() {
   const params = useParams();
@@ -24,16 +29,19 @@ export default function UserDetailPage() {
   const currentUserId = useCurrentUserId();
   const isKeycloakAdmin = useIsKeycloakAdmin();
   const isApiKeyAdmin = useIsApiKeyAdmin();
-  const isUsageAdmin = useHasRole("langfuse-admin");
+  const ownRoles = useUserRoles();
 
   const [user, setUser] = useState<KeycloakUser | null>(null);
+  const [accessResult, setAccessResult] = useState<{ userId: string; data: AdminUserAccess } | null>(null);
+  const [accessErrorUserId, setAccessErrorUserId] = useState<string | null>(null);
+  const [ownGroupsResult, setOwnGroupsResult] = useState<{ userId: string; data: UserGroups } | null>(null);
+  const [ownGroupsErrorUserId, setOwnGroupsErrorUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const isSelf = currentUserId === userId;
   const canViewProfile = isSelf || isKeycloakAdmin;
   const canManageKeys = isSelf || isApiKeyAdmin;
-  const canViewUsage = isSelf || isUsageAdmin;
 
   useEffect(() => {
     if (!canViewProfile) {
@@ -53,8 +61,47 @@ export default function UserDetailPage() {
       });
   }, [userId, canViewProfile]);
 
+  useEffect(() => {
+    if (!isKeycloakAdmin) return;
+    let cancelled = false;
+    void fetchUserAccess(userId)
+      .then((data) => {
+        if (!cancelled) {
+          setAccessResult({ userId, data });
+          setAccessErrorUserId(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setAccessErrorUserId(userId);
+      });
+    return () => { cancelled = true; };
+  }, [isKeycloakAdmin, userId]);
+
+  useEffect(() => {
+    if (!isSelf || isKeycloakAdmin) return;
+    let cancelled = false;
+    void fetchOwnGroups()
+      .then((data) => {
+        if (!cancelled) {
+          setOwnGroupsResult({ userId, data });
+          setOwnGroupsErrorUserId(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setOwnGroupsErrorUserId(userId);
+      });
+    return () => { cancelled = true; };
+  }, [isSelf, isKeycloakAdmin, userId]);
+
+  const access = accessResult?.userId === userId ? accessResult.data : null;
+  const ownGroups = ownGroupsResult?.userId === userId ? ownGroupsResult.data : null;
+  const groups = isKeycloakAdmin ? access?.groups : ownGroups?.groups;
+  const groupsTruncated = isKeycloakAdmin ? access?.groups_truncated : ownGroups?.groups_truncated;
+  const groupsUnavailable = (isKeycloakAdmin ? accessErrorUserId : ownGroupsErrorUserId) === userId;
+  const roles = visibleRoles(isSelf ? ownRoles : access?.effective_realm_roles.map((role) => role.name) ?? []);
+
   // 403
-  if (!canViewProfile && !canManageKeys && !canViewUsage) {
+  if (!canViewProfile && !canManageKeys) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
@@ -74,7 +121,7 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && loading && !canManageKeys && !canViewUsage) {
+  if (canViewProfile && loading && !canManageKeys) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -82,7 +129,7 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && error && !canManageKeys && !canViewUsage) {
+  if (canViewProfile && error && !canManageKeys) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
@@ -93,7 +140,7 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && !loading && !error && !user && !canManageKeys && !canViewUsage) {
+  if (canViewProfile && !loading && !error && !user && !canManageKeys) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         User not found
@@ -132,7 +179,7 @@ export default function UserDetailPage() {
             </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+          <div className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
             <div>
               <p className="text-muted-foreground">Email</p>
               <p>{user.email || "—"}</p>
@@ -142,9 +189,28 @@ export default function UserDetailPage() {
               <p className="font-mono text-xs">{user.id}</p>
             </div>
             <div>
+              <p className="text-muted-foreground">Roles</p>
+              {roles.length > 0 ? (
+                <ul className="mt-1 flex flex-wrap gap-1.5">
+                  {roles.map((role) => (
+                    <li key={role} className="rounded-md border border-border bg-muted px-2 py-0.5 text-xs">
+                      {role}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {!isSelf && !access && accessErrorUserId !== userId ? "Loading roles…" :
+                    accessErrorUserId === userId ? "Unable to load roles." : "No roles assigned."}
+                </p>
+              )}
+            </div>
+            <div>
               <p className="text-muted-foreground">Created</p>
               <p>{new Date(user.createdTimestamp).toLocaleDateString()}</p>
             </div>
+            <UserAccess groups={groups} groupsTruncated={groupsTruncated ?? false}
+              error={groupsUnavailable} canViewGroup={isKeycloakAdmin} />
           </div>
         </div>
       ) : canManageKeys ? (
@@ -154,20 +220,11 @@ export default function UserDetailPage() {
             Manage API keys for user <span className="break-all font-mono text-xs">{userId}</span>.
           </p>
         </div>
-      ) : (
-        <div className="rounded-lg border border-border bg-card p-6">
-          <h1 className="text-xl font-semibold">User usage</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Usage for user <span className="break-all font-mono text-xs">{userId}</span>.
-          </p>
-        </div>
-      )}
+      ) : null}
 
       {(user || canManageKeys) && (
         <ApiKeyManager userId={user?.id ?? userId} canManage={canManageKeys} />
       )}
-      {isKeycloakAdmin && user && <UserAccess key={user.id} userId={user.id} />}
-      {canViewUsage && <UserUsage userId={user?.id ?? userId} />}
     </div>
   );
 }

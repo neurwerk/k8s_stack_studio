@@ -99,6 +99,13 @@ class AdminUserAccess(AdminModel):
     effective_realm_roles: list[AdminRole]
 
 
+class UserGroups(AdminModel):
+    """Bounded memberships visible to the signed-in user."""
+
+    groups: list[AdminGroup]
+    groups_truncated: bool
+
+
 class AdminGroupDetail(AdminModel):
     """Describe one group's hierarchy, members, and role mappings."""
 

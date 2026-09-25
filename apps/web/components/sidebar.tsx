@@ -2,14 +2,14 @@
 
 import {
   BarChart3,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  FolderTree,
-  Key,
+  KeyRound,
   LogOut,
   ScrollText,
+  Settings,
   Shield,
-  ShieldCheck,
   User,
   Users,
 } from "lucide-react";
@@ -28,98 +28,155 @@ import {
 
 interface NavItemsProps {
   collapsed: boolean;
+  onExpand: () => void;
 }
 
-function NavItems({ collapsed }: NavItemsProps) {
+function NavItems({ collapsed, onExpand }: NavItemsProps) {
   const pathname = usePathname();
+  const auth = useAuth();
   const isAdmin = useIsKeycloakAdmin();
   const isOpensearchAdmin = useIsOpensearchAdmin();
   const isPiiAdmin = useIsPiiAdmin();
   const currentUserId = useCurrentUserId();
-
-  // Admin-only items
-  const adminItems = isAdmin
-    ? [
-        { href: "/users", label: "Users", icon: Users },
-        { href: "/groups", label: "Groups", icon: FolderTree },
-        { href: "/roles", label: "Realm Roles", icon: ShieldCheck },
-        { href: "/clients", label: "Clients", icon: Key },
-      ]
-    : [];
-
-  // Logs viewer (opensearch-admin role)
-  const logsItems = isOpensearchAdmin ? [{ href: "/logs", label: "Logs", icon: ScrollText }] : [];
-
-  // Personal items (always visible for authenticated users)
-  const personalItems = currentUserId
-    ? [
-        {
-          href: `/users/${currentUserId}`,
-          label: "My Profile",
-          icon: User,
-        },
-      ]
-    : [];
-
-  const mainItems = [
-    { href: "/usage", label: "Usage", icon: BarChart3 },
-    ...(isPiiAdmin ? [{ href: "/policy-engine", label: "PII Policy", icon: Shield }] : []),
-    ...logsItems,
-    ...adminItems,
-  ];
-
-  const hasPersonalSection = personalItems.length > 0;
+  const [configurationOpen, setConfigurationOpen] = useState(pathname === "/policy-engine");
 
   return (
     <>
       {/* Main navigation */}
       <nav className="flex-1 space-y-1 p-2">
-        {mainItems.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                isActive
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+        <Link
+          href="/usage"
+          className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+            pathname === "/usage"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+              : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+          }`}
+        >
+          <BarChart3 className="h-5 w-5 shrink-0" />
+          {!collapsed && <span className="hidden sm:inline">Usage</span>}
+        </Link>
+        {!isAdmin && !isOpensearchAdmin && (
+          <span
+            aria-disabled="true"
+            title="API Keys (coming soon)"
+            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/40"
+          >
+            <KeyRound className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">API Keys</span>}
+          </span>
+        )}
+        {isAdmin && (
+          <Link
+            href="/users"
+            className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              pathname === "/users"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            }`}
+          >
+            <Users className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">Users</span>}
+          </Link>
+        )}
+        {isOpensearchAdmin && (
+          <Link
+            href="/logs"
+            className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              pathname === "/logs"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            }`}
+          >
+            <ScrollText className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">Logs</span>}
+          </Link>
+        )}
+      </nav>
+
+      {/* Settings */}
+      <div className="border-t border-sidebar-border p-2">
+        {!collapsed && (
+          <p className="hidden px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50 sm:block">
+            Settings
+          </p>
+        )}
+        {currentUserId && (
+          <Link
+            href={`/users/${currentUserId}`}
+            aria-label="Profile"
+            className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              pathname === `/users/${currentUserId}`
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            }`}
+          >
+            <User className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">Profile</span>}
+          </Link>
+        )}
+        {isPiiAdmin && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                if (collapsed) {
+                  onExpand();
+                  setConfigurationOpen(true);
+                } else {
+                  setConfigurationOpen(!configurationOpen);
+                }
+              }}
+              aria-expanded={configurationOpen}
+              aria-controls="sidebar-configuration"
+              aria-label="Configuration"
+              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                pathname === "/policy-engine"
+                  ? "text-sidebar-accent-foreground font-medium"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
               }`}
             >
-              <item.icon className="h-5 w-5 shrink-0" />
-              {!collapsed && <span className="hidden sm:inline">{item.label}</span>}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Personal section */}
-      {hasPersonalSection && (
-        <div className="border-t border-sidebar-border p-2">
-          {!collapsed && (
-            <p className="hidden px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50 sm:block">
-              Personal
-            </p>
-          )}
-          {personalItems.map((item) => {
-            const isActive = pathname === item.href;
-            return (
+              <Settings className="h-5 w-5 shrink-0" />
+              {!collapsed && (
+                <>
+                  <span className="hidden flex-1 text-left sm:inline">Configuration</span>
+                  {configurationOpen ? (
+                    <ChevronDown className="hidden h-4 w-4 sm:block" />
+                  ) : (
+                    <ChevronRight className="hidden h-4 w-4 sm:block" />
+                  )}
+                </>
+              )}
+            </button>
+            <div
+              id="sidebar-configuration"
+              hidden={!configurationOpen}
+              className={collapsed ? "" : "sm:pl-5"}
+            >
               <Link
-                key={item.href}
-                href={item.href}
+                href="/policy-engine"
+                aria-label="PII Policy"
                 className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                  isActive
+                  pathname === "/policy-engine"
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                 }`}
               >
-                <item.icon className="h-5 w-5 shrink-0" />
-                {!collapsed && <span className="hidden sm:inline">{item.label}</span>}
+                <Shield className="h-5 w-5 shrink-0" />
+                {!collapsed && <span className="hidden sm:inline">PII Policy</span>}
               </Link>
-            );
-          })}
-        </div>
-      )}
+            </div>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => auth.signoutRedirect()}
+          className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+          aria-label="Logout"
+        >
+          <LogOut className="h-5 w-5 shrink-0" />
+          {!collapsed && <span className="hidden sm:inline">Logout</span>}
+        </button>
+      </div>
     </>
   );
 }
@@ -163,7 +220,6 @@ function VersionFooter({ collapsed }: { collapsed: boolean }) {
 
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
-  const auth = useAuth();
 
   return (
     <aside
@@ -189,21 +245,7 @@ export function Sidebar() {
         </button>
       </div>
 
-      <NavItems collapsed={collapsed} />
-
-      {/* Log out */}
-      <div className="border-t border-sidebar-border p-2">
-        <button
-          onClick={() => auth.signoutRedirect()}
-          className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors ${
-            collapsed ? "justify-center px-0" : ""
-          }`}
-          aria-label="Log out"
-        >
-          <LogOut className="h-5 w-5 shrink-0" />
-          {!collapsed && <span className="hidden sm:inline">Log out</span>}
-        </button>
-      </div>
+      <NavItems collapsed={collapsed} onExpand={() => setCollapsed(false)} />
 
       <VersionFooter collapsed={collapsed} />
     </aside>

@@ -163,7 +163,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
   };
 
   return (
-    <section className="mt-6" aria-labelledby="api-keys-heading">
+    <section className="mt-6 rounded-lg border border-border bg-card p-6" aria-labelledby="api-keys-heading">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 id="api-keys-heading" className="text-lg font-semibold tracking-tight">
           API Keys
