@@ -150,7 +150,7 @@ pnpm-workspace.yaml               ← apps/*
 
 ## Architecture
 
-1. Next.js proxies `/api/*` → `localhost:4010` (configured in `next.config.ts`)
+1. Next.js proxies `/api/*` → `localhost:4010` by default, or `STUDIO_API_URL` in Compose (`next.config.ts`)
 2. FastAPI admits operational routes only after Keycloak verifies a JWT with the `studio-user` realm role; feature routes retain their focused leaf-role checks
 3. The policy-engine endpoints proxy directly to PII Engine v1 over workload mTLS; human JWTs are not forwarded
 4. Policy evaluation is deterministic and model-free; Studio displays the Engine's transformed request, simulated model-facing echo, restored user response, and bounded diagnostics
@@ -172,19 +172,15 @@ pnpm-workspace.yaml               ← apps/*
 ## Local development
 
 ```bash
-# Install JS dependencies
-pnpm install
-
-# Install Python dependencies
-cd apps/api && uv sync --dev && cd ../..
-
-# Configure explicit local endpoints and certificate paths
-cp .env.example .env.local
-
-# Run both apps
+# Start isolated containers with local Keycloak, bridge, and sample integrations
 ./start_dev.sh
-# → Next.js on http://localhost:3000
+# → Next.js on http://localhost:3001
 # → FastAPI on http://localhost:4010
+# → Keycloak on http://localhost:4081
+
+# For host-side validation, install JS and Python dependencies first:
+pnpm install --frozen-lockfile
+uv sync --project apps/api --dev
 
 # Python linting & tests (from apps/api/)
 uv run ruff check

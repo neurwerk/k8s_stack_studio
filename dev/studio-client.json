@@ -1,0 +1,31 @@
+{
+  "clientId": "studio",
+  "name": "Studio local development",
+  "enabled": true,
+  "protocol": "openid-connect",
+  "publicClient": true,
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": false,
+  "fullScopeAllowed": true,
+  "redirectUris": ["http://localhost:3001/auth/callback"],
+  "webOrigins": ["http://localhost:3001"],
+  "attributes": {
+    "pkce.code.challenge.method": "S256",
+    "post.logout.redirect.uris": "http://localhost:3001/"
+  },
+  "defaultClientScopes": ["basic", "web-origins", "acr", "roles", "profile", "email"],
+  "protocolMappers": [
+    {
+      "name": "studio-dev-bridge-audience",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-audience-mapper",
+      "config": {
+        "included.client.audience": "studio-dev-bridge",
+        "access.token.claim": "true",
+        "id.token.claim": "false"
+      }
+    }
+  ]
+}
