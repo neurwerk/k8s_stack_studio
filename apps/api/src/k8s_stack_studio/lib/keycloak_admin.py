@@ -14,6 +14,7 @@ Uses the shared httpx.AsyncClient from the app lifespan for connection pooling.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -39,6 +40,7 @@ from k8s_stack_studio.models.admin import (
 )
 
 _logger = logging.getLogger(__name__)
+MAX_ACCOUNT_GROUPS_BYTES = 256 * 1024
 
 
 class InvalidKeycloakResponseError(ValueError):
@@ -323,14 +325,25 @@ class KeycloakAdminClient:
         if not self._base_url.startswith("https://"):
             headers["X-Forwarded-Proto"] = "https"
         try:
-            response = await self._client.get(
-                url, headers=headers, params={"briefRepresentation": "true"}
-            )
-            response.raise_for_status()
+            # Keycloak's Account API does not paginate /account/groups. Bound
+            # the response before parsing, rather than trusting LDAP group size.
+            async with self._client.stream(
+                "GET",
+                url,
+                headers=headers,
+                params={"briefRepresentation": "true"},
+                timeout=5,
+            ) as response:
+                response.raise_for_status()
+                payload = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(payload) + len(chunk) > MAX_ACCOUNT_GROUPS_BYTES:
+                        raise InvalidKeycloakResponseError
+                    payload.extend(chunk)
         except httpx.HTTPError as exc:
             _logger.exception("Keycloak account groups request failed")
             raise RuntimeError("Keycloak account groups request failed") from exc  # noqa: TRY003
-        groups = _items(response.json())
+        groups = _items(json.loads(payload))
         for item in groups[:25]:
             if not _text(item, "path").startswith("/"):
                 raise InvalidKeycloakResponseError
