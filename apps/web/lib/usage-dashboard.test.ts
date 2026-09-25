@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { UserDailyUsage } from "@/lib/api/usage";
-import { presetRange, rankPeople, usageSummary, validRange } from "@/lib/usage-dashboard";
+import { modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
 
 describe("usage dashboard calendar and aggregation", () => {
   it("uses calendar labels through month and daylight-saving boundaries", () => {
@@ -33,6 +33,18 @@ describe("usage dashboard calendar and aggregation", () => {
     expect(result.totals.cost_usd).toBeCloseTo(0.3);
     expect(result.models.map((model) => model.model)).toEqual(["model-a", null]);
     expect(result.daily[1]).toEqual({ date: "2026-03-30", requests: 0, total_tokens: 0, cost_usd: 0 });
+    const models = result.models.map((model) => model.model);
+    expect(modelTrend(usage, models, "cost_usd")).toEqual([
+      { date: "2026-03-29", model0: 0.2, model1: 0 },
+      { date: "2026-03-30", model0: 0, model1: 0 },
+      { date: "2026-03-31", model0: 0.1, model1: 0 },
+    ]);
+    expect(modelTrend(usage, models, "total_tokens")[0]).toEqual({
+      date: "2026-03-29", model0: 100, model1: 50,
+    });
+    expect(modelTrend(usage, models, "requests")[0]).toEqual({
+      date: "2026-03-29", model0: 2, model1: 1,
+    });
     const people = [
       { user_id: "user-b", requests: 3, total_tokens: 20, cost_usd: 2 },
       { user_id: "user-a", requests: 1, total_tokens: 100, cost_usd: 1 },
@@ -40,5 +52,16 @@ describe("usage dashboard calendar and aggregation", () => {
     expect(rankPeople(people, "total_tokens").map((person) => person.user_id)).toEqual(["user-a", "user-b"]);
     expect(rankPeople(people, "cost_usd").map((person) => person.user_id)).toEqual(["user-b", "user-a"]);
     expect(people.map((person) => person.user_id)).toEqual(["user-b", "user-a"]);
+    const modelTotals = [
+      { model: "expensive", requests: 2, total_tokens: 10, cost_usd: 1 },
+      { model: "busy", requests: 8, total_tokens: 100, cost_usd: 0.2 },
+    ];
+    expect(rankModels(modelTotals, "cost_usd").map((model) => model.model)).toEqual(["expensive", "busy"]);
+    expect(rankModels(modelTotals, "total_tokens").map((model) => model.model)).toEqual(["busy", "expensive"]);
+    expect(rankModels(modelTotals, "requests").map((model) => model.model)).toEqual(["busy", "expensive"]);
+    expect(modelTotals[0]?.model).toBe("expensive");
+    expect(usageBarWidth(0.02, 0.02)).toBe("100%");
+    expect(usageBarWidth(0.01, 0.02)).toBe("50%");
+    expect(usageBarWidth(0, 0.02)).toBe("0%");
   });
 });

@@ -35,6 +35,7 @@ from k8s_stack_studio.models.admin import (
     AdminRolePage,
     AdminUserAccess,
     AdminUserSummary,
+    UserGroups,
 )
 
 _logger = logging.getLogger(__name__)
@@ -309,6 +310,33 @@ class KeycloakAdminClient:
             effective_realm_roles=sorted(
                 (_role(item) for item in _items(effective_raw)), key=lambda role: role.name
             ),
+        )
+
+    async def get_own_groups(self, user_token: str) -> UserGroups:
+        """Read only the caller's groups from Keycloak's account API.
+
+        The endpoint derives the subject from the forwarded token; Studio never
+        accepts a target user ID for this self-service request.
+        """
+        url = f"{self._base_url}/realms/{self._realm}/account/groups"
+        headers = {"Authorization": f"Bearer {user_token}", "Accept": "application/json"}
+        if not self._base_url.startswith("https://"):
+            headers["X-Forwarded-Proto"] = "https"
+        try:
+            response = await self._client.get(
+                url, headers=headers, params={"briefRepresentation": "true"}
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            _logger.exception("Keycloak account groups request failed")
+            raise RuntimeError("Keycloak account groups request failed") from exc  # noqa: TRY003
+        groups = _items(response.json())
+        for item in groups[:25]:
+            if not _text(item, "path").startswith("/"):
+                raise InvalidKeycloakResponseError
+        return UserGroups(
+            groups=[_group(item) for item in groups[:25]],
+            groups_truncated=len(groups) > 25,
         )
 
     async def get_group_access(self, group_id: str, user_token: str) -> AdminGroupDetail:

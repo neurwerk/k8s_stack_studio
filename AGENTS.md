@@ -16,6 +16,7 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `GET /api/logs` | `studio-user`, `opensearch-admin` | Search pod logs via OpenSearch (newest 100 by default; text, Kubernetes, classification, time, size, offset, and index filters) |
 | `GET /api/admin/users`, `GET /api/admin/clients` | `studio-user`, `keycloak-admin` | Keycloak administration |
 | `GET /api/admin/groups`, `GET /api/admin/roles` | `studio-user`, `keycloak-admin` | Read-only Keycloak groups and realm roles |
+| `GET /api/users/me/groups` | `studio-user` | Bounded full-path memberships from the caller's Keycloak account; requires Keycloak account groups permission |
 | Admin user, group, and client access routes | `studio-user`, `keycloak-admin` | Read-only memberships, role mappings, client roles, and service-account access |
 | `GET /api/admin/recent-signins` | `studio-user`, `keycloak-admin` | Read-only seven-day successful LOGIN summary for up to 25 user IDs |
 | `GET /api/users/{user_id}/usage` | `studio-user`, self or `langfuse-admin` | Calls, total tokens, and USD cost from AgentGateway private analytics |
@@ -179,6 +180,9 @@ pnpm-workspace.yaml               ← apps/*
 # → Next.js on http://localhost:3001
 # → FastAPI on http://localhost:4010
 # → Keycloak on http://localhost:4081
+
+# Local setup automatically grants account/view-groups and assigns the demo
+# users three representative full-path Keycloak groups; no LDAP connection is used.
 
 # For host-side validation, install JS and Python dependencies first:
 pnpm install --frozen-lockfile

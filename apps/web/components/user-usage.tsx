@@ -6,6 +6,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { fetchUserDailyUsage } from "@/lib/api/usage";
 import type { UsageDateRange, UserDailyUsage } from "@/lib/api/usage";
+import { modelColor } from "@/lib/usage-dashboard";
 
 const POLL_INTERVAL_MS = 30_000;
 const DAY_MS = 86_400_000;
@@ -30,13 +31,6 @@ function formatDate(date: string): string {
     day: "numeric",
     timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00Z`));
-}
-
-function modelColor(model: string | null): string {
-  if (model === null) return "#94a3b8";
-  let hash = 0;
-  for (const character of model) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) | 0;
-  return `hsl(${String((hash >>> 0) % 360)} 65% 60%)`;
 }
 
 function DateRangeSelector({

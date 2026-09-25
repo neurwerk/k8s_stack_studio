@@ -165,7 +165,8 @@ function LogsView({ queryString }: { queryString: string }) {
   );
   const page = Math.floor((initial.filter.offset ?? 0) / PAGE_SIZE) + 1;
   const lastVisibleEntry = Math.min(page * PAGE_SIZE, total);
-  const canGoNext = lastVisibleEntry < Math.min(total, MAX_RESULTS);
+  const pageCount = Math.max(1, Math.min(Math.ceil(total / PAGE_SIZE), MAX_RESULTS / PAGE_SIZE));
+  const canGoNext = page < pageCount;
 
   const toggleRow = (i: number) => {
     setExpandedRows((prev) => {
@@ -571,7 +572,7 @@ function LogsView({ queryString }: { queryString: string }) {
         >
           Previous
         </button>
-        <span className="text-sm text-muted-foreground">Page {page}</span>
+        <span className="text-sm text-muted-foreground">Page {page} of {pageCount}</span>
         <button
           type="button"
           onClick={() => {

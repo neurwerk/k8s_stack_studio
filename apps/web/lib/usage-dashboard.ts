@@ -1,6 +1,7 @@
-import type { UsageDateRange, UserDailyUsage, UsagePerson } from "@/lib/api/usage";
+import type { DailyModelUsage, UsageDateRange, UserDailyUsage, UsagePerson } from "@/lib/api/usage";
 
 export type UsagePreset = "month" | "7d" | "30d" | "last_month" | "custom";
+export type PersonMetric = "total_tokens" | "cost_usd" | "requests";
 
 const DAY_MS = 86_400_000;
 
@@ -53,9 +54,40 @@ export function usageSummary(usage: UserDailyUsage) {
   };
 }
 
-export type PersonMetric = "total_tokens" | "cost_usd" | "requests";
+/** Keep model colors stable across the dashboard and the per-user chart. */
+export function modelColor(model: string | null): string {
+  if (model === null) return "#94a3b8";
+  let hash = 0;
+  for (const character of model) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) | 0;
+  return `hsl(${String((hash >>> 0) % 360)} 65% 60%)`;
+}
+
+/** One stack per requested model, preserving empty dates and unknown models. */
+export function modelTrend(
+  usage: UserDailyUsage, models: (string | null)[], metric: PersonMetric,
+): ({ date: string } & Record<string, string | number>)[] {
+  return usage.days.map((day) => ({
+    date: day.date,
+    ...Object.fromEntries(models.map((model, index) => [
+      `model${String(index)}`,
+      day.models.find((entry) => entry.model === model)?.[metric] ?? 0,
+    ])),
+  }));
+}
 
 /** Highest usage first; the opaque ID gives ties a stable order. */
 export function rankPeople(people: UsagePerson[], metric: PersonMetric): UsagePerson[] {
   return [...people].sort((a, b) => b[metric] - a[metric] || a.user_id.localeCompare(b.user_id));
+}
+
+/** Rank requested models without changing the order used by the stacked trend. */
+export function rankModels(models: DailyModelUsage[], metric: PersonMetric): DailyModelUsage[] {
+  return [...models].sort((a, b) => b[metric] - a[metric] ||
+    (a.model ?? "").localeCompare(b.model ?? ""));
+}
+
+/** Compare against the largest real value, including USD amounts below one dollar. */
+export function usageBarWidth(value: number, largest: number): string {
+  if (largest <= 0 || value <= 0) return "0%";
+  return `${String(Math.max(2, value / largest * 100))}%`;
 }

@@ -63,6 +63,7 @@ for role in llm:invoke model:demo-model:invoke; do
 done
 
 realm_management_id="$(kc get clients -r "$realm" -q clientId=realm-management --fields id --format csv --noquotes)"
+account_id="$(kc get clients -r "$realm" -q clientId=account --fields id --format csv --noquotes)"
 service_id="$(kc get "clients/$bridge_id/service-account-user" -r "$realm" --fields id --format csv --noquotes)"
 kc add-roles -r "$realm" --uid "$service_id" --cid "$realm_management_id" \
   --rolename view-users --rolename query-users --rolename view-clients
@@ -81,6 +82,7 @@ for name in developer viewer no-access; do
   if [[ "$name" == developer ]]; then developer_id="$user_id"; fi
   if [[ "$name" == viewer ]]; then viewer_id="$user_id"; fi
   kc add-roles -r "$realm" --uid "$user_id" --rolename studio-user
+  kc add-roles -r "$realm" --uid "$user_id" --cid "$account_id" --rolename view-groups
   if [[ "$name" == developer ]]; then
     kc add-roles -r "$realm" --uid "$user_id" --rolename pii-admin \
       --rolename opensearch-admin --rolename keycloak-admin \
@@ -91,6 +93,49 @@ for name in developer viewer no-access; do
     kc add-roles -r "$realm" --uid "$user_id" --cid "$gateway_id" \
       --rolename llm:invoke --rolename model:demo-model:invoke
   fi
+done
+
+# Local Keycloak has no LDAP connector. Mirror three representative child paths
+# so both demo accounts exercise the same full-path group display as synced users.
+ensure_group() {
+  local parent_id="$1" group_name="$2" id
+  if [[ -z "$parent_id" ]]; then
+    id="$(kc get groups -r "$realm" -q search="$group_name" \
+      --fields id,name --format csv --noquotes |
+      while IFS=, read -r candidate_id candidate_name; do
+        if [[ "$candidate_name" == "$group_name" ]]; then
+          printf '%s\n' "$candidate_id"
+          break
+        fi
+      done)"
+    if [[ -z "$id" ]]; then id="$(kc create groups -r "$realm" -s name="$group_name" -i)"; fi
+  else
+    id="$(kc get "groups/$parent_id/children" -r "$realm" -q search="$group_name" \
+      --fields id,name --format csv --noquotes |
+      while IFS=, read -r candidate_id candidate_name; do
+        if [[ "$candidate_name" == "$group_name" ]]; then
+          printf '%s\n' "$candidate_id"
+          break
+        fi
+      done)"
+    if [[ -z "$id" ]]; then
+      id="$(kc create "groups/$parent_id/children" -r "$realm" -s name="$group_name" -i)"
+    fi
+  fi
+  printf '%s\n' "$id"
+}
+
+access_id="$(ensure_group '' access)"
+for mapping in \
+  'neurwerk-librechat-users:SG_neurwerk-librechat-users' \
+  'neurwerk-studio-users:SG_neurwerk-studio-users' \
+  'neurwerk-llm-all-users:SG_neurwerk-llm-allusers'; do
+  parent_name="${mapping%%:*}"
+  child_name="${mapping#*:}"
+  parent_id="$(ensure_group "$access_id" "$parent_name")"
+  child_id="$(ensure_group "$parent_id" "$child_name")"
+  kc update "users/$developer_id/groups/$child_id" -r "$realm" -n
+  kc update "users/$viewer_id/groups/$child_id" -r "$realm" -n
 done
 printf '{"developer":"%s","viewer":"%s"}\n' "$developer_id" "$viewer_id" \
   > /opt/studio-users/usage-users.json
