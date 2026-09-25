@@ -1,4 +1,4 @@
-# AI Stack Studio agent guidance
+# neurwerk studio agent guidance
 
 Follow `../docs/dev/conventions/coding-and-release.md`: use a dedicated worktree and branch, make the smallest complete change, review the diff, and submit a pull request rather than working on `main`.
 Use `design.md` as the direction for UI changes, while checking the current implementation before editing.
