@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 class UsagePeriod(BaseModel):
@@ -71,6 +71,21 @@ class DailyUsageResponse(BaseModel):
     days: list[DailyUsage]
 
 
+class UserUsageTotal(UsagePeriod):
+    """One attributed principal's totals in the selected calendar range."""
+
+    user_id: str
+
+
+class UsagePeopleResponse(BaseModel):
+    """Active attributed principals, without Keycloak profile information."""
+
+    timezone: str
+    start_date: date
+    end_date: date
+    users: list[UserUsageTotal]
+
+
 class AgentGatewayModelKey(BaseModel):
     """The exact grouping requested by Studio, never upstream filter options."""
 
@@ -104,3 +119,41 @@ class AgentGatewayDailySummary(BaseModel):
     bucket_seconds: int = Field(alias="bucketSeconds", gt=0)
     groups: list[AgentGatewayModelGroup]
     buckets: list[AgentGatewayModelBucket]
+
+
+class AgentGatewayUserKey(BaseModel):
+    """Identity attribute produced by AgentGateway, not supplied by the browser."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    user_id: str | None = Field(default=None, alias="agentgateway.user")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_attribute(cls, value: object) -> object:
+        """Accept the two upstream encodings of one exact identity attribute."""
+        if not isinstance(value, dict) or "agentgateway.user" in value:
+            return value
+        nested = value.get("attributes")
+        if isinstance(nested, dict):
+            return {"agentgateway.user": nested.get("agentgateway.user")}
+        return value
+
+
+class AgentGatewayUserGroup(BaseModel):
+    """User-scoped summary without access to raw logs or prompt content."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    group: AgentGatewayUserKey
+    requests: int = Field(ge=0)
+    total_tokens: int = Field(alias="totalTokens", ge=0)
+    cost: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
+class AgentGatewayUserSummary(BaseModel):
+    """Bound the upstream grouped-user response for the admin leaderboard."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    groups: list[AgentGatewayUserGroup] = Field(max_length=5000)

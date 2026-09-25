@@ -205,8 +205,9 @@ export function fetchRecentSignins(
 }
 
 /** Fetch a single Keycloak user by ID (self or keycloak-admin). */
-export function fetchUser(userId: string): Promise<KeycloakUser> {
-  return apiGet<KeycloakUser>(`/admin/users/${userId}`);
+export function fetchUser(userId: string, signal?: AbortSignal): Promise<KeycloakUser> {
+  const path = `/admin/users/${encodeURIComponent(userId)}`;
+  return signal ? apiGet<KeycloakUser>(path, undefined, signal) : apiGet<KeycloakUser>(path);
 }
 
 /** List viewable OIDC clients (keycloak-admin role required). */

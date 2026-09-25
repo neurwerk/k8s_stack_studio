@@ -60,6 +60,7 @@ services:
       - ./dev/setup-keycloak.sh:/opt/dev/setup-keycloak.sh:ro
       - ./dev/studio-client.json:/opt/dev/studio-client.json:ro
       - ./dev/bridge-audience.json:/opt/dev/bridge-audience.json:ro
+      - ./.dev-local/demo-users:/opt/studio-users
     depends_on:
       keycloak:
         condition: service_healthy
@@ -77,6 +78,8 @@ services:
   usage-sim:
     <<: *simulator
     command: [python, /app/server.py, usage]
+    volumes:
+      - ./.dev-local/demo-users:/demo-users:ro
     healthcheck:
       test: [CMD, python, /app/health.py, "15000"]
       interval: 3s

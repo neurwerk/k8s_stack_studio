@@ -67,6 +67,8 @@ service_id="$(kc get "clients/$bridge_id/service-account-user" -r "$realm" --fie
 kc add-roles -r "$realm" --uid "$service_id" --cid "$realm_management_id" \
   --rolename view-users --rolename query-users --rolename view-clients
 
+developer_id=""
+viewer_id=""
 for name in developer viewer no-access; do
   user_id="$(kc get users -r "$realm" -q username="$name" -q exact=true --fields id --format csv --noquotes)"
   if [[ -z "$user_id" ]]; then
@@ -76,6 +78,8 @@ for name in developer viewer no-access; do
     kc set-password -r "$realm" --userid "$user_id" --new-password "$DEV_USER_PASSWORD"
   fi
   if [[ "$name" == no-access ]]; then continue; fi
+  if [[ "$name" == developer ]]; then developer_id="$user_id"; fi
+  if [[ "$name" == viewer ]]; then viewer_id="$user_id"; fi
   kc add-roles -r "$realm" --uid "$user_id" --rolename studio-user
   if [[ "$name" == developer ]]; then
     kc add-roles -r "$realm" --uid "$user_id" --rolename pii-admin \
@@ -88,4 +92,6 @@ for name in developer viewer no-access; do
       --rolename llm:invoke --rolename model:demo-model:invoke
   fi
 done
+printf '{"developer":"%s","viewer":"%s"}\n' "$developer_id" "$viewer_id" \
+  > /opt/studio-users/usage-users.json
 printf 'Studio development realm, clients, roles and accounts are ready.\n'
