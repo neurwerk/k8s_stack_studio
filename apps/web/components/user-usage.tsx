@@ -6,7 +6,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { fetchUserDailyUsage } from "@/lib/api/usage";
 import type { UsageDateRange, UserDailyUsage } from "@/lib/api/usage";
-import { modelColor } from "@/lib/usage-dashboard";
+import { modelColors } from "@/lib/usage-dashboard";
 
 const POLL_INTERVAL_MS = 30_000;
 const DAY_MS = 86_400_000;
@@ -157,6 +157,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
   const models = [
     ...new Set(usage?.days.flatMap((day) => day.models.map((item) => item.model)) ?? []),
   ].sort((a, b) => (a ?? "").localeCompare(b ?? ""));
+  const colors = modelColors(models);
   const totals = { total_tokens: 0, cost_usd: 0, requests: 0 };
   for (const day of usage?.days ?? []) {
     for (const item of day.models) {
@@ -326,7 +327,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
                                 <div key={JSON.stringify(item.model)} className="mt-2">
                                   <p
                                     className="break-all font-medium"
-                                    style={{ color: modelColor(item.model) }}
+                                    style={{ color: colors.get(item.model) }}
                                   >
                                     {item.model ?? "Unknown model"}
                                   </p>
@@ -347,7 +348,9 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
                         name={model ?? "Unknown model"}
                         dataKey={`model${String(index)}`}
                         stackId="usage"
-                        fill={modelColor(model)}
+                        fill={colors.get(model)}
+                        stroke="var(--card)"
+                        strokeWidth={1}
                         hide={hidden.has(model)}
                         isAnimationActive={false}
                         maxBarSize={36}
@@ -379,7 +382,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
                     <span
                       aria-hidden="true"
                       className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                      style={{ backgroundColor: modelColor(model) }}
+                      style={{ backgroundColor: colors.get(model) }}
                     />
                     <span className="break-all">{model ?? "Unknown model"}</span>
                   </button>

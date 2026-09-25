@@ -10,7 +10,7 @@ import { fetchUser } from "@/lib/api/admin";
 import { fetchAllDailyUsage, fetchUsagePeople, fetchUserDailyUsage } from "@/lib/api/usage";
 import type { UsageDateRange, UsagePeople, UserDailyUsage } from "@/lib/api/usage";
 import { useCurrentUserId, useHasRole, useIsKeycloakAdmin } from "@/lib/auth/roles";
-import { modelColor, modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
+import { modelColors, modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
 import type { PersonMetric, UsagePreset } from "@/lib/usage-dashboard";
 
 const panel = "card min-w-0 border border-border bg-card p-4 sm:p-6";
@@ -123,6 +123,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const today = shown?.usage.today ?? result?.usage.today;
   const people = shown?.people?.users ?? [];
   const summary = shown ? usageSummary(shown.usage) : null;
+  const colors = modelColors(summary?.models.map((model) => model.model) ?? []);
   const trend = shown && summary
     ? modelTrend(shown.usage, summary.models.map((model) => model.model), trendMetric)
     : [];
@@ -339,7 +340,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                     />
                     {summary.models.map((model, index) => (
                       <Bar key={JSON.stringify(model.model)} name={model.model ?? "Unknown model"}
-                        dataKey={`model${String(index)}`} stackId="usage" fill={modelColor(model.model)}
+                        dataKey={`model${String(index)}`} stackId="usage" fill={colors.get(model.model)}
+                        stroke="var(--card)" strokeWidth={1}
                         maxBarSize={36} isAnimationActive={false}
                         shape={(props) => (
                           <Rectangle {...props} radius={topStackIndexes[props.index] === index ? [4, 4, 0, 0] : 0} />

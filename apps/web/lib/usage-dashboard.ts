@@ -54,13 +54,16 @@ export function usageSummary(usage: UserDailyUsage) {
   };
 }
 
-/** Keep model colors stable across the dashboard and the per-user chart. */
-export function modelColor(model: string | null): string {
-  if (model === null) return "#5f5f6b";
-  let hash = 0;
-  for (const character of model) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) | 0;
-  const palette = ["#5563ab", "#26735a", "#8a539a", "#a15b52", "#476985", "#76602d", "#7f8ac0"];
-  return palette[(hash >>> 0) % palette.length] ?? "#5563ab";
+/** Give each displayed series a distinct color, regardless of the chart's ranking order. */
+export function modelColors(models: readonly (string | null)[]): Map<string | null, string> {
+  const colors = new Map<string | null, string>();
+  if (models.includes(null)) colors.set(null, "#5f5f6b");
+  const names = [...new Set(models.filter((model): model is string => model !== null))].sort();
+  names.forEach((model, index) => {
+    const hue = ((232 + index * 137.508) % 360).toFixed(1);
+    colors.set(model, `hsl(${hue} 56% ${index % 2 === 0 ? "42" : "48"}%)`);
+  });
+  return colors;
 }
 
 /** One stack per requested model, preserving empty dates and unknown models. */
