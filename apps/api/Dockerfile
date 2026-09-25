@@ -15,7 +15,7 @@ RUN uv sync --frozen --no-dev --no-editable
 FROM python:3.12.12-slim
 
 LABEL org.opencontainers.image.source="https://github.com/neurwerk/k8s_stack_studio"
-LABEL org.opencontainers.image.description="AI Stack Studio API"
+LABEL org.opencontainers.image.description="neurwerk studio API"
 LABEL org.opencontainers.image.licenses="MIT"
 
 ENV PATH=/app/.venv/bin:$PATH \

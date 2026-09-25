@@ -56,10 +56,11 @@ export function usageSummary(usage: UserDailyUsage) {
 
 /** Keep model colors stable across the dashboard and the per-user chart. */
 export function modelColor(model: string | null): string {
-  if (model === null) return "#94a3b8";
+  if (model === null) return "#5f5f6b";
   let hash = 0;
   for (const character of model) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) | 0;
-  return `hsl(${String((hash >>> 0) % 360)} 65% 60%)`;
+  const palette = ["#5563ab", "#26735a", "#8a539a", "#a15b52", "#476985", "#76602d", "#7f8ac0"];
+  return palette[(hash >>> 0) % palette.length] ?? "#5563ab";
 }
 
 /** One stack per requested model, preserving empty dates and unknown models. */

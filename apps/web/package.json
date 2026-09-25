@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "license": "MIT",
   "homepage": "https://github.com/neurwerk/k8s_stack_studio#readme",
@@ -40,6 +40,7 @@
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "daisyui": "^5",
     "jsdom": "^30.0.1",
     "tailwindcss": "^4.1.0",
     "tw-animate-css": "^1.3.0",

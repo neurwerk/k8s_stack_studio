@@ -47,10 +47,10 @@ export default function ClientsPage() {
   if (!isAdmin) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
+        <div className="alert alert-error max-w-md flex-col p-6 text-center text-sm">
           <p className="font-semibold">Access Denied</p>
           <p className="mt-1">
-            You need the <code className="rounded bg-red-100 px-1">keycloak-admin</code> role to
+            You need the <code className="font-mono">keycloak-admin</code> role to
             view clients.
           </p>
         </div>
@@ -69,7 +69,7 @@ export default function ClientsPage() {
   if (error) {
     return (
       <div className="p-6">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="alert alert-error text-sm" role="alert">
           {error}
         </div>
       </div>
@@ -87,14 +87,14 @@ export default function ClientsPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
       <h1 className="mb-6 text-2xl font-semibold tracking-tight">OIDC Clients</h1>
       <p className="mb-4 text-sm text-muted-foreground">
         Read-only public and confidential client metadata. Secrets are never shown.
       </p>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <table className="table w-full text-left text-sm">
           <thead>
             <tr className="border-b border-border text-muted-foreground">
               <th className="px-4 py-3 font-medium">Client ID</th>
@@ -119,11 +119,11 @@ export default function ClientsPage() {
                 <td className="px-4 py-3 text-muted-foreground">{client.description || "—"}</td>
                 <td className="px-4 py-3">
                   {client.enabled ? (
-                    <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
+                    <span className="badge badge-success badge-outline text-xs font-medium">
                       Enabled
                     </span>
                   ) : (
-                    <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
+                    <span className="badge badge-error badge-outline text-xs font-medium">
                       Disabled
                     </span>
                   )}
@@ -138,7 +138,7 @@ export default function ClientsPage() {
       </div>
       <div className="mt-4 flex items-center gap-4 text-sm">
         <button
-          className="rounded border border-border px-3 py-1.5 disabled:opacity-50"
+          className="btn btn-outline btn-sm"
           disabled={loading || first === 0}
           onClick={() => {
             setFirst(Math.max(0, first - 25));
@@ -148,7 +148,7 @@ export default function ClientsPage() {
         </button>
         <span>Page {first / 25 + 1}</span>
         <button
-          className="rounded border border-border px-3 py-1.5 disabled:opacity-50"
+          className="btn btn-outline btn-sm"
           disabled={loading || !!error || !hasMore}
           onClick={() => {
             setFirst(first + 25);

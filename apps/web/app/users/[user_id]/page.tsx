@@ -104,13 +104,13 @@ export default function UserDetailPage() {
   if (!canViewProfile && !canManageKeys) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-sm text-red-700">
+        <div className="alert alert-error max-w-md flex-col p-6 text-center text-sm">
           <p className="font-semibold">Access Denied</p>
           <p className="mt-1">You do not have permission to view this user's profile.</p>
           {isKeycloakAdmin && (
             <Link
               href="/users"
-              className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-red-700 underline hover:no-underline"
+              className="mt-3 inline-flex items-center gap-1 text-sm font-medium underline hover:no-underline"
             >
               <ArrowLeft className="h-4 w-4" />
               Back to users
@@ -132,7 +132,7 @@ export default function UserDetailPage() {
   if (canViewProfile && error && !canManageKeys) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-sm text-red-700">
+        <div className="alert alert-error max-w-md block p-6 text-sm" role="alert">
           <p className="font-semibold">Error</p>
           <p className="mt-1">{error}</p>
         </div>
@@ -149,7 +149,7 @@ export default function UserDetailPage() {
   }
 
   return (
-    <div className="p-6">
+    <div className="mx-auto max-w-7xl p-4 sm:p-6">
       {isKeycloakAdmin && (
         <div className="mb-6">
           <Link
@@ -163,7 +163,7 @@ export default function UserDetailPage() {
       )}
 
       {user ? (
-        <div className="rounded-lg border border-border bg-card p-6">
+        <div className="card border border-border bg-card p-6">
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
               <UserIcon className="h-6 w-6 text-muted-foreground" />
@@ -193,7 +193,7 @@ export default function UserDetailPage() {
               {roles.length > 0 ? (
                 <ul className="mt-1 flex flex-wrap gap-1.5">
                   {roles.map((role) => (
-                    <li key={role} className="rounded-md border border-border bg-muted px-2 py-0.5 text-xs">
+                     <li key={role} className="badge badge-ghost badge-sm text-xs">
                       {role}
                     </li>
                   ))}
@@ -214,7 +214,7 @@ export default function UserDetailPage() {
           </div>
         </div>
       ) : canManageKeys ? (
-        <div className="rounded-lg border border-border bg-card p-6">
+        <div className="card border border-border bg-card p-6">
           <h1 className="text-xl font-semibold">API key management</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Manage API keys for user <span className="break-all font-mono text-xs">{userId}</span>.

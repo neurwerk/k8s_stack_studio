@@ -50,13 +50,13 @@ export default function GroupsPage() {
 
   if (!isAdmin)
     return (
-      <div className="flex h-full items-center justify-center text-sm text-red-700">
+      <div className="flex h-full items-center justify-center text-sm text-error">
         The keycloak-admin role is required.
       </div>
     );
 
   return (
-    <div className="p-6">
+    <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Groups</h1>
@@ -72,16 +72,16 @@ export default function GroupsPage() {
             setSearch(event.target.value);
             setFirst(0);
           }}
-          className="rounded-md border border-border bg-background px-3 py-1.5 text-sm"
+          className="input input-bordered bg-base-100 text-sm"
         />
       </div>
       {error && (
-        <div className="mb-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="alert alert-error mb-4 text-sm" role="alert">
           {error}
         </div>
       )}
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <table className="table w-full text-left text-sm">
           <thead className="border-b border-border text-muted-foreground">
             <tr>
               <th className="px-4 py-3">Group</th>
@@ -120,7 +120,7 @@ export default function GroupsPage() {
       </div>
       <div className="mt-4 flex items-center gap-4 text-sm">
         <button
-          className="rounded border border-border px-3 py-1.5 disabled:opacity-50"
+          className="btn btn-outline btn-sm"
           disabled={loading || first === 0}
           onClick={() => {
             setFirst(Math.max(0, first - 25));
@@ -130,7 +130,7 @@ export default function GroupsPage() {
         </button>
         <span>Page {first / 25 + 1}</span>
         <button
-          className="rounded border border-border px-3 py-1.5 disabled:opacity-50"
+          className="btn btn-outline btn-sm"
           disabled={loading || !!error || !hasMore}
           onClick={() => {
             setFirst(first + 25);

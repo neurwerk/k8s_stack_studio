@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "k8s-stack-studio"
-version = "0.10.0"
-description = "AI Stack Studio FastAPI backend proxying internal services"
+version = "0.11.0"
+description = "neurwerk studio FastAPI backend proxying internal services"
 authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
 license = "MIT"
 license-files = ["LICENSE"]

@@ -10,7 +10,7 @@ import { modelColor } from "@/lib/usage-dashboard";
 
 const POLL_INTERVAL_MS = 30_000;
 const DAY_MS = 86_400_000;
-const controlClass = "rounded-md border border-border bg-background px-3 py-2 text-sm";
+const controlClass = "input input-bordered bg-base-100 text-sm";
 
 function formatTokens(value: number): string {
   return new Intl.NumberFormat().format(value);
@@ -90,7 +90,7 @@ function DateRangeSelector({
           }}
         />
       </label>
-      <button className={`${controlClass} hover:bg-muted`} type="submit">
+      <button className="btn btn-primary" type="submit">
         Apply range
       </button>
       <span className="py-2 text-xs text-muted-foreground">90 days maximum, inclusive</span>
@@ -179,7 +179,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
 
   return (
     <section
-      className="mt-6 min-w-0 rounded-lg border border-border bg-card p-4 sm:p-6"
+      className="card mt-6 min-w-0 border border-border bg-card p-4 sm:p-6"
       aria-label="Usage"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -195,14 +195,14 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
         <div
           role="group"
           aria-label="Chart metric"
-          className="flex rounded-md border border-border p-1"
+          className="join border border-border"
         >
           {(["total_tokens", "cost_usd"] as const).map((value) => (
             <button
               key={value}
               type="button"
               aria-pressed={metric === value}
-              className={`rounded px-3 py-1 text-sm ${metric === value ? "bg-muted font-medium" : "text-muted-foreground"}`}
+              className={`btn btn-sm join-item ${metric === value ? "btn-primary" : "btn-ghost"}`}
               onClick={() => {
                 setMetric(value);
               }}
@@ -213,7 +213,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
         </div>
         <button
           type="button"
-          className={`${controlClass} hover:bg-muted`}
+          className="btn btn-outline btn-sm"
           onClick={() => {
             setRange(undefined);
           }}
@@ -238,7 +238,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
             {usage.start_date} to {usage.end_date} (inclusive). Timezone: {usage.timezone}.
           </p>
           {stale && (
-            <p role="alert" className="mt-3 text-sm text-amber-600 dark:text-amber-400">
+            <p role="alert" className="alert alert-warning mt-3 text-sm">
               Stale data: showing the last successful result for this range.{" "}
               {error ? `Refresh failed: ${error}` : "Refresh is delayed."}
             </p>
@@ -276,7 +276,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
                     accessibilityLayer
                     margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
                   >
-                    <CartesianGrid vertical={false} stroke="var(--border)" />
+                    <CartesianGrid vertical={false} stroke="var(--border-color)" />
                     <XAxis
                       dataKey="date"
                       tickFormatter={formatDate}
@@ -366,7 +366,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
                     key={JSON.stringify(model)}
                     type="button"
                     aria-pressed={!hidden.has(model)}
-                    className={`flex min-w-0 max-w-full items-center gap-2 rounded-md border border-border px-2 py-1 text-xs ${hidden.has(model) ? "text-muted-foreground line-through" : ""}`}
+                     className={`btn btn-outline btn-sm h-auto min-w-0 max-w-full gap-2 py-1 text-xs ${hidden.has(model) ? "text-muted-foreground line-through" : ""}`}
                     onClick={() => {
                       setHidden((previous) => {
                         const next = new Set(previous);

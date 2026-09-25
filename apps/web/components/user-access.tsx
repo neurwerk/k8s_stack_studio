@@ -23,7 +23,7 @@ export function UserAccess({ groups, groupsTruncated, error, canViewGroup }: {
           <ul className="mt-1 flex flex-wrap gap-1.5">
             {groups.map((group) => (
               <li key={group.id} title={group.path}
-                className="rounded-md border border-border bg-muted px-2 py-0.5 text-xs">
+                className="badge badge-ghost badge-sm h-auto max-w-full break-all text-xs">
                 {canViewGroup ? (
                   <Link href={`/groups/${group.id}`} className="hover:underline">
                     {group.path.split("/").filter(Boolean).at(-1) ?? group.name}

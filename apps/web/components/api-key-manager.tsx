@@ -163,7 +163,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
   };
 
   return (
-    <section className="mt-6 rounded-lg border border-border bg-card p-6" aria-labelledby="api-keys-heading">
+    <section className="card mt-6 border border-border bg-card p-6" aria-labelledby="api-keys-heading">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 id="api-keys-heading" className="text-lg font-semibold tracking-tight">
           API Keys
@@ -172,7 +172,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
           <button
             type="button"
             onClick={openCreateForm}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="btn btn-primary btn-sm gap-1.5"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             Create API key
@@ -183,7 +183,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
       {error && (
         <div
           role="alert"
-          className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+          className="alert alert-error mb-4 flex-wrap gap-2 text-sm"
         >
           <span>{error}</span>
           <button
@@ -230,7 +230,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
                 pattern={API_KEY_NAME_PATTERN.source}
                 aria-describedby="api-key-name-help"
                 aria-invalid={newKeyName !== "" && !validKeyName}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                 className="input input-bordered w-full bg-base-100 text-sm"
                 autoFocus
               />
               <p id="api-key-name-help" className="mt-1 text-xs text-muted-foreground">
@@ -254,7 +254,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
                 }}
                 aria-describedby="api-key-expiry-help"
                 aria-invalid={expiresInDays !== "" && !validExpiry}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                 className="input input-bordered w-full bg-base-100 text-sm"
               />
               <p id="api-key-expiry-help" className="mt-1 text-xs text-muted-foreground">
                 Choose from 1 to 365 days.
@@ -301,6 +301,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
                   <input
                     ref={selectAllPermissionsRef}
                     type="checkbox"
+                    className="checkbox checkbox-primary checkbox-sm"
                     checked={allPermissionsSelected}
                     disabled={permissionsLoading}
                     onChange={(event) => {
@@ -320,6 +321,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
                     >
                       <input
                         type="checkbox"
+                        className="checkbox checkbox-primary checkbox-sm"
                         checked={selectedPermissions.includes(permission)}
                         onChange={(event) => {
                           setSelectedPermissions((current) =>
@@ -341,7 +343,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
             <button
               type="submit"
               disabled={creating || !canCreate}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="btn btn-primary btn-sm gap-1.5"
             >
               {creating && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
               Create key
@@ -349,7 +351,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
             <button
               type="button"
               onClick={closeCreateForm}
-              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
+              className="btn btn-outline btn-sm"
             >
               Cancel
             </button>
@@ -359,7 +361,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
 
       {newKeyResult && (
         <div
-          className="mb-4 rounded-lg border border-green-500/30 bg-green-500/5 p-4 text-sm text-green-700"
+          className="card mb-4 border border-success bg-base-100 p-4 text-sm"
           role="status"
         >
           <p className="font-semibold">API key created</p>
@@ -400,7 +402,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
 
       {!loading && keys.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-[700px] text-left text-sm">
+          <table className="table w-full min-w-[700px] text-left text-sm">
             <thead>
               <tr className="border-b border-border text-muted-foreground">
                 <th scope="col" className="px-3 py-2 font-medium">

@@ -6,4 +6,5 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/web apps/web
-CMD ["sh", "-c", "pnpm install --frozen-lockfile && node apps/web/scripts/write-runtime-env.mjs apps/web/public/env.js && exec pnpm --filter web dev --hostname 0.0.0.0"]
+COPY dev/prepare-web-cache.mjs dev/prepare-web-cache.mjs
+CMD ["sh", "-c", "pnpm install --frozen-lockfile && node dev/prepare-web-cache.mjs && node apps/web/scripts/write-runtime-env.mjs apps/web/public/env.js && exec pnpm --filter web dev --hostname 0.0.0.0"]
