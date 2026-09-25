@@ -109,6 +109,7 @@ def main() -> None:
     with httpx.Client(base_url=base, timeout=30) as client:
         assert client.get("/api/version").status_code == 200
         assert client.get("/env.js").status_code == 200
+        assert client.get("/usage").status_code == 200
         assert client.get("/api/session").status_code == 401
         for username in ("developer", "viewer", "no-access"):
             token = token_for(username, credentials["DEV_USER_PASSWORD"])
@@ -145,10 +146,26 @@ def main() -> None:
                 assert (
                     client.get("/api/admin/users", headers=headers).status_code == 403
                 )
+                assert (
+                    client.get("/api/usage/daily", headers=headers).status_code == 403
+                )
+                assert (
+                    client.get("/api/usage/people", headers=headers).status_code == 403
+                )
             if username != "developer":
                 continue
             user_id = session.json()["subject"]
             assert client.get("/api/admin/users", headers=headers).status_code == 200
+            today = client.get("/api/usage/daily", headers=headers)
+            assert today.status_code == 200 and today.json()["days"]
+            people = client.get("/api/usage/people", headers=headers)
+            assert people.status_code == 200
+            assert user_id in [person["user_id"] for person in people.json()["users"]]
+            assert sum(
+                model["requests"]
+                for day in today.json()["days"]
+                for model in day["models"]
+            ) == sum(person["requests"] for person in people.json()["users"])
             assert client.get(
                 "/api/users/" + user_id + "/usage/daily", headers=headers
             ).json()["days"]

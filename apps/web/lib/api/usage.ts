@@ -44,13 +44,41 @@ export interface UsageDateRange {
   end: string;
 }
 
+export interface UsagePerson extends UsagePeriod {
+  user_id: string;
+}
+
+export interface UsagePeople {
+  timezone: string;
+  start_date: string;
+  end_date: string;
+  users: UsagePerson[];
+}
+
 /** Omit the range to use the server's last 30 calendar days, including today. */
 export function fetchUserDailyUsage(
   userId: string,
   range?: UsageDateRange,
+  signal?: AbortSignal,
+): Promise<UserDailyUsage> {
+  const path = `/users/${encodeURIComponent(userId)}/usage/daily`;
+  const params = range ? { start: range.start, end: range.end } : undefined;
+  return signal ? apiGet<UserDailyUsage>(path, params, signal) : apiGet<UserDailyUsage>(path, params);
+}
+
+/** Only usage admins can request an unfiltered aggregation. */
+export function fetchAllDailyUsage(
+  range?: UsageDateRange,
+  signal?: AbortSignal,
 ): Promise<UserDailyUsage> {
   return apiGet<UserDailyUsage>(
-    `/users/${encodeURIComponent(userId)}/usage/daily`,
+    "/usage/daily",
     range ? { start: range.start, end: range.end } : undefined,
+    signal,
   );
+}
+
+/** Active principals for the admin selector and per-person breakdown. */
+export function fetchUsagePeople(range: UsageDateRange, signal?: AbortSignal): Promise<UsagePeople> {
+  return apiGet<UsagePeople>("/usage/people", { start: range.start, end: range.end }, signal);
 }

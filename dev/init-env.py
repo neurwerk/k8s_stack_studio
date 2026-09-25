@@ -10,6 +10,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 secrets_dir = root / ".dev-local"
 secrets_dir.mkdir(mode=0o700, exist_ok=True)
+(secrets_dir / "demo-users").mkdir(mode=0o700, exist_ok=True)
 env_file = secrets_dir / "credentials.env"
 if not env_file.exists():
     credentials = (

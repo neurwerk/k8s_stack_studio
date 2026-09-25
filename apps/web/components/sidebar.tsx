@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BarChart3,
   ChevronLeft,
   ChevronRight,
   FolderTree,
@@ -61,6 +62,7 @@ function NavItems({ collapsed }: NavItemsProps) {
     : [];
 
   const mainItems = [
+    { href: "/usage", label: "Usage", icon: BarChart3 },
     ...(isPiiAdmin ? [{ href: "/policy-engine", label: "PII Policy", icon: Shield }] : []),
     ...logsItems,
     ...adminItems,

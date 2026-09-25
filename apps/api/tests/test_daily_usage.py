@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 
 from k8s_stack_studio.config.settings import Settings
-from k8s_stack_studio.controllers.usage import router
+from k8s_stack_studio.controllers.usage import aggregate_router, router
 from k8s_stack_studio.lib.agentgateway import AgentGatewayClient
 from k8s_stack_studio.lib.auth import StudioAdmissionMiddleware, StudioPrincipal
 from k8s_stack_studio.lib.dependencies import get_agentgateway
@@ -74,6 +74,7 @@ async def daily_api(request):
 
     app = FastAPI()
     app.include_router(router)
+    app.include_router(aggregate_router)
     app.add_middleware(StudioAdmissionMiddleware)
 
     @app.middleware("http")
@@ -120,6 +121,106 @@ async def test_daily_default_contract_and_sequential_runs(daily_api):
         assert payload["filters"] == {"attributes": {"agentgateway.user": "self"}}
         assert payload["groupBy"] == [{"field": "requestModel"}]
         assert "bucketCount" not in payload
+
+
+async def test_all_user_usage_requires_usage_admin_before_any_upstream_request(daily_api):
+    client, payloads, _state = daily_api
+    for path in ("/api/usage/daily", "/api/usage/people"):
+        assert (await client.get(path)).status_code == 403
+    assert payloads == []
+
+
+async def test_all_daily_usage_reuses_bounded_calendar_contract_without_user_filter(daily_api):
+    client, payloads, state = daily_api
+    state["principal"] = StudioPrincipal(
+        "admin", frozenset({"studio-user", "langfuse-admin"}), frozenset(), {}
+    )
+    response = await client.get("/api/usage/daily?start=2026-10-25&end=2026-10-25")
+    assert response.status_code == 200
+    assert response.json()["days"][0]["date"] == "2026-10-25"
+    assert len(payloads) == 1
+    assert "filters" not in payloads[0]
+    assert payloads[0]["timeRange"] == {
+        "from": "2026-10-24T22:00:00Z",
+        "to": "2026-10-25T23:00:00Z",
+    }
+    assert payloads[0]["bucketSeconds"] == 90000
+    assert (await client.get("/api/usage/daily?start=2026-13-01")).status_code == 422
+    assert (await client.get("/api/usage/daily?start=2026-01-01")).status_code == 422
+    assert len(payloads) == 1
+
+
+async def test_people_returns_sorted_attributed_users_without_upstream_metadata(daily_api):
+    client, payloads, state = daily_api
+    state["principal"] = StudioPrincipal(
+        "admin", frozenset({"studio-user", "langfuse-admin"}), frozenset(), {}
+    )
+    state["response"] = httpx.Response(
+        200,
+        json={
+            "groups": [
+                {
+                    "group": {"agentgateway.user": "person-b"},
+                    "requests": 1,
+                    "totalTokens": 5,
+                    "cost": None,
+                },
+                {
+                    "group": {"agentgateway.user": None},
+                    "requests": 1,
+                    "totalTokens": 99,
+                    "cost": 0.1,
+                },
+                {
+                    "group": {"attributes": {"agentgateway.user": "person-a"}},
+                    "requests": 2,
+                    "totalTokens": 10,
+                    "cost": 0.25,
+                },
+            ],
+            "filterOptions": {"agentgateway.user": ["private-other-user"]},
+        },
+    )
+    response = await client.get("/api/usage/people?start=2026-10-25&end=2026-10-25")
+    assert response.status_code == 200
+    assert response.json() == {
+        "timezone": "Europe/Berlin",
+        "start_date": "2026-10-25",
+        "end_date": "2026-10-25",
+        "users": [
+            {"user_id": "person-a", "requests": 2, "total_tokens": 10, "cost_usd": 0.25},
+            {"user_id": "person-b", "requests": 1, "total_tokens": 5, "cost_usd": 0.0},
+        ],
+    }
+    assert "filters" not in payloads[0]
+    assert payloads[0]["groupBy"] == [{"field": "attributes", "key": "agentgateway.user"}]
+    assert "filterOptions" not in response.text
+
+
+async def test_people_rejects_duplicate_or_invalid_upstream_id(daily_api):
+    client, _payloads, state = daily_api
+    state["principal"] = StudioPrincipal(
+        "admin", frozenset({"studio-user", "langfuse-admin"}), frozenset(), {}
+    )
+    state["response"] = httpx.Response(
+        200,
+        json={
+            "groups": [
+                {"group": {"agentgateway.user": "same"}, "requests": 1, "totalTokens": 1},
+                {"group": {"agentgateway.user": "same"}, "requests": 1, "totalTokens": 1},
+            ]
+        },
+    )
+    assert (await client.get("/api/usage/people")).status_code == 502
+    state["response"] = httpx.Response(
+        200,
+        json={
+            "groups": [
+                {"group": {"agentgateway.user": 123}, "requests": 1, "totalTokens": 1},
+            ]
+        },
+    )
+    assert (await client.get("/api/usage/people")).status_code == 502
 
 
 @pytest.mark.parametrize(

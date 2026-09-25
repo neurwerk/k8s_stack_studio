@@ -20,6 +20,7 @@ Monorepo with a FastAPI backend (Python) and a Next.js 16 frontend (TypeScript).
 | `GET /api/admin/recent-signins` | `studio-user`, `keycloak-admin` | Read-only seven-day successful LOGIN summary for up to 25 user IDs |
 | `GET /api/users/{user_id}/usage` | `studio-user`, self or `langfuse-admin` | Calls, total tokens, and USD cost from AgentGateway private analytics |
 | `GET /api/users/{user_id}/usage/daily` | `studio-user`, self or `langfuse-admin` | Daily requested-model tokens, calls, and reported USD; inclusive date range up to 90 days |
+| `GET /api/usage/daily`, `GET /api/usage/people` | `studio-user`, `langfuse-admin` | All-user daily model totals and active-person breakdown; inclusive date range up to 90 days |
 | `GET /api/users/{user_id}/agentgateway-permissions` | `studio-user`, self or `api-key-admin` | Transparent bridge `GET /permissions?user_id=...` proxy |
 | API-key list/create/revoke routes | `studio-user`, self or `api-key-admin` | Bridge proxy; creates require immutable `name`, non-empty `permissions`, and `expires_in_days` from 1 to 365; no renewal route |
 
@@ -61,6 +62,7 @@ The Next.js frontend consumes the API and renders a dashboard with:
 - **Sidebar** — collapsible dark sidebar with icon navigation
 - **PII Policy** (`/policy-engine`, `pii-admin` role) — config panel, YAML preview, strict policy validation, detailed PII diagnostics, and deterministic model-free simulation
 - **Logs** (`/logs`, `opensearch-admin` role) — OpenSearch log viewer with text, namespace, pod, level, failure-type, and time filters
+- **Usage** (`/usage`) — model and daily usage dashboard; `langfuse-admin` can select all active users or one user, with a per-person chart
 - **Users / Groups / Realm Roles / Clients** (`keycloak-admin` role) — read-only Keycloak access views and existing user controls
 - **API Keys** — per-user API key management
 - **Error / loading states** — spinner while loading, error card when the API is unreachable

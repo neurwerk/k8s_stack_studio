@@ -13,11 +13,14 @@ from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.models.usage import (
     AgentGatewayDailySummary,
     AgentGatewaySummary,
+    AgentGatewayUserSummary,
     DailyUsage,
     DailyUsageResponse,
     ModelUsage,
+    UsagePeopleResponse,
     UsagePeriod,
     UsageResponse,
+    UserUsageTotal,
 )
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -49,21 +52,20 @@ class AgentGatewayClient:
         self, user_id: str, start: date | None = None, end: date | None = None
     ) -> DailyUsageResponse:
         """Query consecutive equal-duration calendar days together, isolating today."""
+        return await self._daily_usage(user_id, start, end)
+
+    async def fetch_all_daily_usage(
+        self, start: date | None = None, end: date | None = None
+    ) -> DailyUsageResponse:
+        """Query aggregate model usage without a user filter (admin route only)."""
+        return await self._daily_usage(None, start, end)
+
+    async def _daily_usage(
+        self, user_id: str | None, start: date | None, end: date | None
+    ) -> DailyUsageResponse:
+        """Share one calendar and DST contract across self and all-user views."""
         now = _utc_now()
-        today = now.astimezone(self._timezone).date()
-        end = end or today
-        start = start or end - timedelta(days=min(29, end.toordinal() - 1))
-        if start > end or end > today or (end - start).days >= 90:
-            raise InvalidUsageRangeError
-        try:
-            midnights = [
-                datetime.combine(
-                    start + timedelta(days=offset), time.min, self._timezone
-                ).astimezone(UTC)
-                for offset in range((end - start).days + 2)
-            ]
-        except OverflowError as error:
-            raise InvalidUsageRangeError from error
+        start, end, midnights = self._calendar_window(start, end, now)
         days: list[DailyUsage] = []
         for (seconds, _partial), windows in groupby(
             pairwise(midnights),
@@ -84,13 +86,76 @@ class AgentGatewayClient:
             timezone=self._timezone.key,
             start_date=start,
             end_date=end,
-            today=today,
+            today=now.astimezone(self._timezone).date(),
             days=days,
+        )
+
+    def _calendar_window(
+        self, start: date | None, end: date | None, now: datetime
+    ) -> tuple[date, date, list[datetime]]:
+        """Resolve an inclusive, bounded local date range to UTC midnight boundaries."""
+        today = now.astimezone(self._timezone).date()
+        end = end or today
+        start = start or end - timedelta(days=min(29, end.toordinal() - 1))
+        if start > end or end > today or (end - start).days >= 90:
+            raise InvalidUsageRangeError
+        try:
+            midnights = [
+                datetime.combine(
+                    start + timedelta(days=offset), time.min, self._timezone
+                ).astimezone(UTC)
+                for offset in range((end - start).days + 2)
+            ]
+        except OverflowError as error:
+            raise InvalidUsageRangeError from error
+        return start, end, midnights
+
+    async def fetch_user_breakdown(
+        self, start: date | None = None, end: date | None = None
+    ) -> UsagePeopleResponse:
+        """Return only verified attributed user IDs and totals for admin selection."""
+        now = _utc_now()
+        start, end, midnights = self._calendar_window(start, end, now)
+        until = min(midnights[-1], now)
+        if until <= midnights[0]:
+            return UsagePeopleResponse(
+                timezone=self._timezone.key, start_date=start, end_date=end, users=[]
+            )
+        payload = self._summary_payload(None, midnights[0], until)
+        payload["groupBy"] = [{"field": "attributes", "key": "agentgateway.user"}]
+        try:
+            response = await self._client.post(
+                f"{self._base}/api/logs/analytics/summary", json=payload
+            )
+            response.raise_for_status()
+            summary = AgentGatewayUserSummary.model_validate_json(response.content)
+        except (httpx.HTTPError, ValidationError, ValueError) as error:
+            raise AgentGatewayUsageError from error
+        users: list[UserUsageTotal] = []
+        seen: set[str] = set()
+        for item in summary.groups:
+            user_id = item.group.user_id
+            if user_id is None:
+                continue  # A record without a verified principal is not a person.
+            if not user_id or len(user_id) > 255 or user_id in seen:
+                raise AgentGatewayUsageError
+            seen.add(user_id)
+            users.append(
+                UserUsageTotal(
+                    user_id=user_id,
+                    requests=item.requests,
+                    total_tokens=item.total_tokens,
+                    cost_usd=item.cost or 0.0,
+                )
+            )
+        users.sort(key=lambda item: (-item.total_tokens, item.user_id))
+        return UsagePeopleResponse(
+            timezone=self._timezone.key, start_date=start, end_date=end, users=users
         )
 
     async def _fetch_daily_run(
         self,
-        user_id: str,
+        user_id: str | None,
         start: datetime,
         end: datetime,
         seconds: int,
@@ -209,20 +274,22 @@ class AgentGatewayClient:
     @classmethod
     def _summary_payload(
         cls,
-        user_id: str,
+        user_id: str | None,
         start: datetime,
         end: datetime,
     ) -> dict[str, object]:
         """Create the private analytics request for one principal and period."""
-        return {
+        payload: dict[str, object] = {
             "timeRange": {
                 "from": cls._isoformat_utc(start),
                 "to": cls._isoformat_utc(end),
             },
-            "filters": {"attributes": {"agentgateway.user": user_id}},
             "groupBy": [],
             "bucketCount": 1,
         }
+        if user_id is not None:
+            payload["filters"] = {"attributes": {"agentgateway.user": user_id}}
+        return payload
 
     @staticmethod
     def _isoformat_utc(value: datetime) -> str:

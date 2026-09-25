@@ -2,19 +2,35 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+
+def _demo_principals() -> tuple[str, str]:
+    """Use the same local-only Keycloak subjects as the real dev login."""
+    path = Path("/demo-users/usage-users.json")
+    if path.is_file():
+        with path.open() as stream:
+            users = json.load(stream)
+        return users["developer"], users["viewer"]
+    return "demo-developer", "demo-viewer"
 
 
 def usage_summary(payload: dict) -> dict:
     """Return grouped summaries aligned to the caller's UTC bucket boundaries."""
     start = datetime.fromisoformat(payload["timeRange"]["from"].replace("Z", "+00:00"))
     end = datetime.fromisoformat(payload["timeRange"]["to"].replace("Z", "+00:00"))
-    if not start < end or "agentgateway.user" not in payload.get("filters", {}).get(
-        "attributes", {}
-    ):
-        raise ValueError("bounded user and time filters required")
-    grouped = payload.get("groupBy") == [{"field": "requestModel"}]
-    if payload.get("groupBy") not in ([], [{"field": "requestModel"}]):
+    if not start < end:
+        raise ValueError("bounded time range required")
+    attributes = payload.get("filters", {}).get("attributes", {})
+    if not isinstance(attributes, dict) or set(attributes) - {"agentgateway.user"}:
+        raise ValueError("unsupported filters")
+    selected_user = attributes.get("agentgateway.user")
+    dimensions = payload.get("groupBy")
+    by_model = dimensions == [{"field": "requestModel"}]
+    by_user = dimensions == [{"field": "attributes", "key": "agentgateway.user"}]
+    if dimensions != [] and not by_model and not by_user:
         raise ValueError("unsupported grouping")
     seconds = min(
         int(payload.get("bucketSeconds", 86400)),
@@ -24,38 +40,49 @@ def usage_summary(payload: dict) -> dict:
         raise ValueError("invalid bucket duration")
     groups: dict[str, dict] = {}
     buckets: dict[tuple[datetime, str], dict] = {}
-    # A fixed pattern relative to today provides visible charts without storing user data.
+    # Synthetic usage belongs to the two actual local Keycloak subjects.
     today = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
-    for day in range(0, 28, 3):
-        at = today - timedelta(days=day)
-        if not start <= at < end:
+    for person, user_id in enumerate(_demo_principals()):
+        if selected_user is not None and selected_user != user_id:
             continue
-        model = "demo-model" if day % 2 else "sample-model"
-        key = {"requestModel": model} if grouped else {}
-        row = groups.setdefault(
-            model if grouped else "all",
-            {"group": key, "requests": 0, "totalTokens": 0, "cost": 0.0},
-        )
-        row["requests"] += 1
-        row["totalTokens"] += 120 + day * 4
-        row["cost"] += 0.002
-        if grouped:
-            bucket_start = start + timedelta(
-                seconds=((at - start) // timedelta(seconds=seconds)) * seconds
+        for day in range(person, 28, 3 + person * 3):
+            at = today - timedelta(days=day)
+            if not start <= at < end:
+                continue
+            model = "demo-model" if day % 2 else "sample-model"
+            group_key = user_id if by_user else model if by_model else "all"
+            group = (
+                {"agentgateway.user": user_id}
+                if by_user
+                else {"requestModel": model}
+                if by_model
+                else {}
             )
-            bucket = buckets.setdefault(
-                (bucket_start, model),
-                {
-                    "start": bucket_start.isoformat(),
-                    "group": key,
-                    "requests": 0,
-                    "totalTokens": 0,
-                    "cost": 0.0,
-                },
+            tokens = 120 + day * 4 + person * 40
+            row = groups.setdefault(
+                group_key,
+                {"group": group, "requests": 0, "totalTokens": 0, "cost": 0.0},
             )
-            bucket["requests"] += 1
-            bucket["totalTokens"] += 120 + day * 4
-            bucket["cost"] += 0.002
+            row["requests"] += 1
+            row["totalTokens"] += tokens
+            row["cost"] += 0.002
+            if by_model:
+                bucket_start = start + timedelta(
+                    seconds=((at - start) // timedelta(seconds=seconds)) * seconds
+                )
+                bucket = buckets.setdefault(
+                    (bucket_start, model),
+                    {
+                        "start": bucket_start.isoformat(),
+                        "group": group,
+                        "requests": 0,
+                        "totalTokens": 0,
+                        "cost": 0.0,
+                    },
+                )
+                bucket["requests"] += 1
+                bucket["totalTokens"] += tokens
+                bucket["cost"] += 0.002
     return {
         "bucketSeconds": seconds,
         "groups": list(groups.values()),
@@ -264,7 +291,9 @@ def search_logs(payload: dict) -> dict:
     for offset, (level, failure, message, namespace, pod) in enumerate(records):
         timestamp = now - timedelta(minutes=offset * 4)
         source = {
-            "@timestamp": timestamp.isoformat(),
+            "@timestamp": timestamp.isoformat(timespec="milliseconds").replace(
+                "+00:00", "Z"
+            ),
             "log": message,
             "kubernetes": {
                 "namespace_name": namespace,

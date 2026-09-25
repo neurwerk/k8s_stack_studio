@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, Suspense, useCallback, useEffect, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { FAILURE_TYPES, LOG_LEVELS, fetchLogs } from "@/lib/api/logs";
@@ -48,6 +48,12 @@ function formatLog(value: string): string {
   } catch {
     return value;
   }
+}
+
+function formatLogTimestamp(value: string, formatter: Intl.DateTimeFormat | null): string {
+  if (!formatter) return value;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? formatter.format(date) : value;
 }
 
 function readFilters(params: URLSearchParams): { filter: LogsFilter; error: string | null } {
@@ -140,6 +146,23 @@ function LogsView({ queryString }: { queryString: string }) {
   );
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
   const [copiedRow, setCopiedRow] = useState<number | null>(null);
+  const [timeZone, setTimeZone] = useState<string | null>(null);
+  useEffect(() => {
+    setTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
+  const logTimeFormatter = useMemo(
+    () => timeZone ? new Intl.DateTimeFormat("sv-SE", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }) : null,
+    [timeZone],
+  );
   const page = Math.floor((initial.filter.offset ?? 0) / PAGE_SIZE) + 1;
   const lastVisibleEntry = Math.min(page * PAGE_SIZE, total);
   const canGoNext = lastVisibleEntry < Math.min(total, MAX_RESULTS);
@@ -379,7 +402,7 @@ function LogsView({ queryString }: { queryString: string }) {
           </label>
           <button
             type="submit"
-            className="h-9 self-end rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="h-9 w-fit self-end justify-self-start rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             Search
           </button>
@@ -405,7 +428,14 @@ function LogsView({ queryString }: { queryString: string }) {
           </colgroup>
           <thead className="border-b border-border bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
-              <th className="whitespace-nowrap px-3 py-2">Timestamp</th>
+              <th className="px-3 py-2">
+                <span className="block">Timestamp</span>
+                {timeZone && (
+                  <span className="block truncate font-normal normal-case" title={timeZone}>
+                    {timeZone}
+                  </span>
+                )}
+              </th>
               <th className="whitespace-nowrap px-3 py-2">Log level</th>
               <th className="whitespace-nowrap px-3 py-2">Failure type</th>
               <th className="px-3 py-2">Namespace</th>
@@ -420,8 +450,8 @@ function LogsView({ queryString }: { queryString: string }) {
               return (
                 <Fragment key={`${entry.index}-${entry.timestamp}-${i}`}>
                   <tr className={expanded ? "bg-muted/30" : "border-b border-border"}>
-                    <td className="whitespace-nowrap px-3 py-1.5 align-top font-mono text-xs text-muted-foreground">
-                      {entry.timestamp}
+                    <td className="whitespace-nowrap px-3 py-1.5 align-top font-mono text-xs text-muted-foreground" title={entry.timestamp}>
+                      {formatLogTimestamp(entry.timestamp, logTimeFormatter)}
                     </td>
                     <td className="px-3 py-1.5 align-top text-xs">
                       <span

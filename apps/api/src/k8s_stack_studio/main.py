@@ -28,6 +28,7 @@ from k8s_stack_studio.controllers.api_keys import router as api_keys_router
 from k8s_stack_studio.controllers.logs import router as logs_router
 from k8s_stack_studio.controllers.policy_engine import router as policy_engine_router
 from k8s_stack_studio.controllers.session import router as session_router
+from k8s_stack_studio.controllers.usage import aggregate_router as aggregate_usage_router
 from k8s_stack_studio.controllers.usage import router as usage_router
 from k8s_stack_studio.lib.auth import configure_auth
 from k8s_stack_studio.lib.exceptions import (
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(api_keys_router)
     app.include_router(logs_router)
     app.include_router(usage_router)
+    app.include_router(aggregate_usage_router)
     app.include_router(session_router)
 
     # --- Version endpoint (unauthenticated, public) ---

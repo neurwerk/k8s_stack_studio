@@ -140,6 +140,20 @@ selected-range totals. It defaults to 30 calendar days including today and
 refreshes every 30 seconds. Costs are reported sums and may omit unpriced
 requests. Today is partial; unknown models and empty days are retained.
 
+The **Usage** sidebar page (`/usage`) has date presets and an inclusive custom
+range (up to 90 days), headline totals, a per-model table, daily trends, and a
+daily table. It defaults to this month in the API's configured calendar timezone.
+Everyone can view their own usage. Users with `langfuse-admin` also see an
+**All users** option (selected by default), an active-user selector, and a
+descending, metric-selectable per-person breakdown. Admin-only
+`GET /api/usage/daily` and `GET /api/usage/people` query AgentGateway without a
+user filter; the latter groups by the verified `agentgateway.user` attribute
+and returns only opaque IDs and totals, never raw logs or upstream filter
+options. Users with both `langfuse-admin` and `keycloak-admin` see names for
+the first 20 active people and their selected user through delegated Keycloak
+reads; others see shortened IDs with full IDs on hover. The user picker lists
+active principals in the selected period plus the viewer's own account.
+
 `GET /api/users/{user_id}/usage/daily` accepts optional inclusive `start` and
 `end` dates (`YYYY-MM-DD`), with a maximum of 90 days and no future end date.
 Without `end`, it ends today; without `start`, it starts 29 days before the end.
