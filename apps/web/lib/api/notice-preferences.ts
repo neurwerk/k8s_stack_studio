@@ -1,11 +1,15 @@
 import { apiGet, apiPut } from "@/lib/api/client";
 
 export interface NoticePreferences {
+  notices_enabled: boolean;
   show_no_pii: boolean;
   show_pass: boolean;
   show_changes: boolean;
   show_reroutes: boolean;
   show_timing: boolean;
+  show_no_faces: boolean;
+  show_detected_faces: boolean;
+  show_unscanned_faces: boolean;
 }
 
 export type NoticeOverrides = { [K in keyof NoticePreferences]: boolean | null };

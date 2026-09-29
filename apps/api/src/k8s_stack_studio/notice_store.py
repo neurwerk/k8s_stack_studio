@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 
 import asyncpg
 
 from k8s_stack_studio.config.settings import Settings
 
-FIELDS = ("show_no_pii", "show_pass", "show_changes", "show_reroutes", "show_timing")
+FIELDS = (
+    "notices_enabled",
+    "show_no_pii",
+    "show_pass",
+    "show_changes",
+    "show_reroutes",
+    "show_timing",
+    "show_no_faces",
+    "show_detected_faces",
+    "show_unscanned_faces",
+)
 
 
 class NoticeSchemaError(RuntimeError):
@@ -43,6 +54,16 @@ MIGRATIONS = (
         show_timing boolean,
         PRIMARY KEY (principal_id, credential_id)
     );""",
+    """ALTER TABLE notice_users
+        ADD COLUMN notices_enabled boolean NOT NULL DEFAULT true,
+        ADD COLUMN show_no_faces boolean NOT NULL DEFAULT true,
+        ADD COLUMN show_detected_faces boolean NOT NULL DEFAULT true,
+        ADD COLUMN show_unscanned_faces boolean NOT NULL DEFAULT true;
+    ALTER TABLE notice_keys
+        ADD COLUMN notices_enabled boolean,
+        ADD COLUMN show_no_faces boolean,
+        ADD COLUMN show_detected_faces boolean,
+        ADD COLUMN show_unscanned_faces boolean;""",
 )
 
 
@@ -85,7 +106,7 @@ async def schema_ready(dsn: str) -> bool:
 
 
 async def read(dsn: str, principal_id: str, credential_id: str | None = None) -> dict[str, bool]:
-    """Return effective preferences with field-by-field inheritance."""
+    """Return nine independent effective flags; consumers apply the master switch."""
     conn = await asyncpg.connect(dsn)
     try:
         user = await conn.fetchrow(
@@ -109,28 +130,35 @@ async def read(dsn: str, principal_id: str, credential_id: str | None = None) ->
 
 
 async def write(
-    dsn: str, principal_id: str, values: dict[str, bool | None], credential_id: str | None = None
+    dsn: str, principal_id: str, values: Mapping[str, bool | None], credential_id: str | None = None
 ) -> None:
-    """Replace all five values atomically (null means inherit on keys)."""
+    """Replace all nine values atomically (null means inherit on keys)."""
     args: list[str | bool | None] = [principal_id]
     if credential_id:
         args.append(credential_id)
     args += [values[field] for field in FIELDS]
     key_query = """INSERT INTO notice_keys
-        (principal_id, credential_id, show_no_pii, show_pass, show_changes,
-         show_reroutes, show_timing)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        (principal_id, credential_id, notices_enabled, show_no_pii, show_pass, show_changes,
+         show_reroutes, show_timing, show_no_faces, show_detected_faces, show_unscanned_faces)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT (principal_id, credential_id) DO UPDATE SET
-        show_no_pii = EXCLUDED.show_no_pii, show_pass = EXCLUDED.show_pass,
-        show_changes = EXCLUDED.show_changes, show_reroutes = EXCLUDED.show_reroutes,
-        show_timing = EXCLUDED.show_timing"""
+        notices_enabled = EXCLUDED.notices_enabled, show_no_pii = EXCLUDED.show_no_pii,
+        show_pass = EXCLUDED.show_pass, show_changes = EXCLUDED.show_changes,
+        show_reroutes = EXCLUDED.show_reroutes, show_timing = EXCLUDED.show_timing,
+        show_no_faces = EXCLUDED.show_no_faces,
+        show_detected_faces = EXCLUDED.show_detected_faces,
+        show_unscanned_faces = EXCLUDED.show_unscanned_faces"""
     user_query = """INSERT INTO notice_users
-        (principal_id, show_no_pii, show_pass, show_changes, show_reroutes, show_timing)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        (principal_id, notices_enabled, show_no_pii, show_pass, show_changes,
+         show_reroutes, show_timing, show_no_faces, show_detected_faces, show_unscanned_faces)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (principal_id) DO UPDATE SET
-        show_no_pii = EXCLUDED.show_no_pii, show_pass = EXCLUDED.show_pass,
-        show_changes = EXCLUDED.show_changes, show_reroutes = EXCLUDED.show_reroutes,
-        show_timing = EXCLUDED.show_timing"""
+        notices_enabled = EXCLUDED.notices_enabled, show_no_pii = EXCLUDED.show_no_pii,
+        show_pass = EXCLUDED.show_pass, show_changes = EXCLUDED.show_changes,
+        show_reroutes = EXCLUDED.show_reroutes, show_timing = EXCLUDED.show_timing,
+        show_no_faces = EXCLUDED.show_no_faces,
+        show_detected_faces = EXCLUDED.show_detected_faces,
+        show_unscanned_faces = EXCLUDED.show_unscanned_faces"""
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(key_query if credential_id else user_query, *args)

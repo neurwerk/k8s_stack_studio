@@ -8,7 +8,7 @@ from typing import Annotated
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.dependencies import get_current_user_id, get_settings
@@ -19,25 +19,33 @@ Identifier = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za
 
 
 class UserPreferences(BaseModel):
-    """All five independently controlled notice categories."""
+    """Master switch and eight independently stored notice categories."""
 
     model_config = ConfigDict(extra="forbid")
-    show_no_pii: bool
-    show_pass: bool
-    show_changes: bool
-    show_reroutes: bool
-    show_timing: bool
+    notices_enabled: StrictBool
+    show_no_pii: StrictBool
+    show_pass: StrictBool
+    show_changes: StrictBool
+    show_reroutes: StrictBool
+    show_timing: StrictBool
+    show_no_faces: StrictBool
+    show_detected_faces: StrictBool
+    show_unscanned_faces: StrictBool
 
 
 class KeyOverrides(BaseModel):
     """Null inherits the matching user preference."""
 
     model_config = ConfigDict(extra="forbid")
-    show_no_pii: bool | None
-    show_pass: bool | None
-    show_changes: bool | None
-    show_reroutes: bool | None
-    show_timing: bool | None
+    notices_enabled: StrictBool | None
+    show_no_pii: StrictBool | None
+    show_pass: StrictBool | None
+    show_changes: StrictBool | None
+    show_reroutes: StrictBool | None
+    show_timing: StrictBool | None
+    show_no_faces: StrictBool | None
+    show_detected_faces: StrictBool | None
+    show_unscanned_faces: StrictBool | None
 
 
 def _require_store(settings: Settings = Depends(get_settings)) -> Settings:
