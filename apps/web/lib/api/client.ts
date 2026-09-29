@@ -53,6 +53,17 @@ export async function apiPost<TReq, TRes>(path: string, body: TReq): Promise<TRe
   return res.json();
 }
 
+/** Generic typed PUT request. */
+export async function apiPut<TReq, TRes>(path: string, body: TReq): Promise<TRes> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: authHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new ApiRequestError(res.status);
+  return res.json();
+}
+
 /** Generic typed GET request with optional query params. */
 export async function apiGet<TRes>(
   path: string,
