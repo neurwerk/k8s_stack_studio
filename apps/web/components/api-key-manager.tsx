@@ -2,6 +2,7 @@
 
 import { KeyIcon, Loader2, Plus, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { NoticeSettings } from "@/components/notice-preferences";
 import {
   createApiKey,
   fetchAgentGatewayPermissions,
@@ -13,6 +14,8 @@ import type { ApiKey, ApiKeyCreated } from "@/lib/api/admin";
 interface ApiKeyManagerProps {
   userId: string;
   canManage: boolean;
+  isSelf?: boolean;
+  noticeAvailable?: boolean;
 }
 
 const API_KEY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._\x2d]{0,63}$/;
@@ -22,7 +25,7 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? "Unavailable" : date.toLocaleDateString();
 }
 
-export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
+export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailable = false }: ApiKeyManagerProps) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +40,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
   const [createdExpiryDays, setCreatedExpiryDays] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [noticeKeyId, setNoticeKeyId] = useState<string | null>(null);
   const keyRequestId = useRef(0);
   const permissionRequestId = useRef(0);
   const selectAllPermissionsRef = useRef<HTMLInputElement>(null);
@@ -154,6 +158,7 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
     setError(null);
     try {
       await revokeApiKey(userId, keyId);
+      if (noticeKeyId === keyId) setNoticeKeyId(null);
       await loadKeys();
     } catch {
       setError("Unable to revoke the API key. Please try again.");
@@ -451,12 +456,24 @@ export function ApiKeyManager({ userId, canManage }: ApiKeyManagerProps) {
                         Revoke
                       </button>
                     )}
+                    {isSelf && noticeAvailable && !key.revoked && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs ml-2"
+                        onClick={() => setNoticeKeyId(noticeKeyId === key.id ? null : key.id)}
+                      >
+                        Notices
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {isSelf && noticeAvailable && noticeKeyId && keys.some((key) => key.id === noticeKeyId && !key.revoked) && (
+        <NoticeSettings key={noticeKeyId} keyId={noticeKeyId} />
       )}
     </section>
   );

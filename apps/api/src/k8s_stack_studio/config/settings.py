@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Self
-from urllib.parse import SplitResult, urlsplit
+from urllib.parse import SplitResult, quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator, model_validator
@@ -164,6 +164,32 @@ class Settings(BaseSettings):
     # --- Management port ---
     # Separate port for health and metrics (internal only, not exposed via HTTPRoute)
     mgmt_port: int = 4090
+
+    # Dedicated Studio-owned database; schema is initialized by the explicit migrate command.
+    notice_database_url: str = ""
+    notice_postgres_host: str = ""
+    notice_postgres_port: int = 5432
+    notice_postgres_database: str = "studio"
+    notice_postgres_user: str = "studio"
+    notice_postgres_password: str = ""
+    notice_port: int = 4091
+    notice_tls_cert: str = "/var/run/studio-notices/tls/tls.crt"
+    notice_tls_key: str = "/var/run/studio-notices/tls/tls.key"
+    notice_tls_ca: str = "/var/run/studio-notices/tls/ca.crt"
+    notice_client_cn: str = "monitor-agentgateway-extproc-studio"
+
+    @property
+    def notice_dsn(self) -> str:
+        """Build a safely escaped DSN from the namespace-local password."""
+        if self.notice_database_url:
+            return self.notice_database_url
+        if not self.notice_postgres_host or not self.notice_postgres_password:
+            return ""
+        return (
+            f"postgresql://{quote(self.notice_postgres_user, safe='')}:"
+            f"{quote(self.notice_postgres_password, safe='')}@{self.notice_postgres_host}:"
+            f"{self.notice_postgres_port}/{quote(self.notice_postgres_database, safe='')}"
+        )
 
     @model_validator(mode="after")
     def validate_pii_engine_transport(self) -> Self:

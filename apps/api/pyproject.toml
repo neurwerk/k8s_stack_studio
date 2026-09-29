@@ -15,6 +15,8 @@ dependencies = [
     "uvicorn>=0.34.0",
     "pydantic-settings>=2.7",
     "httpx>=0.28.0",
+    "asyncpg>=0.30.0",
+    "aiohttp>=3.12.0",
     "prometheus-fastapi-instrumentator>=8.0.2",
     "fastapi-keycloak-middleware>=1.6.0",
 ]
@@ -22,6 +24,8 @@ dependencies = [
 [project.scripts]
 k8s-stack-studio = "k8s_stack_studio.main:main"
 k8s-stack-studio-mgmt = "k8s_stack_studio.main:mgmt"
+k8s-stack-studio-notices = "k8s_stack_studio.notice_internal:main"
+k8s-stack-studio-migrate = "k8s_stack_studio.notice_store:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/k8s_stack_studio"]

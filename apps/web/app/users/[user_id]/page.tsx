@@ -5,8 +5,10 @@ import { UserStatus } from "@/components/user-status";
 import { ArrowLeft, Loader2, UserIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useVerifiedSession } from "@/lib/auth/session-context";
 import { useEffect, useState } from "react";
 import { ApiKeyManager } from "@/components/api-key-manager";
+import { NoticeSettings } from "@/components/notice-preferences";
 import { UserAccess } from "@/components/user-access";
 import { fetchOwnGroups, fetchUser, fetchUserAccess } from "@/lib/api/admin";
 import {
@@ -30,6 +32,7 @@ export default function UserDetailPage() {
   const isKeycloakAdmin = useIsKeycloakAdmin();
   const isApiKeyAdmin = useIsApiKeyAdmin();
   const ownRoles = useUserRoles();
+  const noticeAvailable = useVerifiedSession().notice_preferences_available;
 
   const [user, setUser] = useState<KeycloakUser | null>(null);
   const [accessResult, setAccessResult] = useState<{ userId: string; data: AdminUserAccess } | null>(null);
@@ -222,8 +225,9 @@ export default function UserDetailPage() {
         </div>
       ) : null}
 
+      {isSelf && noticeAvailable && <NoticeSettings />}
       {(user || canManageKeys) && (
-        <ApiKeyManager userId={user?.id ?? userId} canManage={canManageKeys} />
+        <ApiKeyManager userId={user?.id ?? userId} canManage={canManageKeys} isSelf={isSelf} noticeAvailable={noticeAvailable} />
       )}
     </div>
   );

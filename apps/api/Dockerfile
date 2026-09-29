@@ -29,5 +29,5 @@ COPY --from=builder /app/.venv /app/.venv
 COPY LICENSE /licenses/LICENSE
 
 USER appuser
-EXPOSE 4010 4090
+EXPOSE 4010 4090 4091
 CMD ["k8s-stack-studio"]
