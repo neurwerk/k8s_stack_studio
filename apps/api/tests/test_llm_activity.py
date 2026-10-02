@@ -27,6 +27,13 @@ def observation(
         "model": "test-model",
         "input": '{"messages":[{"role":"user","content":"a full request"}]}',
         "output": '{"role":"assistant","content":"a full response"}',
+        "metadata": {
+            "attributes.http.method": "POST",
+            "attributes.http.path": "/v1/chat/completions?token=hidden",
+            "attributes.http.status": 200,
+            "url.full": "https://service.test/?token=hidden",
+            "connection_string": "postgresql://user:pass@db.example/studio",
+        },
     }
 
 
@@ -100,6 +107,12 @@ async def test_personal_activity_boundary(activity_api):
     assert result.status_code == 200
     assert result.headers["cache-control"] == "no-store"
     assert result.json()[0]["input"].endswith('"a full request"}]}')
+    assert result.json()[0]["metadata"] == {
+        "attributes.http.method": "POST",
+        "attributes.http.status": 200,
+    }
+    assert "hidden" not in result.text
+    assert "postgresql://" not in result.text
     assert json.loads(calls[0].url.params["filter"])[0]["value"] == "self"
     assert json.loads(calls[0].url.params["filter"])[1]["value"] == ["GENERATION", "TOOL"]
     assert calls[0].url.params["limit"] == "10"

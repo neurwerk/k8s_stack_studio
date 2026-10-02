@@ -86,6 +86,34 @@ _SECRET_KEY = re.compile(
     re.IGNORECASE,
 )
 _BEARER = re.compile(r"\bBearer\s+\S+", re.IGNORECASE)
+_URL_USERINFO = re.compile(r"([a-z][a-z0-9+.-]*://)[^/@\s]+:[^/@\s]+@", re.IGNORECASE)
+_SECRET_PARAM = re.compile(
+    r"([?&](?:token|access_token|api_key|key|secret|password)=)[^&#\s]+", re.IGNORECASE
+)
+_VISIBLE_METADATA = frozenset(
+    {
+        "requested_model",
+        "attributes.gen_ai.request.model",
+        "attributes.gen_ai.response.model",
+        "attributes.gen_ai.provider.name",
+        "attributes.gen_ai.operation.name",
+        "attributes.http.method",
+        "attributes.http.status",
+        "attributes.langfuse.session.id",
+        "resourceAttributes.service.name",
+        "mcp.server",
+        "mcp.tool",
+        "attributes.mcp.target",
+        "attributes.gen_ai.tool.name",
+    }
+)
+
+
+def _redact_text(value: str) -> str:
+    """Mask credentials in recorded text before returning it to a browser."""
+    value = _URL_USERINFO.sub(r"\1******@", value)
+    value = _SECRET_PARAM.sub(r"\1******", value)
+    return _BEARER.sub("Bearer ******", value)
 
 
 def _safe_metadata(value: object, key: str = "") -> object:
@@ -97,7 +125,7 @@ def _safe_metadata(value: object, key: str = "") -> object:
     if isinstance(value, list):
         return [_safe_metadata(part) for part in value]
     if isinstance(value, str):
-        return _BEARER.sub("Bearer ******", value)
+        return _redact_text(value)
     return value
 
 
@@ -110,7 +138,7 @@ class _Page(BaseModel):
 def _recorded_content(value: str | None, metadata: dict[str, Any], prefix: str) -> str | None:
     """Prefer direct I/O; v4 MCP traces can store flattened I/O only in metadata."""
     if value:
-        return value
+        return _redact_text(value)
     fields = {
         key.removeprefix(prefix): content
         for key, content in metadata.items()
@@ -125,7 +153,17 @@ def _activity(row: Observation) -> Activity:
         if row.end_time is not None
         else None
     )
-    metadata = {name: _safe_metadata(value, name) for name, value in row.metadata.items()}
+    metadata = {
+        name: _safe_metadata(value, name)
+        for name, value in row.metadata.items()
+        if name in _VISIBLE_METADATA
+    }
+    content_metadata = {
+        name: _safe_metadata(value, name)
+        for name, value in row.metadata.items()
+        if name.startswith("attributes.langfuse.observation.input.")
+        or name.startswith("attributes.langfuse.observation.output.")
+    }
     recorded_session = row.session_id or row.metadata.get("attributes.langfuse.session.id")
     session_id = (
         recorded_session if isinstance(recorded_session, str) and recorded_session else None
@@ -135,8 +173,8 @@ def _activity(row: Observation) -> Activity:
         tokens = (row.input_usage or 0) + (row.output_usage or 0)
     if row.type == "GENERATION":
         recorded = row.model_dump(by_alias=True)
-        recorded["input"] = _BEARER.sub("Bearer ******", row.input) if row.input else row.input
-        recorded["output"] = _BEARER.sub("Bearer ******", row.output) if row.output else row.output
+        recorded["input"] = _redact_text(row.input) if row.input else row.input
+        recorded["output"] = _redact_text(row.output) if row.output else row.output
         recorded["durationMs"] = duration_ms
         recorded["sessionId"] = session_id
         recorded["tokens"] = tokens
@@ -165,13 +203,13 @@ def _activity(row: Observation) -> Activity:
         server=server if isinstance(server, str) else None,
         tool=tool if isinstance(tool, str) else "MCP tool",
         parameters=_recorded_content(
-            _BEARER.sub("Bearer ******", row.input) if row.input else row.input,
-            metadata,
+            row.input,
+            content_metadata,
             "attributes.langfuse.observation.input.",
         ),
         result=_recorded_content(
-            _BEARER.sub("Bearer ******", row.output) if row.output else row.output,
-            metadata,
+            row.output,
+            content_metadata,
             "attributes.langfuse.observation.output.",
         ),
         status=status,

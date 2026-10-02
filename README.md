@@ -153,8 +153,9 @@ the concrete model (preferring the response model on reroutes) and groups MCP
 server and tool together. Expanded entries group Sent and Received
 or Parameters and Result, with a Recorded payload toggle and recorded request time.
 The Langfuse observation contains model-visible content rather than the original
-HTTP wire request. A separate metadata card shows the observation's context as
-readable key/value rows or recorded JSON, with credential-like values masked.
+HTTP wire request. A separate metadata card shows an allowlisted subset of the
+observation's context as readable key/value rows or JSON; arbitrary URLs and
+paths are excluded and credential-like values are masked before reaching the browser.
 The current tracing pipeline records HTTP context but not request headers.
 Session IDs come from the observation or its Langfuse metadata and color-code
 related rows; unattributed tool calls may lack a session ID. MCP traces may put
