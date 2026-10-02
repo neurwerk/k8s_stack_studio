@@ -5,6 +5,7 @@ export interface VerifiedSession {
   realm_roles: string[];
   agentgateway_roles: string[];
   notice_preferences_available: boolean;
+  llm_logs_available: boolean;
 }
 
 export async function fetchSession(): Promise<VerifiedSession> {

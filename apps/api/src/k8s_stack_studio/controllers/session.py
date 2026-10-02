@@ -20,6 +20,7 @@ class SessionResponse(BaseModel):
     realm_roles: list[str]
     agentgateway_roles: list[str]
     notice_preferences_available: bool
+    llm_logs_available: bool
 
 
 @router.get("")
@@ -33,4 +34,5 @@ async def get_session(
         realm_roles=sorted(principal.roles),
         agentgateway_roles=sorted(principal.agentgateway_roles),
         notice_preferences_available=await schema_ready(settings.notice_dsn),
+        llm_logs_available=settings.llm_logs_enabled,
     )

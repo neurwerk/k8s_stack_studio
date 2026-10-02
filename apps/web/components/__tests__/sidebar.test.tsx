@@ -7,6 +7,7 @@ import { Sidebar } from "../sidebar";
 const state = vi.hoisted(() => ({
   pathname: "/usage",
   roles: [] as string[],
+  llmLogsAvailable: false,
   signoutRedirect: vi.fn(),
 }));
 
@@ -20,12 +21,16 @@ vi.mock("@/lib/auth/roles", () => ({
   useIsOpensearchAdmin: () => state.roles.includes("opensearch-admin"),
   useIsPiiAdmin: () => state.roles.includes("pii-admin"),
 }));
+vi.mock("@/lib/auth/session-context", () => ({
+  useVerifiedSession: () => ({ llm_logs_available: state.llmLogsAvailable }),
+}));
 vi.mock("@/lib/api/version", () => ({ fetchVersion: () => Promise.resolve(null) }));
 
 describe("Sidebar settings", () => {
   beforeEach(() => {
     state.pathname = "/usage";
     state.roles = [];
+    state.llmLogsAvailable = false;
     state.signoutRedirect.mockClear();
   });
 
@@ -80,6 +85,7 @@ describe("Sidebar settings", () => {
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Groups and Roles" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Logs" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "My LLM activity" })).not.toBeInTheDocument();
 
     state.roles = ["opensearch-admin"];
     rerender(<Sidebar />);
@@ -100,5 +106,10 @@ describe("Sidebar settings", () => {
     rerender(<Sidebar />);
     const items = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
     expect(items.slice(0, 3)).toEqual(["/usage", "/users", "/logs"]);
+    state.llmLogsAvailable = true;
+    rerender(<Sidebar />);
+    expect(screen.getByRole("link", { name: "My LLM activity" })).toHaveAttribute(
+      "href", "/llm-activity",
+    );
   });
 });

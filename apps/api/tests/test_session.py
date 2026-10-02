@@ -27,5 +27,6 @@ async def test_session_returns_sorted_verified_authorization_claims(monkeypatch)
         realm_roles=["pii-admin", "studio-user"],
         agentgateway_roles=["llm:invoke", "model:remote/example:invoke"],
         notice_preferences_available=True,
+        llm_logs_available=False,
     )
     ready.assert_awaited_once_with("postgresql://unused")
