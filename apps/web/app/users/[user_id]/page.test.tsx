@@ -30,9 +30,6 @@ vi.mock("@/lib/auth/roles", () => ({
 vi.mock("@/lib/auth/session-context", () => ({
   useVerifiedSession: () => ({ notice_preferences_available: mocks.noticeAvailable }),
 }));
-vi.mock("@/components/notice-preferences", () => ({
-  NoticeSettings: () => <p>Notice display settings</p>,
-}));
 vi.mock("@/components/api-key-manager", () => ({
   ApiKeyManager: ({ noticeAvailable }: { noticeAvailable: boolean }) =>
     <p>API key manager: {noticeAvailable ? "notices enabled" : "notices disabled"}</p>,
@@ -119,17 +116,15 @@ describe("UserDetailPage", () => {
     expect(await screen.findByRole("heading", { name: "Target User" })).toBeInTheDocument();
     expect(screen.getByText("studio-user")).toBeInTheDocument();
     expect(mocks.fetchUserAccess).not.toHaveBeenCalled();
-    expect(screen.queryByText("Notice display settings")).not.toBeInTheDocument();
-    expect(screen.getByText("API key manager: notices disabled")).toBeInTheDocument();
+    expect(screen.queryByText(/API key manager:/)).not.toBeInTheDocument();
   });
 
-  it("shows both notice controls when the authenticated API reports migrated storage", async () => {
-    mocks.roles.currentUserId = "target-user";
+  it("keeps other-user key management for API-key admins", async () => {
+    mocks.roles.isApiKeyAdmin = true;
     mocks.noticeAvailable = true;
     mocks.fetchUser.mockResolvedValue({ id: "target-user", username: "target", createdTimestamp: 0 });
     render(<UserDetailPage />);
-    expect(await screen.findByText("Notice display settings")).toBeInTheDocument();
-    expect(screen.getByText("API key manager: notices enabled")).toBeInTheDocument();
+    expect(await screen.findByText("API key manager: notices enabled")).toBeInTheDocument();
   });
 
   it("shows a profile error instead of usage when loading fails", async () => {

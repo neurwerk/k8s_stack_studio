@@ -8,7 +8,6 @@ import { useParams } from "next/navigation";
 import { useVerifiedSession } from "@/lib/auth/session-context";
 import { useEffect, useState } from "react";
 import { ApiKeyManager } from "@/components/api-key-manager";
-import { NoticeSettings } from "@/components/notice-preferences";
 import { UserAccess } from "@/components/user-access";
 import { fetchOwnGroups, fetchUser, fetchUserAccess } from "@/lib/api/admin";
 import {
@@ -225,9 +224,8 @@ export default function UserDetailPage() {
         </div>
       ) : null}
 
-      {isSelf && noticeAvailable && <NoticeSettings />}
-      {(user || canManageKeys) && (
-        <ApiKeyManager userId={user?.id ?? userId} canManage={canManageKeys} isSelf={isSelf} noticeAvailable={noticeAvailable} />
+      {!isSelf && canManageKeys && (
+        <ApiKeyManager userId={user?.id ?? userId} canManage noticeAvailable={noticeAvailable} />
       )}
     </div>
   );

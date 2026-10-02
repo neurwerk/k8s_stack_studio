@@ -1,8 +1,10 @@
 "use client";
 
-import { KeyIcon, Loader2, Plus, XCircle } from "lucide-react";
+import { BellRing, KeyIcon, Loader2, Plus, XCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NoticeSettings } from "@/components/notice-preferences";
+import { inheritedNoticeOverrides, NoticeControls, NoticeSettings } from "@/components/notice-preferences";
+import { getNoticePreferences, saveNoticeOverrides } from "@/lib/api/notice-preferences";
+import type { NoticeOverrides, NoticePreferences } from "@/lib/api/notice-preferences";
 import {
   createApiKey,
   fetchAgentGatewayPermissions,
@@ -16,6 +18,7 @@ interface ApiKeyManagerProps {
   canManage: boolean;
   isSelf?: boolean;
   noticeAvailable?: boolean;
+  asPage?: boolean;
 }
 
 const API_KEY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._\x2d]{0,63}$/;
@@ -25,7 +28,7 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? "Unavailable" : date.toLocaleDateString();
 }
 
-export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailable = false }: ApiKeyManagerProps) {
+export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailable = false, asPage = false }: ApiKeyManagerProps) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +44,15 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
   const [creating, setCreating] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [noticeKeyId, setNoticeKeyId] = useState<string | null>(null);
+  const [noticeProfile, setNoticeProfile] = useState<NoticePreferences | null>(null);
+  const [noticeOverrides, setNoticeOverrides] = useState<NoticeOverrides>(inheritedNoticeOverrides);
+  const [noticeLoading, setNoticeLoading] = useState(false);
+  const [noticeLoadError, setNoticeLoadError] = useState<string | null>(null);
+  const [noticeSaveError, setNoticeSaveError] = useState<string | null>(null);
+  const [noticesSaved, setNoticesSaved] = useState(false);
   const keyRequestId = useRef(0);
   const permissionRequestId = useRef(0);
+  const noticeRequestId = useRef(0);
   const selectAllPermissionsRef = useRef<HTMLInputElement>(null);
 
   const loadKeys = useCallback(async () => {
@@ -92,13 +102,35 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
 
   useEffect(() => {
     permissionRequestId.current += 1;
+    noticeRequestId.current += 1;
     setShowCreateForm(false);
     setPermissions([]);
     setSelectedPermissions([]);
     setPermissionsError(null);
     setNewKeyResult(null);
     setCreatedExpiryDays(null);
+    setNoticeProfile(null);
+    setNoticeOverrides(inheritedNoticeOverrides());
+    setNoticeLoadError(null);
+    setNoticeSaveError(null);
   }, [userId]);
+
+  const loadNoticeProfile = () => {
+    const requestId = ++noticeRequestId.current;
+    setNoticeLoading(true);
+    setNoticeLoadError(null);
+    void getNoticePreferences()
+      .then((profile) => {
+        if (requestId === noticeRequestId.current) setNoticeProfile(profile);
+      })
+      .catch(() => {
+        if (requestId === noticeRequestId.current)
+          setNoticeLoadError("Unable to load profile notices. A new key will inherit your profile settings.");
+      })
+      .finally(() => {
+        if (requestId === noticeRequestId.current) setNoticeLoading(false);
+      });
+  };
 
   const openCreateForm = () => {
     setShowCreateForm(true);
@@ -106,13 +138,20 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
     setPermissions([]);
     setSelectedPermissions([]);
     setPermissionsError(null);
+    setNoticeOverrides(inheritedNoticeOverrides());
+    setNoticeProfile(null);
+    setNoticeSaveError(null);
+    setNoticesSaved(false);
     void loadPermissions();
+    if (isSelf && noticeAvailable) loadNoticeProfile();
   };
 
   const closeCreateForm = () => {
     permissionRequestId.current += 1;
+    noticeRequestId.current += 1;
     setShowCreateForm(false);
     setPermissionsLoading(false);
+    setNoticeLoading(false);
     setPermissionsError(null);
   };
 
@@ -120,7 +159,7 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
   const validExpiry = Number.isInteger(expiry) && expiry >= 1 && expiry <= 365;
   const validKeyName = API_KEY_NAME_PATTERN.test(newKeyName);
   const canCreate =
-    validKeyName && selectedPermissions.length > 0 && validExpiry && !permissionsLoading;
+    validKeyName && selectedPermissions.length > 0 && validExpiry && !permissionsLoading && !noticeLoading;
   const allPermissionsSelected =
     permissions.length > 0 && selectedPermissions.length === permissions.length;
 
@@ -135,6 +174,7 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
     if (!canCreate) return;
     setCreating(true);
     setPermissionsError(null);
+    const chosenNotices = noticeOverrides;
     try {
       const result = await createApiKey(userId, {
         name: newKeyName.trim(),
@@ -146,6 +186,15 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
       setNewKeyName("");
       closeCreateForm();
       await loadKeys();
+      if (isSelf && noticeAvailable && Object.values(chosenNotices).some((value) => value !== null)) {
+        try {
+          await saveNoticeOverrides(result.id, chosenNotices);
+          setNoticesSaved(true);
+        } catch {
+          setNoticeSaveError("Key created, but notice settings could not be saved. Open Notice settings to retry.");
+          setNoticeKeyId(result.id);
+        }
+      }
     } catch {
       setPermissionsError("Unable to create the API key. Please try again.");
     } finally {
@@ -170,9 +219,8 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
   return (
     <section className="card mt-6 border border-border bg-card p-6" aria-labelledby="api-keys-heading">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 id="api-keys-heading" className="text-lg font-semibold tracking-tight">
-          API Keys
-        </h2>
+        {asPage ? <h1 id="api-keys-heading" className="text-2xl font-semibold tracking-tight">API Keys</h1>
+          : <h2 id="api-keys-heading" className="text-lg font-semibold tracking-tight">API Keys</h2>}
         {canManage && (
           <button
             type="button"
@@ -267,8 +315,9 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
             </div>
           </div>
 
-          <fieldset className="mt-4">
-            <legend className="text-sm font-medium">Permissions</legend>
+          <fieldset className="mt-5 rounded-lg border border-border bg-card px-4 pb-4 pt-2">
+            <legend className="px-2 text-sm font-semibold">Permissions</legend>
+            <p className="text-xs text-muted-foreground">Choose what this key can access.</p>
             {permissionsLoading && (
               <p
                 className="mt-2 flex items-center gap-2 text-sm text-muted-foreground"
@@ -344,6 +393,23 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
             )}
           </fieldset>
 
+          {isSelf && noticeAvailable && (
+            <fieldset className="mt-5 rounded-lg border border-border bg-card px-4 pb-4 pt-2">
+              <legend className="px-2 text-sm font-semibold">Notice settings</legend>
+              <p className="text-xs text-muted-foreground">
+                This key inherits your profile notices unless you choose overrides here.
+              </p>
+              {noticeLoading && <p className="mt-3 text-sm text-muted-foreground">Loading profile notices…</p>}
+              {noticeLoadError && <p role="alert" className="mt-3 text-sm text-destructive">
+                {noticeLoadError}{" "}
+                <button type="button" className="underline hover:no-underline"
+                  onClick={loadNoticeProfile}>Retry</button>
+              </p>}
+              {noticeProfile && <NoticeControls values={noticeOverrides} profile={noticeProfile} isKey
+                onChange={(next) => { setNoticeOverrides(next); }} />}
+            </fieldset>
+          )}
+
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="submit"
@@ -375,6 +441,8 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
           {createdExpiryDays !== null && (
             <p className="mt-1 text-xs">Expires in {createdExpiryDays} days.</p>
           )}
+          {noticesSaved && <p className="mt-2 text-xs">Notice settings saved. Changes may take up to 5 minutes to take effect.</p>}
+          {noticeSaveError && <p role="alert" className="mt-2 text-xs text-destructive">{noticeSaveError}</p>}
           <p className="mt-2 text-xs">Copy this key now. It will not be shown again.</p>
           <button
             type="button"
@@ -385,6 +453,13 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {newKeyResult && !loading && keys.length > 0 && (
+        <div className="mb-4">
+          <hr className="border-border" />
+          <h3 className="mt-4 text-sm font-semibold">Saved keys</h3>
         </div>
       )}
 
@@ -459,10 +534,12 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
                     {isSelf && noticeAvailable && !key.revoked && (
                       <button
                         type="button"
-                        className="btn btn-ghost btn-xs ml-2"
+                        className="ml-2 inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-primary hover:bg-accent"
+                        aria-expanded={noticeKeyId === key.id}
                         onClick={() => setNoticeKeyId(noticeKeyId === key.id ? null : key.id)}
                       >
-                        Notices
+                        <BellRing className="h-3 w-3" aria-hidden="true" />
+                        Notice settings
                       </button>
                     )}
                   </td>

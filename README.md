@@ -66,15 +66,16 @@ The web application listens on **http://localhost:3001**, the API on
 `http://localhost:4010`, and Keycloak on **http://localhost:4081**. Use
 `localhost` for login, matching the registered redirect and issuer. The first
 start creates ignored `.dev-local/credentials.env` and locally signed workload
-certificates under `.dev-local/tls/`; the `DEV_USER_PASSWORD` in that env file
-is the initial password for `developer`, `viewer`, and `no-access`. `developer`
+certificates under `.dev-local/tls/`. The launcher displays the
+`DEV_USER_PASSWORD` from that env file after setup; it is the initial password
+for `developer`, `viewer`, and `no-access`. `developer`
 has all Studio feature roles and delegated Keycloak read access; `viewer` has
 only Studio admission; `no-access` has no Studio access. Existing passwords and
 API keys are retained on subsequent starts.
 
 The launcher waits for PostgreSQL, Keycloak, and the application, rerunning
-idempotent Keycloak configuration on each launch. `Ctrl+C` stops containers
-without deleting their volumes. Other commands:
+idempotent Keycloak configuration and Studio notice database migrations on each
+launch. `Ctrl+C` stops containers without deleting their volumes. Other commands:
 
 ```bash
 ./start_dev.sh up --detach
@@ -86,10 +87,12 @@ without deleting their volumes. Other commands:
 ```
 
 Keycloak and the API-key bridge are real services. The bridge persists keys in
-its own SQLite volume. Three separate dev-only services built from
-`dev/simulators/` provide synthetic responses for PII Engine, AgentGateway
-analytics, and OpenSearch. The browser always talks through Studio's ordinary
-authenticated API. The PII sample recognizes **only** the literal demo addresses
+its own SQLite volume. Studio notice preferences persist in a separate `studio`
+database in the local PostgreSQL container. Four separate dev-only services built
+from `dev/simulators/` provide synthetic responses for PII Engine, AgentGateway
+analytics, OpenSearch, and Langfuse. The browser always talks through Studio's
+ordinary authenticated API. The PII sample recognizes **only** the literal demo
+addresses
 `john@example.com` and `a@example.com` with `pass`, `mask`, or `block`; other
 actions return an explicit unsupported-sample result. It is not a policy
 validator or a real PII detector. Usage and logs are synthetic, including
@@ -97,6 +100,18 @@ current example dates; they are not observations from a gateway or Kubernetes
 cluster. The PII connection still requires a
 locally signed Studio client certificate; OpenSearch uses verified local TLS
 and a generated basic-auth password. No cluster credentials are accessed.
+
+The **LLM & MCP logs** page is enabled locally. Its fictional chat messages
+follow the Langfuse v4 generation input/output array shape observed in the
+development cluster, including sample reversible-replacement placeholders and a
+synthetic PII Engine notice in a title-generation request. The local Brave MCP
+call has a recorded query and result; a second call shows
+how missing parameters and session IDs appear in the UI. Example LLM exchanges
+share a demo session ID so related rows have the same color. Synthetic observation
+metadata includes requested and routed models plus HTTP method, path, and status.
+They contain no copied prompts, user identifiers, or credentials from Langfuse;
+request headers were not present in the sampled generation input/output records.
+The simulated project keys work only with the local Langfuse simulator.
 
 Optional automated local smoke check (requires host `uv` and Python 3.12):
 
@@ -130,13 +145,27 @@ a query, or a fragment. `K8S_STUDIO_USAGE_TIMEZONE` controls calendar boundaries
 and defaults to `Europe/Berlin`, including daylight-saving transitions.
 Langfuse tracing is separate from this usage integration.
 
-The optional **My LLM activity** page reads the signed-in person's ten most
-recent matching Langfuse v4 LLM exchanges. Expand an exchange to see its full
-recorded request and response. Query searches words or phrases in either side;
-optional From/To local timestamps limit searches to at most 90 days. Data not
+The optional **LLM & MCP logs** page reads the signed-in person's ten most recent
+matching Langfuse v4 LLM generations and MCP tool calls. The All, LLM, and MCP
+filter changes which observations are returned. The table shows recorded token
+totals and USD cost where available, with the response preview last. It shows
+the concrete model (preferring the response model on reroutes) and groups MCP
+server and tool together. Expanded entries group Sent and Received
+or Parameters and Result, with a Recorded payload toggle and recorded request time.
+The Langfuse observation contains model-visible content rather than the original
+HTTP wire request. A separate metadata card shows the observation's context as
+readable key/value rows or recorded JSON, with credential-like values masked.
+The current tracing pipeline records HTTP context but not request headers.
+Session IDs come from the observation or its Langfuse metadata and color-code
+related rows; unattributed tool calls may lack a session ID. MCP traces may put
+parameters and results in observation metadata instead of the ordinary
+input/output fields; unavailable fields are shown as missing. Query searches
+model input/output and recorded MCP query metadata; optional From/To local
+timestamps limit searches to at most 90 days. Data not
 recorded by tracing is shown as missing, and the page does not change PII or
 tracing policy. Admins cannot view another person's trace content through
-Studio. Unlike the separate usage totals, there is no other-user route.
+Studio. Unattributed tool calls are not included in a person's timeline.
+Unlike the separate usage totals, there is no other-user route.
 
 `K8S_STUDIO_LLM_LOGS_ENABLED=false` by default. When disabled the API route
 returns 404 and the API process does not start a Langfuse client. Base additionally
@@ -152,6 +181,11 @@ searches and rejects misattributed upstream results.
 The default landing page is the authenticated user's own info page. Explicit
 local deep links are preserved through login; self-service does not require a
 specialized administrator role beyond Studio admission.
+
+Personal Notice display (`/notices`) and API Keys (`/api-keys`) live under
+Configuration instead of the profile. Creating a personal API key can save
+notice overrides alongside its permissions; existing keys have a Notice settings
+action. PII Policy remains visible only to users with the `pii-admin` role.
 
 The user info page displays a Recharts 3.10.0 daily stacked chart by requested
 model, with an instant Tokens/USD switch, model visibility controls, and

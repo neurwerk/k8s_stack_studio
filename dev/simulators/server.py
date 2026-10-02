@@ -3,24 +3,29 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import os
 import ssl
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
-from fixtures import policy_actions, policy_result, search_logs, usage_summary
+from fixtures import langfuse_observations, policy_actions, policy_result, search_logs, usage_summary
 
 mode = sys.argv[1]
-ports = {"pii": 8443, "usage": 15000, "logs": 9200}
+ports = {"pii": 8443, "usage": 15000, "logs": 9200, "langfuse": 3000}
 if mode not in ports:
-    raise SystemExit("Expected pii, usage or logs")
+    raise SystemExit("Expected pii, usage, logs or langfuse")
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format_string: str, *args: object) -> None:
-        # Never log request bodies or credentials.
+        # Langfuse filters travel in the URL and can contain search terms.
+        if mode == "langfuse":
+            sys.stderr.write("simulator: Langfuse request handled\n")
+            return
         sys.stderr.write("simulator: " + format_string % args + "\n")
 
     def respond(self, status: int, body: object) -> None:
@@ -53,6 +58,19 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("Authorization") != expected:
                 self.respond(401, {"detail": "invalid log reader"})
                 return
+        if mode == "langfuse":
+            expected = "Basic " + base64.b64encode(b"pk-lf-studio-dev:sk-lf-studio-dev").decode()
+            if not hmac.compare_digest(self.headers.get("Authorization", ""), expected):
+                self.respond(401, {"detail": "invalid sample project key"})
+                return
+            if self.command == "GET" and urlsplit(self.path).path == "/api/public/v2/observations":
+                try:
+                    self.respond(200, langfuse_observations(parse_qs(urlsplit(self.path).query)))
+                except (ValueError, TypeError, KeyError, IndexError, StopIteration):
+                    self.respond(400, {"detail": "invalid sample query"})
+                return
+            self.respond(404, {"detail": "unknown simulation route"})
+            return
         if self.command == "GET" and mode == "pii":
             if self.path == "/v1/actions":
                 self.respond(200, policy_actions())

@@ -2,9 +2,11 @@
 
 import {
   BarChart3,
+  BellRing,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FileSearch,
   KeyRound,
   LogOut,
   ScrollText,
@@ -39,8 +41,10 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
   const isOpensearchAdmin = useIsOpensearchAdmin();
   const isPiiAdmin = useIsPiiAdmin();
   const currentUserId = useCurrentUserId();
-  const llmLogsAvailable = useVerifiedSession().llm_logs_available;
-  const [configurationOpen, setConfigurationOpen] = useState(pathname === "/policy-engine");
+  const session = useVerifiedSession();
+  const llmLogsAvailable = session.llm_logs_available;
+  const configurationActive = ["/policy-engine", "/notices", "/api-keys"].includes(pathname);
+  const [configurationOpen, setConfigurationOpen] = useState(configurationActive);
 
   return (
     <>
@@ -62,7 +66,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
         {llmLogsAvailable && (
           <Link
             href="/llm-activity"
-            aria-label="My LLM activity"
+            aria-label="LLM & MCP logs"
             aria-current={pathname === "/llm-activity" ? "page" : undefined}
             className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
               pathname === "/llm-activity"
@@ -71,18 +75,8 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
             }`}
           >
             <ScrollText className="h-5 w-5 shrink-0" />
-            {!collapsed && <span className="hidden sm:inline">My LLM activity</span>}
+            {!collapsed && <span className="hidden sm:inline">LLM &amp; MCP logs</span>}
           </Link>
-        )}
-        {!isAdmin && !isOpensearchAdmin && (
-          <span
-            aria-disabled="true"
-            title="API Keys (coming soon)"
-            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/40"
-          >
-            <KeyRound className="h-5 w-5 shrink-0" />
-            {!collapsed && <span className="hidden sm:inline">API Keys</span>}
-          </span>
         )}
         {isAdmin && (
           <Link
@@ -102,7 +96,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
         {isOpensearchAdmin && (
           <Link
             href="/logs"
-            aria-label="Logs"
+            aria-label="Admin logs"
             aria-current={pathname === "/logs" ? "page" : undefined}
             className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
               pathname === "/logs"
@@ -110,8 +104,8 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
                 : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
             }`}
           >
-            <ScrollText className="h-5 w-5 shrink-0" />
-            {!collapsed && <span className="hidden sm:inline">Logs</span>}
+            <FileSearch className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">Admin logs</span>}
           </Link>
         )}
       </nav>
@@ -138,7 +132,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
             {!collapsed && <span className="hidden sm:inline">Profile</span>}
           </Link>
         )}
-        {isPiiAdmin && (
+        {currentUserId && (
           <>
             <button
               type="button"
@@ -154,7 +148,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
               aria-controls="sidebar-configuration"
               aria-label="Configuration"
               className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                pathname === "/policy-engine"
+                configurationActive
                   ? "text-sidebar-accent-foreground font-medium"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
               }`}
@@ -176,19 +170,40 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
               hidden={!configurationOpen}
               className={collapsed ? "" : "sm:pl-5"}
             >
-              <Link
-                href="/policy-engine"
-                aria-label="PII Policy"
-                aria-current={pathname === "/policy-engine" ? "page" : undefined}
+              {session.notice_preferences_available && (
+                <Link href="/notices" aria-label="Notices"
+                  aria-current={pathname === "/notices" ? "page" : undefined}
+                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                    pathname === "/notices"
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                  }`}>
+                  <BellRing className="h-5 w-5 shrink-0" />
+                  {!collapsed && <span className="hidden sm:inline">Notices</span>}
+                </Link>
+              )}
+              <Link href="/api-keys" aria-label="API Keys"
+                aria-current={pathname === "/api-keys" ? "page" : undefined}
                 className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-                  pathname === "/policy-engine"
+                  pathname === "/api-keys"
                     ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                }`}
-              >
-                <Shield className="h-5 w-5 shrink-0" />
-                {!collapsed && <span className="hidden sm:inline">PII Policy</span>}
+                }`}>
+                <KeyRound className="h-5 w-5 shrink-0" />
+                {!collapsed && <span className="hidden sm:inline">API Keys</span>}
               </Link>
+              {isPiiAdmin && (
+                <Link href="/policy-engine" aria-label="PII Policy"
+                  aria-current={pathname === "/policy-engine" ? "page" : undefined}
+                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                    pathname === "/policy-engine"
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                  }`}>
+                  <Shield className="h-5 w-5 shrink-0" />
+                  {!collapsed && <span className="hidden sm:inline">PII Policy</span>}
+                </Link>
+              )}
             </div>
           </>
         )}
