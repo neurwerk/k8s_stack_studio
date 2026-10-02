@@ -370,7 +370,7 @@ function ActivityView() {
                             </section>
                           </div>
                           <section aria-label="Recorded metadata" className="mt-4 min-w-0 rounded-lg border border-border bg-card p-4">
-                            <h2 className="text-sm font-semibold">Observation metadata</h2>
+                            <h2 className="text-sm font-semibold">Selected observation metadata</h2>
                             <p className="mb-3 mt-1 text-xs text-muted-foreground">
                               Context for the whole log entry, including recorded HTTP details.
                             </p>
