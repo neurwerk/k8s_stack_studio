@@ -29,6 +29,14 @@ class InvalidAgentGatewayAdminUrlError(ValueError):
         )
 
 
+class InvalidLangfuseConfigError(ValueError):
+    """Enabled LLM logs need a fixed URL and project credentials."""
+
+    def __init__(self) -> None:
+        """Keep configuration errors free of secret values."""
+        super().__init__("Enabled LLM logs require a Langfuse URL and project credentials.")
+
+
 class MissingPiiEngineHostnameError(ValueError):
     """The configured PII Engine URL has no hostname."""
 
@@ -147,6 +155,12 @@ class Settings(BaseSettings):
     # Calendar usage periods are calculated in this IANA timezone.
     usage_timezone: str = "Europe/Berlin"
 
+    # A disabled viewer has no Langfuse client and does not need credentials.
+    llm_logs_enabled: bool = False
+    langfuse_url: str = ""
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+
     # --- OpenSearch (logs viewer) ---
     # The internal service DNS default is overridden through environment config.
     opensearch_url: str = (
@@ -249,3 +263,24 @@ class Settings(BaseSettings):
         ):
             raise InvalidAgentGatewayAdminUrlError
         return value
+
+    @model_validator(mode="after")
+    def validate_langfuse_config(self) -> Self:
+        """Fail startup if the enabled viewer cannot use a fixed project endpoint."""
+        if not self.llm_logs_enabled:
+            return self
+        parsed = _parse_url(self.langfuse_url)
+        if (
+            parsed is None
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+            or not self.langfuse_public_key
+            or not self.langfuse_secret_key
+        ):
+            raise InvalidLangfuseConfigError
+        return self

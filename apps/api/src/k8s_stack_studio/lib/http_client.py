@@ -72,6 +72,10 @@ async def http_client_lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.pii_engine_client = await stack.enter_async_context(
             _create_pii_engine_client(settings)
         )
+        if settings.llm_logs_enabled:
+            app.state.langfuse_client = await stack.enter_async_context(
+                _create_client(trust_env=False)
+            )
         yield
 
 

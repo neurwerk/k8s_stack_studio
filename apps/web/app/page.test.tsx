@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
 function landing(subject: string) {
   return (
     <VerifiedSessionProvider
-      session={{ subject, realm_roles: ["studio-user"], agentgateway_roles: [], notice_preferences_available: false }}
+      session={{ subject, realm_roles: ["studio-user"], agentgateway_roles: [], notice_preferences_available: false, llm_logs_available: false }}
     >
       <Home />
     </VerifiedSessionProvider>

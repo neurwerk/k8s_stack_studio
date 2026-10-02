@@ -18,6 +18,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { VersionInfo } from "@/lib/api/version";
+import { useVerifiedSession } from "@/lib/auth/session-context";
 import { fetchVersion } from "@/lib/api/version";
 import {
   useCurrentUserId,
@@ -38,6 +39,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
   const isOpensearchAdmin = useIsOpensearchAdmin();
   const isPiiAdmin = useIsPiiAdmin();
   const currentUserId = useCurrentUserId();
+  const llmLogsAvailable = useVerifiedSession().llm_logs_available;
   const [configurationOpen, setConfigurationOpen] = useState(pathname === "/policy-engine");
 
   return (
@@ -57,6 +59,21 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
           <BarChart3 className="h-5 w-5 shrink-0" />
           {!collapsed && <span className="hidden sm:inline">Usage</span>}
         </Link>
+        {llmLogsAvailable && (
+          <Link
+            href="/llm-activity"
+            aria-label="My LLM activity"
+            aria-current={pathname === "/llm-activity" ? "page" : undefined}
+            className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              pathname === "/llm-activity"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            }`}
+          >
+            <ScrollText className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">My LLM activity</span>}
+          </Link>
+        )}
         {!isAdmin && !isOpensearchAdmin && (
           <span
             aria-disabled="true"

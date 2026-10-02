@@ -130,6 +130,25 @@ a query, or a fragment. `K8S_STUDIO_USAGE_TIMEZONE` controls calendar boundaries
 and defaults to `Europe/Berlin`, including daylight-saving transitions.
 Langfuse tracing is separate from this usage integration.
 
+The optional **My LLM activity** page reads the signed-in person's ten most
+recent matching Langfuse v4 LLM exchanges. Expand an exchange to see its full
+recorded request and response. Query searches words or phrases in either side;
+optional From/To local timestamps limit searches to at most 90 days. Data not
+recorded by tracing is shown as missing, and the page does not change PII or
+tracing policy. Admins cannot view another person's trace content through
+Studio. Unlike the separate usage totals, there is no other-user route.
+
+`K8S_STUDIO_LLM_LOGS_ENABLED=false` by default. When disabled the API route
+returns 404 and the API process does not start a Langfuse client. Base additionally
+omits the API Pod's project credentials and Langfuse egress unless explicitly
+enabled. When enabled, set `K8S_STUDIO_LANGFUSE_URL` and the project-scoped
+`K8S_STUDIO_LANGFUSE_PUBLIC_KEY` and `K8S_STUDIO_LANGFUSE_SECRET_KEY` on the API
+process only. Keep these keys out of the browser. Query text is sent in the
+Studio request body rather than in its URL; responses include `Cache-Control:
+no-store`. Langfuse project keys can access every trace in the project, so the
+server always enforces the verified Keycloak subject for both input and output
+searches and rejects misattributed upstream results.
+
 The default landing page is the authenticated user's own info page. Explicit
 local deep links are preserved through login; self-service does not require a
 specialized administrator role beyond Studio admission.
