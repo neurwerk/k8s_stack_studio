@@ -17,9 +17,87 @@ const fields: { name: keyof NoticePreferences; label: string }[] = [
   { name: "show_unscanned_faces", label: "Faces not scanned" },
 ];
 
-export function NoticeSettings({ keyId }: { keyId?: string }) {
+export function inheritedNoticeOverrides(): NoticeOverrides {
+  return {
+    notices_enabled: null,
+    ...Object.fromEntries(fields.map(({ name }) => [name, null])),
+  } as NoticeOverrides;
+}
+
+export function NoticeControls({ values, profile, isKey, onChange }: {
+  values: NoticePreferences | NoticeOverrides;
+  profile: NoticePreferences | null;
+  isKey: boolean;
+  onChange: (next: NoticePreferences | NoticeOverrides) => void;
+}) {
+  const masterEnabled = values.notices_enabled ?? profile?.notices_enabled ?? true;
+
+  function switchAll(enabled: boolean) {
+    onChange({
+      ...values,
+      ...Object.fromEntries(fields.map(({ name }) => [name, enabled])),
+      notices_enabled: enabled,
+    });
+  }
+
+  function resetOverrides(name?: keyof NoticePreferences) {
+    if (!isKey) return;
+    onChange(name ? { ...values, [name]: null } : inheritedNoticeOverrides());
+  }
+
+  return <div className="mt-4 space-y-3">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/20 bg-accent/50 p-3">
+      <div>
+        <p className="text-sm font-semibold">Extra notices</p>
+        <p className="text-xs text-muted-foreground">All categories</p>
+      </div>
+      <div className="flex items-center gap-3">
+        {isKey && values.notices_enabled === null && (
+          <span className="text-xs text-muted-foreground">Inherits profile</span>
+        )}
+        <span className="text-xs font-medium">{masterEnabled ? "On" : "Off"}</span>
+        <input type="checkbox" className="toggle toggle-primary toggle-sm"
+          aria-label="Extra notices (master)" checked={masterEnabled}
+          onChange={(event) => { switchAll(event.target.checked); }} />
+      </div>
+    </div>
+    {isKey && <button type="button" className="btn btn-ghost btn-xs" onClick={() => { resetOverrides(); }}>
+      Use profile settings for this key
+    </button>}
+    <div className="ml-4 border-l-2 border-border pl-4 sm:ml-6 sm:pl-6">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notice categories</p>
+      <div className="grid gap-x-6 sm:grid-cols-2">
+        {fields.map(({ name, label }) => {
+          const enabled = masterEnabled && (values[name] ?? profile?.[name] ?? true);
+          return (
+            <div key={name} className="flex items-center justify-between gap-3 border-b border-border/70 py-2">
+              <div className="min-w-0">
+                <p className="text-sm">{label}</p>
+                {isKey && values[name] === null && (
+                  <p className="text-xs text-muted-foreground">Inherits profile</p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {isKey && values[name] !== null && (
+                  <button type="button" className="btn btn-ghost btn-xs" disabled={!masterEnabled}
+                    onClick={() => { resetOverrides(name); }}>Inherit</button>
+                )}
+                <span className="text-xs font-medium">{enabled ? "On" : "Off"}</span>
+                <input type="checkbox" className="toggle toggle-primary toggle-sm"
+                  aria-label={label} checked={enabled} disabled={!masterEnabled}
+                  onChange={(event) => { onChange({ ...values, [name]: event.target.checked }); }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  </div>;
+}
+
+export function NoticeSettings({ keyId, asPage = false }: { keyId?: string; asPage?: boolean }) {
   const [values, setValues] = useState<NoticePreferences | NoticeOverrides | null>(null);
-  const [userMaster, setUserMaster] = useState(true);
+  const [profile, setProfile] = useState<NoticePreferences | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +107,7 @@ export function NoticeSettings({ keyId }: { keyId?: string }) {
     let active = true;
     const load = keyId
       ? Promise.all([getNoticeOverrides(keyId), getNoticePreferences()]).then(([overrides, user]) => {
-        if (active) setUserMaster(user.notices_enabled);
+        if (active) setProfile(user);
         return overrides;
       })
       : getNoticePreferences();
@@ -38,8 +116,6 @@ export function NoticeSettings({ keyId }: { keyId?: string }) {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [keyId]);
-
-  const masterOff = values !== null && !(values.notices_enabled ?? userMaster);
 
   async function save() {
     if (!values) return;
@@ -59,56 +135,24 @@ export function NoticeSettings({ keyId }: { keyId?: string }) {
 
   return (
     <section className="card mt-6 border border-border bg-card p-6">
-      <h2 className="text-lg font-semibold">{keyId ? "API key notices" : "Notice display"}</h2>
+      {asPage ? <h1 className="text-2xl font-semibold">Notice display</h1>
+        : <h2 className="text-lg font-semibold">{keyId ? "API key notices" : "Notice display"}</h2>}
       <p className="mt-1 text-sm text-muted-foreground">
-        {keyId ? "Inherit uses your profile setting for this key. An explicit On can override your profile's Off setting." :
-          "Choose which informational notices you see."}
-      </p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Turning extra notices off does not hide API errors or turn off scanning.
+        {keyId
+          ? "Override your profile's informational notices for this key; turning them off does not hide API errors or disable PII scanning."
+          : "Choose which informational notices you see; turning them off does not hide API errors or disable PII scanning."}
       </p>
       {loading && <p role="status" className="mt-3">Loading notice settings…</p>}
       {error && <p role="alert" className="mt-3 text-error">{error}</p>}
-      {values && <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <label className="flex items-center justify-between gap-3 text-sm sm:col-span-2">
-          <span>Extra notices (master)</span>
-          <select className="select select-bordered select-sm" aria-label="Extra notices (master)"
-            value={values.notices_enabled === null ? "inherit" : values.notices_enabled ? "on" : "off"}
-            onChange={(event) => {
-              const value = event.target.value === "inherit" ? null : event.target.value === "on";
-              setValues({ ...values, notices_enabled: value });
-              setSaved(false);
-            }}>
-            {keyId && <option value="inherit">Inherit</option>}
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </select>
-        </label>
-        {masterOff && <p className="text-sm text-muted-foreground sm:col-span-2">
-          Extra notices are off. Your category choices are saved and will apply when extra notices are on.
-        </p>}
-        {fields.map(({ name, label }) => (
-          <label key={name} className="flex items-center justify-between gap-3 text-sm">
-            <span>{label}</span>
-            <select className="select select-bordered select-sm" aria-label={label} disabled={masterOff}
-              value={values[name] === null ? "inherit" : values[name] ? "on" : "off"}
-              onChange={(event) => {
-                const value = event.target.value === "inherit" ? null : event.target.value === "on";
-                setValues({ ...values, [name]: value });
-                setSaved(false);
-              }}>
-              {keyId && <option value="inherit">Inherit</option>}
-              <option value="on">On</option>
-              <option value="off">Off</option>
-            </select>
-          </label>
-        ))}
-      </div>}
-      {values && <div className="mt-4 flex items-center gap-3">
+      {values && <NoticeControls values={values} profile={profile} isKey={Boolean(keyId)}
+        onChange={(next) => { setValues(next); setSaved(false); }} />}
+      {values && <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+        {saved && <span role="status" className="text-sm text-muted-foreground">
+          Saved. Changes may take up to 5 minutes to take effect.
+        </span>}
         <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => { void save(); }}>
           {saving ? "Saving…" : "Save notices"}
         </button>
-        {saved && <span role="status" className="text-sm">Saved.</span>}
       </div>}
     </section>
   );

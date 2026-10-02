@@ -11,7 +11,7 @@ from pydantic import AwareDatetime, BaseModel, Field
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.dependencies import get_current_user_id, get_settings
-from k8s_stack_studio.lib.langfuse import Exchange, LangfuseClient, LangfuseReadError
+from k8s_stack_studio.lib.langfuse import Activity, ActivityType, LangfuseClient, LangfuseReadError
 
 router = APIRouter(prefix="/api/me/llm-activity", tags=["llm-activity"])
 
@@ -21,6 +21,7 @@ class SearchRequest(BaseModel):
 
     model_config = {"extra": "forbid"}
     q: Annotated[str, Field(max_length=200)] = ""
+    type: ActivityType = "all"
     start: AwareDatetime | None = None
     end: AwareDatetime | None = None
 
@@ -32,15 +33,15 @@ def _enabled(settings: Settings = Depends(get_settings)) -> Settings:
     return settings
 
 
-@router.post("", response_model=list[Exchange])
+@router.post("", response_model=list[Activity])
 async def search_llm_activity(
     filters: SearchRequest,
     request: Request,
     response: Response,
     user_id: str = Depends(get_current_user_id),
     settings: Settings = Depends(_enabled),
-) -> list[Exchange]:
-    """Return at most ten of this caller's exchanges; no trace-ID read route exists."""
+) -> list[Activity]:
+    """Return at most ten of this caller's exchanges and MCP calls."""
     now = datetime.now(UTC)
     if (filters.start is None) != (filters.end is None):
         raise HTTPException(422, "Supply both From and To")
@@ -57,7 +58,7 @@ async def search_llm_activity(
         settings.langfuse_url, settings.langfuse_public_key, settings.langfuse_secret_key, client
     )
     try:
-        result = await langfuse.recent(user_id, start, end, filters.q.strip() or None)
+        result = await langfuse.recent(user_id, start, end, filters.q.strip() or None, filters.type)
     except LangfuseReadError as exc:
         raise HTTPException(502, "LLM activity is temporarily unavailable") from exc
     response.headers["Cache-Control"] = "no-store"

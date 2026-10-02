@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   pathname: "/usage",
   roles: [] as string[],
   llmLogsAvailable: false,
+  noticeAvailable: false,
   signoutRedirect: vi.fn(),
 }));
 
@@ -22,7 +23,10 @@ vi.mock("@/lib/auth/roles", () => ({
   useIsPiiAdmin: () => state.roles.includes("pii-admin"),
 }));
 vi.mock("@/lib/auth/session-context", () => ({
-  useVerifiedSession: () => ({ llm_logs_available: state.llmLogsAvailable }),
+  useVerifiedSession: () => ({
+    llm_logs_available: state.llmLogsAvailable,
+    notice_preferences_available: state.noticeAvailable,
+  }),
 }));
 vi.mock("@/lib/api/version", () => ({ fetchVersion: () => Promise.resolve(null) }));
 
@@ -31,15 +35,18 @@ describe("Sidebar settings", () => {
     state.pathname = "/usage";
     state.roles = [];
     state.llmLogsAvailable = false;
+    state.noticeAvailable = false;
     state.signoutRedirect.mockClear();
   });
 
-  it("shows profile and logout, but hides configuration without the PII role", async () => {
+  it("shows self-service configuration without the PII role", async () => {
     render(<Sidebar />);
 
     expect(screen.getByText("Settings")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Profile" })).toHaveAttribute("href", "/users/user-1");
-    expect(screen.queryByRole("button", { name: "Configuration" })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Configuration" }));
+    expect(screen.getByRole("link", { name: "API Keys" })).toHaveAttribute("href", "/api-keys");
+    expect(screen.queryByRole("link", { name: "PII Policy" })).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Logout" }));
     expect(state.signoutRedirect).toHaveBeenCalledOnce();
   });
@@ -75,21 +82,21 @@ describe("Sidebar settings", () => {
     expect(screen.getByRole("link", { name: "PII Policy" })).toBeInTheDocument();
   });
 
-  it("shows a future API Keys item to non-admins and role-gates admin links", () => {
+  it("shows self-service pages while role-gating admin links", async () => {
     const { rerender } = render(<Sidebar />);
-    expect(screen.getByText("API Keys").closest("[aria-disabled]")).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(screen.queryByRole("link", { name: "API Keys" })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Configuration" }));
+    expect(screen.getByRole("link", { name: "API Keys" })).toHaveAttribute("href", "/api-keys");
+    state.noticeAvailable = true;
+    rerender(<Sidebar />);
+    expect(screen.getByRole("link", { name: "Notices" })).toHaveAttribute("href", "/notices");
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Groups and Roles" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Logs" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "My LLM activity" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Admin logs" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "LLM & MCP logs" })).not.toBeInTheDocument();
 
     state.roles = ["opensearch-admin"];
     rerender(<Sidebar />);
-    expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/logs");
+    expect(screen.getByRole("link", { name: "Admin logs" })).toHaveAttribute("href", "/logs");
     expect(screen.queryByRole("link", { name: "Users" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Groups and Roles" })).not.toBeInTheDocument();
 
@@ -100,7 +107,7 @@ describe("Sidebar settings", () => {
     expect(screen.queryByRole("link", { name: "Groups" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Realm Roles" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Clients" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Logs" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Admin logs" })).not.toBeInTheDocument();
 
     state.roles = ["keycloak-admin", "opensearch-admin"];
     rerender(<Sidebar />);
@@ -108,7 +115,7 @@ describe("Sidebar settings", () => {
     expect(items.slice(0, 3)).toEqual(["/usage", "/users", "/logs"]);
     state.llmLogsAvailable = true;
     rerender(<Sidebar />);
-    expect(screen.getByRole("link", { name: "My LLM activity" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "LLM & MCP logs" })).toHaveAttribute(
       "href", "/llm-activity",
     );
   });

@@ -97,6 +97,17 @@ services:
       timeout: 3s
       retries: 20
 
+  langfuse-sim:
+    <<: *simulator
+    command: [python, /app/server.py, langfuse]
+    volumes:
+      - ./.dev-local/demo-users:/demo-users:ro
+    healthcheck:
+      test: [CMD, python, /app/health.py, "3000"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   bridge:
     image: ghcr.io/neurwerk/k8s-stack-keycloak-api-key-bridge:0.7.0
     # This release publishes linux/amd64 only; Docker Desktop emulates it on ARM Macs.
@@ -138,6 +149,11 @@ services:
       K8S_STUDIO_OPENSEARCH_USER: studio-logs-read
       K8S_STUDIO_OPENSEARCH_PASSWORD: ${STUDIO_LOGS_PASSWORD:?Run start_dev.sh}
       K8S_STUDIO_AGENTGATEWAY_ADMIN_URL: http://usage-sim:15000
+      K8S_STUDIO_NOTICE_DATABASE_URL: postgresql://keycloak:${KEYCLOAK_DB_PASSWORD:?Run start_dev.sh}@postgres:5432/studio
+      K8S_STUDIO_LLM_LOGS_ENABLED: "true"
+      K8S_STUDIO_LANGFUSE_URL: http://langfuse-sim:3000
+      K8S_STUDIO_LANGFUSE_PUBLIC_KEY: pk-lf-studio-dev
+      K8S_STUDIO_LANGFUSE_SECRET_KEY: sk-lf-studio-dev
     volumes:
       - ./apps/api/src:/workspace/apps/api/src:ro
       - ./.dev-local/tls:/tls:ro
@@ -153,6 +169,8 @@ services:
       logs-sim:
         condition: service_healthy
       usage-sim:
+        condition: service_healthy
+      langfuse-sim:
         condition: service_healthy
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4010/api/version', timeout=3)"]

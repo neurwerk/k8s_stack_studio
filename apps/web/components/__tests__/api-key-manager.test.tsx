@@ -104,8 +104,9 @@ describe("ApiKeyManager", () => {
   it("offers personal-key notices only when the API reports storage available", async () => {
     const { rerender } = render(<ApiKeyManager userId="target-user" canManage isSelf noticeAvailable={false} />);
     await screen.findByText("automation");
-    expect(screen.queryByRole("button", { name: "Notices" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Notice settings" })).not.toBeInTheDocument();
     rerender(<ApiKeyManager userId="target-user" canManage isSelf noticeAvailable />);
-    expect(screen.getByRole("button", { name: "Notices" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Notice settings" })).toHaveClass("text-primary");
   });
+
 });

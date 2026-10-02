@@ -343,3 +343,161 @@ def search_logs(payload: dict) -> dict:
             "hits": hits[start : start + size],
         }
     }
+
+
+def langfuse_observations(params: dict[str, list[str]]) -> dict:
+    """Return owner-scoped synthetic Langfuse v4 generations and MCP tool calls."""
+    developer, viewer = _demo_principals()
+    now = datetime.now(UTC)
+    examples = (
+        (
+            developer,
+            "deepseek/deepseek-v4-flash-0731",
+            15,
+            [
+                {"role": "system", "content": "Demo policy: reversible_replace email addresses."},
+                {"role": "user", "content": "Draft an invitation for <REV_EMAIL_ADDRESS_abcdef0123456789_0123456789abcdef>."},
+            ],
+            [{"role": "assistant", "content": "Hello <REV_EMAIL_ADDRESS_abcdef0123456789_0123456789abcdef>, you are invited!"}],
+        ),
+        (
+            developer,
+            "deepseek/deepseek-v4-flash-0731",
+            35,
+            [
+                {"role": "system", "content": "Provide a short title for the conversation."},
+                {
+                    "role": "user",
+                    "content": (
+                        "Conversation:\nUser: How is our demo going?\n"
+                        "AI: Everything is ready at <REV_CLIENT_COMPANY_0123456789abcdef_abcdef0123456789>.\n\n"
+                        "---\nPII Engine Notice\nNote: Sensitive data in this conversation was anonymized."
+                    ),
+                },
+            ],
+            [{"role": "assistant", "content": "Demo Progress Update"}],
+        ),
+        (
+            developer,
+            "mistral-small3.2:24b",
+            80,
+            [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Summarize the sample deployment checklist in two sentences."},
+            ],
+            [{"role": "assistant", "content": "Check configuration and health. Then verify the demo UI."}],
+        ),
+        (
+            viewer,
+            "google/gemini-3.1-flash-lite",
+            180,
+            [
+                {"role": "system", "content": "Demo policy: reversible_replace email addresses."},
+                {"role": "user", "content": "Send a reminder to <REV_EMAIL_ADDRESS_1234567890abcdef_fedcba9876543210>."},
+            ],
+            [{"role": "assistant", "content": "Reminder prepared for <REV_EMAIL_ADDRESS_1234567890abcdef_fedcba9876543210>."}],
+        ),
+    )
+    filters = json.loads(params["filter"][0]) if "filter" in params else []
+    if filters:
+        conditions = {entry["column"]: entry for entry in filters}
+        if {"userId", "type", "startTime"} - conditions.keys():
+            raise ValueError("missing owner, type or time filter")
+        owner = conditions["userId"]["value"]
+        types = conditions["type"]["value"]
+        bounds = [entry for entry in filters if entry["column"] == "startTime"]
+        start = datetime.fromisoformat(next(entry["value"] for entry in bounds if entry["operator"] == ">="))
+        end = datetime.fromisoformat(next(entry["value"] for entry in bounds if entry["operator"] == "<"))
+        match = filters[-1] if len(filters) > 4 else None
+        if match and (
+            match["column"] not in ("input", "output", "metadata")
+            or match["operator"] != "matches"
+            or (match["column"] == "metadata" and match.get("key") != "attributes.langfuse.observation.input.query")
+        ):
+            raise ValueError("unsupported search")
+    else:
+        owner = params["userId"][0]
+        types = params["type"]
+        start = datetime.fromisoformat(params["fromStartTime"][0])
+        end = datetime.fromisoformat(params["toStartTime"][0])
+        match = None
+    if not types or set(types) - {"GENERATION", "TOOL"}:
+        raise ValueError("unsupported observation type")
+    if owner not in (developer, viewer) or not start < end:
+        return {"data": []}
+    rows = []
+    for index, (user_id, model, age_minutes, sent, received) in enumerate(examples):
+        at = now - timedelta(minutes=age_minutes)
+        input_text = json.dumps(sent)
+        output_text = json.dumps(received)
+        session_id = (
+            "demo-developer-conversation-a" if index < 2
+            else "demo-developer-conversation-b" if user_id == developer
+            else "demo-viewer-conversation-a"
+        )
+        if user_id != owner or not start <= at < end:
+            continue
+        if "GENERATION" not in types or (
+            match and match["value"].lower() not in
+            (input_text if match["column"] == "input" else output_text if match["column"] == "output" else "").lower()
+        ):
+            continue
+        rows.append(
+            {
+                "id": f"synthetic-generation-{index + 1}",
+                "userId": user_id,
+                "type": "GENERATION",
+                "startTime": at.isoformat(),
+                "endTime": (at + timedelta(milliseconds=275 + index * 150)).isoformat(),
+                "sessionId": session_id,
+                "name": "POST /v1/chat/completions",
+                "model": model,
+                "inputUsage": 120 + index * 90,
+                "outputUsage": 40 + index * 30,
+                "totalUsage": 160 + index * 120,
+                "totalCost": round(0.0012 + index * 0.0004, 6),
+                "level": "DEFAULT",
+                "input": input_text,
+                "output": output_text,
+                "metadata": {
+                    "requested_model": f"remote/{model}",
+                    "attributes.gen_ai.request.model": model,
+                    "attributes.gen_ai.response.model": model,
+                    "attributes.langfuse.session.id": session_id,
+                    "attributes.http.method": "POST",
+                    "attributes.http.path": "/v1/chat/completions",
+                    "attributes.http.status": 200,
+                    "resourceAttributes.service.name": "studio-demo-gateway",
+                },
+            }
+        )
+    tools = (
+        (developer, 25, {
+            "mcp.server": "brave", "mcp.tool": "brave_web_search",
+            "attributes.langfuse.observation.input.query": "example weather in Berlin",
+            "attributes.langfuse.observation.input.result_filter.0": "news",
+            "attributes.langfuse.observation.output.content.0.type": "text",
+            "attributes.langfuse.observation.output.content.0.text": "Sample result: sunny weather in Berlin.",
+            "attributes.langfuse.observation.output.isError": "false",
+        }),
+        (viewer, 95, {"mcp.server": "brave", "mcp.tool": "brave_web_search"}),
+    )
+    for index, (user_id, age_minutes, metadata) in enumerate(tools):
+        at = now - timedelta(minutes=age_minutes)
+        if "TOOL" not in types or user_id != owner or not start <= at < end:
+            continue
+        content = "" if match is None else (
+            str(metadata.get(match["key"], "")) if match["column"] == "metadata"
+            else ""
+        )
+        if match and match["value"].lower() not in content.lower():
+            continue
+        rows.append({
+            "id": f"synthetic-tool-{index + 1}", "userId": user_id,
+            "type": "TOOL", "startTime": at.isoformat(), "name": "brave_web_search",
+            "endTime": (at + timedelta(milliseconds=840 + index * 200)).isoformat(),
+            "sessionId": None,
+            "input": None, "output": None, "metadata": metadata,
+        })
+    rows.sort(key=lambda row: row["startTime"], reverse=True)
+    return {"data": rows[: min(int(params["limit"][0]), 10)]}

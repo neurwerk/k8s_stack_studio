@@ -22,11 +22,27 @@ def observation(
         "userId": owner,
         "type": "GENERATION",
         "startTime": when,
+        "endTime": "2026-10-01T12:00:00.275Z",
         "name": "llm",
         "model": "test-model",
         "input": '{"messages":[{"role":"user","content":"a full request"}]}',
         "output": '{"role":"assistant","content":"a full response"}',
     }
+
+
+def sample_response(request: httpx.Request) -> httpx.Response:
+    """Return the bounded generations expected by the existing activity boundary test."""
+    if request.url.params.get("filter"):
+        filters = json.loads(request.url.params["filter"])
+        if len(filters) == 4:
+            return httpx.Response(200, json={"data": [observation("one")]})
+        column = filters[-1]["column"]
+        if column == "input":
+            return httpx.Response(200, json={"data": [observation("one"), observation("two")]})
+        if column == "output":
+            return httpx.Response(200, json={"data": [observation("two"), observation("three")]})
+        return httpx.Response(200, json={"data": []})
+    return httpx.Response(200, json={"data": [observation("one")]})
 
 
 @pytest.fixture
@@ -46,13 +62,7 @@ async def activity_api():
         result = state["result"]
         if isinstance(result, httpx.Response):
             return result
-        if request.url.params.get("filter"):
-            filters = json.loads(request.url.params["filter"])
-            column = filters[-1]["column"]
-            if column == "input":
-                return httpx.Response(200, json={"data": [observation("one"), observation("two")]})
-            return httpx.Response(200, json={"data": [observation("two"), observation("three")]})
-        return httpx.Response(200, json={"data": [observation("one")]})
+        return sample_response(request)
 
     app = FastAPI()
     app.include_router(router)
@@ -90,8 +100,8 @@ async def test_personal_activity_boundary(activity_api):
     assert result.status_code == 200
     assert result.headers["cache-control"] == "no-store"
     assert result.json()[0]["input"].endswith('"a full request"}]}')
-    assert calls[0].url.params["userId"] == "self"
-    assert calls[0].url.params["type"] == "GENERATION"
+    assert json.loads(calls[0].url.params["filter"])[0]["value"] == "self"
+    assert json.loads(calls[0].url.params["filter"])[1]["value"] == ["GENERATION", "TOOL"]
     assert calls[0].url.params["limit"] == "10"
 
     calls.clear()
@@ -101,6 +111,7 @@ async def test_personal_activity_boundary(activity_api):
             "q": "private phrase",
             "start": "2026-09-01T00:00:00Z",
             "end": "2026-10-02T00:00:00Z",
+            "type": "llm",
         },
     )
     assert [item["id"] for item in result.json()] == ["one", "two", "three"]
