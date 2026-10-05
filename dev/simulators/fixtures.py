@@ -131,10 +131,10 @@ def policy_result(payload: dict, *, evaluate: bool) -> dict:
     policy = payload.get("policy") or {}
     pii = policy.get("pii", {}) if isinstance(policy, dict) else {}
     action = pii.get("defaultAction", "mask") if isinstance(pii, dict) else "mask"
-    messages = request.get("messages", [])
+    segments = request.get("segments", [])
     text = (
-        messages[0].get("content")
-        if isinstance(messages, list) and messages and isinstance(messages[0], dict)
+        segments[0].get("text")
+        if isinstance(segments, list) and segments and isinstance(segments[0], dict)
         else None
     )
     marker = next(
@@ -149,7 +149,7 @@ def policy_result(payload: dict, *, evaluate: bool) -> dict:
     if action not in ("mask", "block", "pass"):
         if evaluate:
             return {
-                "api_version": "v1",
+                "api_version": "v2",
                 "valid": False,
                 "issues": [
                     {
@@ -164,20 +164,20 @@ def policy_result(payload: dict, *, evaluate: bool) -> dict:
         raise ValueError("unsupported local sample action")
     blocked = detected and action == "block"
     transformed = detected and action == "mask"
-    result_request = None if blocked else dict(request)
-    if result_request is not None and transformed:
-        result_request["messages"] = [
-            dict(messages[0], content=text.replace(marker, "*" * len(marker))),
-            *messages[1:],
+    result_segments = None if blocked else list(segments)
+    if result_segments is not None and transformed:
+        result_segments = [
+            dict(segments[0], text=text.replace(marker, "*" * len(marker))),
+            *segments[1:],
         ]
     result = {
-        "api_version": "v1",
+        "api_version": "v2",
         "decision": "block" if blocked else "apply_actions" if transformed else "pass",
         "entities": ["EMAIL_ADDRESS"] if detected else [],
         "entity_counts": {"EMAIL_ADDRESS": 1} if detected else {},
         "applied_actions": ["mask"] if transformed else [],
         "remote_allowed": not blocked,
-        "request": result_request,
+        "segments": result_segments,
         "analysis": {
             "source": "current_request",
             "scan_performed": True,
@@ -185,7 +185,7 @@ def policy_result(payload: dict, *, evaluate: bool) -> dict:
             "overlap_count": 0,
             "overlap_resolution": "strictest_action",
             "policy_version": "synthetic-dev",
-            "text_leaf_count": 1 if isinstance(text, str) else 0,
+            "text_leaf_count": len(segments),
             "cached_decision_applied": False,
         },
         "notices": {
@@ -201,7 +201,7 @@ def policy_result(payload: dict, *, evaluate: bool) -> dict:
     if detected:
         index = text.index(marker)
         span = {
-            "path": ["messages", 0, "content"],
+            "segment_id": segments[0]["id"],
             "start": index,
             "end": index + len(marker),
             "entity_type": "EMAIL_ADDRESS",
@@ -231,8 +231,8 @@ def policy_result(payload: dict, *, evaluate: bool) -> dict:
     simulated_text = (
         "[SIMULATED - NO MODEL CALLED] "
         + (
-            result_request["messages"][0]["content"]
-            if isinstance(text, str) and result_request
+            result_segments[0]["text"]
+            if isinstance(text, str) and result_segments
             else "Sample response"
         )
         if not blocked

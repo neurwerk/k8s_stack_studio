@@ -8,13 +8,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
+from neurwerk_request_segments.models import EngineChatRequest as OpenAIChatRequest
+from neurwerk_request_segments.models import EngineMessage as ChatMessage
 from pydantic import ValidationError
 from starlette.requests import Request
 
 from k8s_stack_studio.controllers.policy_engine import evaluate, router
 from k8s_stack_studio.lib.auth import StudioPrincipal
+from k8s_stack_studio.lib.dependencies import get_pii_engine_client
 from k8s_stack_studio.lib.exceptions import (
     PiiEngineRequestError,
     PiiEngineTimeoutError,
@@ -22,10 +25,9 @@ from k8s_stack_studio.lib.exceptions import (
 )
 from k8s_stack_studio.lib.pii_engine import PiiEngineClient
 from k8s_stack_studio.models.policy_engine import (
-    ChatMessage,
-    OpenAIChatRequest,
     StudioAnalyzeRequest,
     StudioPolicyEvaluationRequest,
+    StudioPolicyEvaluationValidResponse,
 )
 
 
@@ -43,18 +45,13 @@ def request_model() -> StudioAnalyzeRequest:
 def studio_response() -> dict[str, object]:
     """Build a response without reversal material."""
     return {
-        "api_version": "v1",
+        "api_version": "v2",
         "decision": "apply_actions",
         "entities": ["EMAIL_ADDRESS"],
         "entity_counts": {"EMAIL_ADDRESS": 1},
         "applied_actions": ["mask"],
         "remote_allowed": True,
-        "request": {
-            "model": "test-model",
-            "messages": [{"role": "user", "content": "email *************"}],
-            "stream": False,
-            "stream_options": None,
-        },
+        "segments": [{"id": "s0", "text": "email *************"}],
         "analysis": {
             "source": "current_request",
             "scan_performed": True,
@@ -97,7 +94,7 @@ def evaluation_response() -> dict[str, object]:
         "diagnostics": {
             "logical_detections": [
                 {
-                    "path": ["messages", 0, "content"],
+                    "segment_id": "s0",
                     "start": 6,
                     "end": 19,
                     "entity_type": "EMAIL_ADDRESS",
@@ -109,7 +106,7 @@ def evaluation_response() -> dict[str, object]:
             ],
             "effective_regions": [
                 {
-                    "path": ["messages", 0, "content"],
+                    "segment_id": "s0",
                     "start": 6,
                     "end": 19,
                     "entity_type": "EMAIL_ADDRESS",
@@ -150,23 +147,54 @@ def client(mock_http_client: MagicMock) -> PiiEngineClient:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["analyze", "evaluate"])
 async def test_client_analyze_uses_studio_contract(
-    client: PiiEngineClient, mock_http_client: MagicMock
+    client: PiiEngineClient, mock_http_client: MagicMock, endpoint: str
 ) -> None:
-    """Analyze posts the strict request and parses the no-reversal response."""
-    response = httpx.Response(200, json=studio_response())
+    """HTTP transformations preserve provider omissions, nulls, and false values."""
+    response = httpx.Response(
+        200, json=studio_response() if endpoint == "analyze" else evaluation_response()
+    )
     mock_http_client.request = AsyncMock(return_value=response)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_pii_engine_client] = lambda: client
 
-    result = await client.analyze(request_model())
+    @app.middleware("http")
+    async def authenticate(request, call_next):
+        request.scope["user"] = StudioPrincipal(
+            "user-1", frozenset({"studio-user", "pii-admin"}), frozenset(), {}
+        )
+        return await call_next(request)
 
-    assert result.entities == ["EMAIL_ADDRESS"]
-    assert result.model_dump(mode="json")["request"]["stream_options"] is None
-    assert "reversal" not in result.model_dump()
+    provider_request = {
+        "model": "test-model",
+        "messages": [{"role": "user", "content": "email a@example.com"}],
+        "temperature": None,
+        "stream": False,
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as browser:
+        response = await browser.post(
+            f"/api/policy-engine/{endpoint}",
+            json={"request": provider_request, "policy": {"pii": {"defaultAction": "mask"}}},
+        )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["entities"] == ["EMAIL_ADDRESS"]
+    assert result["request"] == provider_request | {
+        "messages": [{"role": "user", "content": "email *************"}]
+    }
+    assert result["route_class"] is None
+    assert result["safety_rule"] is None
+    assert "reversal" not in result
     call = mock_http_client.request.await_args
     assert call is not None
+    path = "analyze-segments" if endpoint == "analyze" else "evaluate-policy"
     assert call.args[:2] == (
         "POST",
-        "https://monitor-pii-engine-service.monitor-pii-engine.svc.cluster.local:443/v1/studio/analyze-request",
+        f"https://monitor-pii-engine-service.monitor-pii-engine.svc.cluster.local:443/v2/studio/{path}",
     )
     assert "headers" not in call.kwargs
     assert call.kwargs["json"]["policy"]["pii"]["defaultAction"] == "mask"
@@ -213,9 +241,6 @@ async def test_client_evaluate_uses_dedicated_studio_path_without_headers(
     """Evaluation preserves serialized Engine stream options without human headers."""
     options = None if include_usage is None else {"include_usage": include_usage}
     payload = evaluation_response()
-    cast(dict[str, object], payload["request"]).update(
-        {"stream": options is not None, "stream_options": options}
-    )
     response = httpx.Response(200, json=payload)
     mock_http_client.request = AsyncMock(return_value=response)
     request = evaluation_request_model().model_dump(mode="json")
@@ -225,27 +250,26 @@ async def test_client_evaluate_uses_dedicated_studio_path_without_headers(
     result = await client.evaluate(StudioPolicyEvaluationRequest.model_validate(request))
 
     assert result.valid is True
+    assert isinstance(result, StudioPolicyEvaluationValidResponse)
+    assert result.api_version == "v1"
+    assert result.diagnostics.logical_detections[0].path == ["messages", 0, "content"]
     assert result.model_dump(mode="json")["request"]["stream_options"] == options
     call = mock_http_client.request.await_args
     assert call is not None
     assert call.args[:2] == (
         "POST",
-        "https://monitor-pii-engine-service.monitor-pii-engine.svc.cluster.local:443/v1/studio/evaluate-policy",
+        "https://monitor-pii-engine-service.monitor-pii-engine.svc.cluster.local:443/v2/studio/evaluate-policy",
     )
     assert "headers" not in call.kwargs
     assert call.kwargs["json"] == {
         "request": {
-            "model": "test-model",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "email a@example.com",
-                    "tool_calls": [],
-                }
-            ],
-            "stream": options is not None,
-            **({"stream_options": options} if options is not None else {}),
-            "tools": [],
+            "api_version": "v2",
+            "request_kind": "chat",
+            "scope": "request",
+            "segments": [{"id": "s0", "text": "email a@example.com"}],
+            "text_pii_enabled": True,
+            "attachments_present": False,
+            "visual_findings": None,
         },
         "policy": {"pii": {"defaultAction": "mask"}},
         "simulation": "deterministic_echo",
@@ -255,10 +279,8 @@ async def test_client_evaluate_uses_dedicated_studio_path_without_headers(
 @pytest.mark.parametrize(
     "update",
     [
-        {"stream": True, "stream_options": {}},
         {"stream": True, "stream_options": {"include_usage": "true"}},
         {"stream": True, "stream_options": {"include_usage": 1}},
-        {"stream": True, "stream_options": {"include_usage": None}},
         {"stream": True, "stream_options": {"include_usage": True, "unknown": True}},
         {"stream_options": {"include_usage": True}},
         {"stream": False, "stream_options": {"include_usage": False}},
@@ -266,9 +288,15 @@ async def test_client_evaluate_uses_dedicated_studio_path_without_headers(
     ],
 )
 def test_chat_request_rejects_invalid_stream_options(update: dict[str, object]) -> None:
-    with pytest.raises(ValidationError):
-        OpenAIChatRequest.model_validate(
-            {"model": "test-model", "messages": [{"role": "user", "content": "hello"}]} | update
+    with pytest.raises((ValidationError, PiiEngineRequestError)):
+        StudioAnalyzeRequest.model_validate(
+            {
+                "request": {
+                    "model": "test-model",
+                    "messages": [{"role": "user", "content": "hello"}],
+                }
+                | update
+            }
         )
 
 
@@ -279,7 +307,7 @@ async def test_client_accepts_invalid_candidate_as_a_normal_response(
     response = MagicMock(spec=httpx.Response)
     response.status_code = 200
     response.json.return_value = {
-        "api_version": "v1",
+        "api_version": "v2",
         "valid": False,
         "issues": [
             {
@@ -306,7 +334,7 @@ async def test_client_rejects_extra_fields_on_invalid_evaluation_response(
     response = MagicMock(spec=httpx.Response)
     response.status_code = 200
     response.json.return_value = {
-        "api_version": "v1",
+        "api_version": "v2",
         "valid": False,
         "issues": [
             {
@@ -490,6 +518,39 @@ async def test_client_translates_engine_error(
     assert error.value.status_code == 422
     assert "invalid request" not in str(error.value)
 
+    limit_error = {
+        "api_version": "v2",
+        "error": {
+            "code": "request_too_large",
+            "message": "The analysis request exceeds the configured size limit.",
+            "retryable": False,
+            "limit": {
+                "component": "pii_engine",
+                "stage": "inspection",
+                "reason": "depth",
+                "measured": 33,
+                "maximum": 32,
+                "unit": "levels",
+                "exact": False,
+            },
+        },
+    }
+    mock_http_client.request = AsyncMock(
+        return_value=httpx.Response(
+            413, json=limit_error, headers={"x-correlation-id": "sample-request-1"}
+        )
+    )
+    with pytest.raises(PiiEngineRequestError) as error:
+        await client.analyze(request_model())
+    assert error.value.status_code == 413
+    assert "depth, at least 33 levels, maximum 32" in str(error.value.detail)
+    assert "Request ID: sample-request-1" in str(error.value.detail)
+    limit_error["error"]["message"] = "private rejected content"
+    mock_http_client.request = AsyncMock(return_value=httpx.Response(413, json=limit_error))
+    with pytest.raises(PiiEngineRequestError) as error:
+        await client.analyze(request_model())
+    assert error.value.detail == "PII Engine request failed."
+
 
 @pytest.mark.asyncio
 async def test_client_keeps_evaluation_engine_errors_safe(
@@ -579,3 +640,167 @@ async def test_client_accepts_cached_analysis_without_a_duration(
     result = await client.analyze(request_model())
     assert result.analysis.duration_ms is None
     assert result.analysis.overlap_count == 2
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"segments": []},
+        {"segments": [{"id": "s1", "text": "changed"}]},
+        {"segments": [{"id": "s0", "text": "changed"}] * 2},
+        {"segments": None},
+        {"decision": "pass"},
+        {"applied_actions": []},
+        {"applied_actions": ["pass"]},
+        {"decision": "block"},
+        {"request": {"model": "unauthorized"}},
+    ],
+)
+async def test_client_rejects_invalid_segment_replacements(client, mock_http_client, update):
+    mock_http_client.request = AsyncMock(
+        return_value=httpx.Response(200, json=studio_response() | update)
+    )
+    with pytest.raises(PiiEngineRequestError) as error:
+        await client.analyze(request_model())
+    assert error.value.status_code == 502
+
+
+async def test_client_preserves_block_without_rebuilding(client, mock_http_client):
+    payload = studio_response() | {"decision": "block", "segments": None, "remote_allowed": False}
+    mock_http_client.request = AsyncMock(return_value=httpx.Response(200, json=payload))
+    result = await client.analyze(request_model())
+    assert result.request is None
+    assert result.decision == "block"
+
+
+@pytest.mark.parametrize("key", ["contact", "k" * 129])
+async def test_evaluation_rebuilds_nested_mcp_and_maps_diagnostics(client, mock_http_client, key):
+    request = StudioPolicyEvaluationRequest.model_validate(
+        {
+            "request": {
+                "jsonrpc": "2.0",
+                "id": "call-1",
+                "method": "tools/call",
+                "params": {"name": "lookup", "arguments": {key: ["email a@example.com"]}},
+            }
+        }
+    )
+    mock_http_client.request = AsyncMock(
+        return_value=httpx.Response(200, json=evaluation_response())
+    )
+    result = await client.evaluate(request)
+    assert result.valid
+    assert result.request.model_dump()["params"]["arguments"] == {key: ["email *************"]}
+    assert result.request.model_dump()["params"]["name"] == "lookup"
+    assert result.diagnostics.logical_detections[0].path == ["params", "arguments", key[:128], 0]
+    assert result.diagnostics.effective_regions[0].path == ["params", "arguments", key[:128], 0]
+    assert result.diagnostics.truncated == (len(key) > 128)
+    call = mock_http_client.request.await_args
+    assert call is not None
+    sent = call.kwargs["json"]["request"]
+    assert sent["request_kind"] == "mcp"
+    assert sent["segments"] == [{"id": "s0", "text": "email a@example.com"}]
+    assert "params" not in sent
+
+
+@pytest.mark.parametrize("update", [{"segment_id": "unknown"}, {"end": 1000}, {"path": []}])
+async def test_client_rejects_unmapped_diagnostics(client, mock_http_client, update):
+    payload = evaluation_response()
+    diagnostics = cast(dict[str, list[dict[str, object]]], payload["diagnostics"])
+    diagnostics["logical_detections"][0].update(update)
+    mock_http_client.request = AsyncMock(return_value=httpx.Response(200, json=payload))
+    with pytest.raises(PiiEngineRequestError):
+        await client.evaluate(evaluation_request_model())
+
+
+async def test_studio_rejects_invalid_samples_without_sending_content(client, mock_http_client):
+    oversized = StudioAnalyzeRequest.model_validate(
+        {"request": {"model": "sample", "input": "x" * 100_001}}
+    )
+    with pytest.raises(PiiEngineRequestError) as error:
+        await client.analyze(oversized)
+    assert error.value.status_code == 413
+    malformed = StudioPolicyEvaluationRequest.model_validate(
+        {
+            "request": {
+                "model": "sample",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "type": "function",
+                                "function": {"name": "lookup", "arguments": '{"private-input"'},
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+    )
+    with pytest.raises(PiiEngineRequestError) as error:
+        await client.evaluate(malformed)
+    assert error.value.status_code == 400
+    assert "private-input" not in str(error.value)
+    assert error.value.__suppress_context__
+    deep_arguments: object = "private-input"
+    for _ in range(34):
+        deep_arguments = [deep_arguments]
+    deep = StudioAnalyzeRequest.model_validate(
+        {
+            "request": {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "lookup", "arguments": {"nested": deep_arguments}},
+            }
+        }
+    )
+    with pytest.raises(PiiEngineRequestError) as error:
+        await client.analyze(deep)
+    assert error.value.status_code == 413
+    assert "private-input" not in str(error.value)
+    encoded = malformed.model_dump(mode="json", exclude_unset=True)
+    encoded["request"]["messages"][0]["tool_calls"][0]["function"]["arguments"] = (
+        "[" * 1500 + '"private-input"' + "]" * 1500
+    )
+    with pytest.raises(PiiEngineRequestError) as error:
+        await client.evaluate(StudioPolicyEvaluationRequest.model_validate(encoded))
+    assert error.value.status_code == 413
+    assert "private-input" not in str(error.value)
+    mock_http_client.request.assert_not_called()
+
+
+async def test_responses_preserves_controls_and_rejects_reordered_segments(
+    client, mock_http_client
+):
+    sample = {
+        "model": "sample-model",
+        "instructions": "answer briefly",
+        "input": "email a@example.com",
+        "previous_response_id": None,
+        "stream": False,
+    }
+    request = StudioAnalyzeRequest.model_validate({"request": sample})
+    payload = studio_response() | {
+        "segments": [
+            {"id": "s0", "text": "answer briefly"},
+            {"id": "s1", "text": "email *************"},
+        ]
+    }
+    mock_http_client.request = AsyncMock(return_value=httpx.Response(200, json=payload))
+    result = await client.analyze(request)
+    assert result.request is not None
+    assert result.request.model_dump(exclude_unset=True) == sample | {
+        "input": "email *************"
+    }
+    cast(list[dict[str, str]], payload["segments"]).reverse()
+    mock_http_client.request = AsyncMock(return_value=httpx.Response(200, json=payload))
+    with pytest.raises(PiiEngineRequestError):
+        await client.analyze(request)
+    with pytest.raises(PiiEngineRequestError) as error:
+        StudioAnalyzeRequest.model_validate(
+            {"request": sample | {"previous_response_id": "response-1"}}
+        )
+    assert error.value.status_code == 400

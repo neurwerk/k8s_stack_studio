@@ -8,6 +8,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 COPY --from=uv /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock LICENSE ./
+COPY vendor/request_segments/ vendor/request_segments/
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src/ src/
 RUN uv sync --frozen --no-dev --no-editable

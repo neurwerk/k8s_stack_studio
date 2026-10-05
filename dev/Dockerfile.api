@@ -4,6 +4,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy PYTHONUNBUFFERED=1
 WORKDIR /workspace/apps/api
 COPY apps/api/pyproject.toml apps/api/uv.lock apps/api/LICENSE ./
+COPY apps/api/vendor/request_segments ./vendor/request_segments
 RUN uv sync --frozen --dev --no-install-project
 COPY apps/api/src ./src
 RUN uv sync --frozen --dev
