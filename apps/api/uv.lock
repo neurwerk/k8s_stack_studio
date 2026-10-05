@@ -408,6 +408,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fastapi-keycloak-middleware" },
     { name = "httpx" },
+    { name = "neurwerk-request-segments" },
     { name = "prometheus-fastapi-instrumentator" },
     { name = "pydantic-settings" },
     { name = "uvicorn" },
@@ -430,6 +431,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.138.2" },
     { name = "fastapi-keycloak-middleware", specifier = ">=1.6.0" },
     { name = "httpx", specifier = ">=0.28.0" },
+    { name = "neurwerk-request-segments", directory = "vendor/request_segments" },
     { name = "prometheus-fastapi-instrumentator", specifier = ">=8.0.2" },
     { name = "pydantic-settings", specifier = ">=2.7" },
     { name = "uvicorn", specifier = ">=0.34.0" },
@@ -473,6 +475,17 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/95/59f4472ec512bc180fd207899594c7803ece96262ff9aaa3a4b6d7da6940/multidict-6.9.1-cp312-cp312-win_arm64.whl", hash = "sha256:361f7206cf341ba94fb015688f5c8b480f8e63bd58a4c14a48aeca7851a241cc", size = 54930, upload-time = "2026-09-21T17:55:41.155Z" },
     { url = "https://files.pythonhosted.org/packages/be/59/e26cb779be4c591d1a910f59d29aca9fba4de70349840a833beba2652371/multidict-6.9.1-py3-none-any.whl", hash = "sha256:7bf6478188f4e47bf5686e8a33da4ae28bf43b1b2528d9ee144d28492bfac60b", size = 19176, upload-time = "2026-09-21T17:59:03.501Z" },
 ]
+
+[[package]]
+name = "neurwerk-request-segments"
+version = "0.1.0"
+source = { directory = "vendor/request_segments" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.12,<3" }]
 
 [[package]]
 name = "packaging"

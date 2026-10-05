@@ -39,10 +39,25 @@ enforces feature-specific realm roles. The API communicates with PII Engine
 over workload mTLS and integrates with OpenSearch, Keycloak administration,
 the API-key bridge, and AgentGateway's private usage analytics API.
 
-Studio mirrors PII Engine's typed Chat Completions `stream_options` contract:
-omitted or null options are accepted; a non-null object requires `stream: true`
-and a strict boolean `include_usage` field. Unknown option fields are rejected.
-Analysis and evaluation responses preserve these options, including explicit null.
+Studio uses the shared `neurwerk-request-segments` package to validate Chat,
+Responses, and MCP samples and extract text. Only opaque text segments and
+analysis flags cross the Engine boundary through `/v2/studio/analyze-segments`
+and `/v2/studio/evaluate-policy`. Studio rebuilds the original request locally
+and maps diagnostic segment IDs back to browser paths. The browser API keeps
+its existing request, policy, simulation, and v1 response fields.
+
+Provider controls, including stream options, stay in Studio. Replacements require
+the exact original segment IDs and order; blocked replies contain no segments,
+and Engine reversal data is rejected. Studio retains its 100,000-character
+per-text-field limit. The canonical package is vendored under
+`apps/api/vendor/request_segments` for independent builds; see its `ORIGIN.md`
+before updating it. The Engine must support the v2 routes before this Studio
+change is deployed.
+
+Invalid extracted content returns a safe 400; extraction and text-size limits
+return 413. Validated Engine v2 limit measurements and correlation IDs are
+included in Studio's existing error `detail` string. Studio does not relay raw
+Engine error bodies or rejected request values.
 
 Default service URLs in the API settings are intentional Kubernetes service DNS
 names. Deployments override identity, credentials, certificates, and any

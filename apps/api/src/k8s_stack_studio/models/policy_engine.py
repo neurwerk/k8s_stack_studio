@@ -4,10 +4,36 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from neurwerk_request_segments import SupportedRequest, UnsupportedFeatureError, parse_request
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    field_serializer,
+    model_validator,
+)
+
+from k8s_stack_studio.lib.exceptions import PiiEngineRequestError
 
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
+
+
+def _parse_sample(value: object) -> SupportedRequest:
+    if isinstance(value, BaseModel):
+        value = value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+    if not isinstance(value, dict):
+        raise PiiEngineRequestError(400, "The sample request must be an object.")
+    try:
+        return parse_request(value)
+    except UnsupportedFeatureError:
+        raise PiiEngineRequestError(
+            400, "The sample contains an unsupported request feature."
+        ) from None
+
+
+type StudioRequest = Annotated[SupportedRequest, BeforeValidator(_parse_sample)]
 
 
 class StrictModel(BaseModel):
@@ -16,213 +42,68 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=False)
 
 
-class TextPart(StrictModel):
-    """Represent one supported text content part."""
+class EngineLimitDetail(StrictModel):
+    """Accept only content-free, bounded Engine limit measurements."""
 
-    type: Literal["text"]
-    text: str = Field(min_length=1, max_length=100_000)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
-
-class AttachmentPart(BaseModel):
-    """Mirror attachment blocks accepted only for engine policy rejection."""
-
-    model_config = ConfigDict(extra="allow", str_strip_whitespace=False)
-
-    type: Literal[
-        "image_url",
-        "input_audio",
-        "file",
-        "input_image",
-        "input_file",
-        "image",
-        "audio",
-        "resource",
-        "resource_link",
+    component: Literal["pii_engine", "extproc", "request_segments"]
+    stage: Literal[
+        "admission",
+        "json",
+        "inspection",
+        "engine_request",
+        "engine_response",
+        "provider_response",
+        "output",
     ]
+    reason: Literal[
+        "bytes",
+        "declared_bytes",
+        "encoded_bytes",
+        "decoded_bytes",
+        "transformed_bytes",
+        "depth",
+        "tokens",
+        "nodes",
+        "text_characters",
+        "segments",
+        "text_leaves",
+        "empty_chunks",
+    ]
+    measured: int = Field(ge=0, le=10**18)
+    maximum: int = Field(ge=0, le=10**18)
+    unit: Literal["bytes", "characters", "items", "levels"]
+    exact: bool
 
 
-type MessageContent = (
-    Annotated[str, Field(max_length=100_000)]
-    | Annotated[list[TextPart | AttachmentPart], Field(max_length=64)]
-)
+class EngineLimitError(StrictModel):
+    """Validate a fixed Engine rejection message before displaying it."""
+
+    code: Literal["request_too_large"]
+    message: Literal["The analysis request exceeds the configured size limit."]
+    retryable: Literal[False]
+    limit: EngineLimitDetail
 
 
-class FunctionCall(StrictModel):
-    """Represent a supported function call and JSON arguments."""
+class EngineLimitResponse(StrictModel):
+    """Accept the Engine's versioned limit error envelope."""
 
-    name: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_.:-]+$")
-    arguments: JsonValue = ""
-
-
-class ToolCall(StrictModel):
-    """Represent an assistant tool call."""
-
-    id: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_.:-]+$")
-    type: Literal["function"]
-    function: FunctionCall
-
-
-class ToolFunction(StrictModel):
-    """Describe a supported function tool."""
-
-    name: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_.:-]+$")
-    description: str | None = Field(default=None, max_length=4_000)
-    parameters: dict[str, JsonValue] | None = None
-
-
-class ToolDefinition(StrictModel):
-    """Describe one supported OpenAI function tool."""
-
-    type: Literal["function"]
-    function: ToolFunction
-
-
-class ChatMessage(StrictModel):
-    """Represent a supported chat message and tool result."""
-
-    role: Literal["system", "developer", "user", "assistant", "tool"]
-    content: MessageContent | None = None
-    name: str | None = Field(default=None, max_length=256)
-    tool_calls: list[ToolCall] = Field(default_factory=list, max_length=32)
-    tool_call_id: str | None = Field(default=None, max_length=256)
-
-    @model_validator(mode="after")
-    def validate_role_fields(self) -> ChatMessage:
-        """Require fields that distinguish assistant calls and tool results."""
-        if self.role == "tool" and not self.tool_call_id:
-            raise ValueError("tool messages require tool_call_id")  # noqa: TRY003
-        if self.tool_calls and self.role != "assistant":
-            raise ValueError("tool_calls are only supported on assistant messages")  # noqa: TRY003
-        if self.role == "assistant" and self.content is None and not self.tool_calls:
-            raise ValueError("assistant messages require content or tool_calls")  # noqa: TRY003
-        return self
-
-
-class ChatStreamOptions(StrictModel):
-    """Control metadata included in a streamed Chat Completions response."""
-
-    include_usage: Annotated[bool, Field(strict=True)]
-
-
-class OpenAIChatRequest(StrictModel):
-    """Bound an OpenAI chat request to the engine's v1/studio contract."""
-
-    model: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_./:-]+$")
-    messages: list[ChatMessage] = Field(min_length=1, max_length=256)
-    temperature: float | None = Field(default=None, ge=0, le=2)
-    top_p: float | None = Field(default=None, ge=0, le=1)
-    max_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
-    stream: bool = False
-    stream_options: ChatStreamOptions | None = None
-    n: int | None = Field(default=None, ge=1, le=16)
-    stop: str | list[str] | None = None
-    tools: list[ToolDefinition] = Field(default_factory=list, max_length=128)
-    tool_choice: Literal["none", "auto", "required"] | dict[str, JsonValue] | None = None
-    response_format: dict[str, JsonValue] | None = None
-    user: str | None = Field(default=None, max_length=256)
-
-    @model_validator(mode="after")
-    def validate_stream_options(self) -> OpenAIChatRequest:
-        """Allow stream options only for streamed Chat Completions requests."""
-        if self.stream_options is not None and not self.stream:
-            raise ValueError("stream_options require stream to be enabled")  # noqa: TRY003
-        return self
-
-
-class ResponseTextPart(StrictModel):
-    """Represent one supported Responses API text part."""
-
-    type: Literal["input_text", "output_text"]
-    text: str = Field(min_length=1, max_length=100_000)
-
-
-class ResponseMessage(StrictModel):
-    """Represent one Responses API message item."""
-
-    type: Literal["message"] = "message"
-    role: Literal["system", "developer", "user", "assistant"]
-    content: list[ResponseTextPart | AttachmentPart] = Field(min_length=1, max_length=64)
-
-
-class ResponseFunctionCall(StrictModel):
-    """Represent one Responses API function call."""
-
-    type: Literal["function_call"]
-    call_id: str = Field(min_length=1, max_length=256)
-    name: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_.:-]+$")
-    arguments: JsonValue
-
-
-class ResponseFunctionOutput(StrictModel):
-    """Represent nested tool output returned to a model."""
-
-    type: Literal["function_call_output"]
-    call_id: str = Field(min_length=1, max_length=256)
-    output: JsonValue
-
-
-type ResponseInputItem = ResponseMessage | ResponseFunctionCall | ResponseFunctionOutput
-type ResponseInput = (
-    Annotated[str, Field(max_length=100_000)]
-    | Annotated[list[ResponseInputItem], Field(min_length=1, max_length=256)]
-)
-
-
-class OpenAIResponsesRequest(StrictModel):
-    """Bound a supported OpenAI Responses request."""
-
-    model: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_./:-]+$")
-    input: ResponseInput
-    instructions: str | None = Field(default=None, max_length=100_000)
-    tools: list[ToolDefinition] = Field(default_factory=list, max_length=128)
-    tool_choice: Literal["none", "auto", "required"] | dict[str, JsonValue] | None = None
-    temperature: float | None = Field(default=None, ge=0, le=2)
-    top_p: float | None = Field(default=None, ge=0, le=1)
-    max_output_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
-    stream: bool = False
-    previous_response_id: str | None = Field(default=None, max_length=256)
-    user: str | None = Field(default=None, max_length=256)
-
-
-class McpContent(StrictModel):
-    """Represent a supported MCP text content block."""
-
-    type: Literal["text"]
-    text: str = Field(min_length=1, max_length=100_000)
-
-
-class McpParams(StrictModel):
-    """Represent bounded MCP arguments and tool-result payloads."""
-
-    name: str | None = Field(default=None, max_length=256)
-    arguments: JsonValue | None = None
-    content: list[McpContent | AttachmentPart] = Field(default_factory=list, max_length=128)
-    result: JsonValue | None = None
-
-
-class McpRequest(StrictModel):
-    """Bound a supported MCP JSON-RPC request."""
-
-    jsonrpc: Literal["2.0"]
-    id: str | int
-    method: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z0-9_./:-]+$")
-    params: McpParams
-
-
-type SupportedRequest = OpenAIChatRequest | OpenAIResponsesRequest | McpRequest
+    api_version: Literal["v2"]
+    error: EngineLimitError
 
 
 class StudioAnalyzeRequest(StrictModel):
     """Wrap a supported request and optional engine-validated policy preview."""
 
-    request: SupportedRequest
+    request: StudioRequest
     policy: dict[str, JsonValue] | None = Field(default=None, max_length=16)
 
 
 class StudioPolicyEvaluationRequest(StrictModel):
     """Accept a request sample and an unvalidated bounded policy candidate."""
 
-    request: SupportedRequest
+    request: StudioRequest
     policy: dict[str, JsonValue] | None = Field(default=None, max_length=16)
     simulation: Literal["deterministic_echo"] = "deterministic_echo"
 
@@ -281,6 +162,13 @@ class StudioAnalyzeResponse(StrictModel):
     analysis: AnalysisMetadata
     notices: Notices
     safety_rule: str | None = Field(default=None, max_length=128)
+
+    @field_serializer("request")
+    def serialize_request(self, request: SupportedRequest | None) -> dict[str, object] | None:
+        """Preserve provider omissions without dropping Studio response defaults."""
+        if request is None:
+            return None
+        return request.model_dump(mode="json", by_alias=True, exclude_unset=True)
 
 
 type EvaluationPathPart = (

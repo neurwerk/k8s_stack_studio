@@ -99,8 +99,8 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("expected object")
             if mode == "pii" and self.path in (
-                "/v1/studio/analyze-request",
-                "/v1/studio/evaluate-policy",
+                "/v2/studio/analyze-segments",
+                "/v2/studio/evaluate-policy",
             ):
                 result = policy_result(
                     payload, evaluate=self.path.endswith("evaluate-policy")

@@ -11,6 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "neurwerk-request-segments==0.1.0",
     "fastapi>=0.138.2",
     "uvicorn>=0.34.0",
     "pydantic-settings>=2.7",
@@ -30,7 +31,11 @@ k8s-stack-studio-migrate = "k8s_stack_studio.notice_store:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/k8s_stack_studio"]
 
+[tool.uv.sources]
+neurwerk-request-segments = { path = "vendor/request_segments" }
+
 [tool.ruff]
+extend-exclude = ["vendor"]
 target-version = "py312"
 line-length = 100
 
@@ -98,6 +103,9 @@ convention = "google"
 
 [tool.ty]
 environment = { python = ".venv/bin/python" }
+
+[tool.ty.src]
+exclude = ["vendor"]
 
 [tool.ty.rules]
 all = "error"
