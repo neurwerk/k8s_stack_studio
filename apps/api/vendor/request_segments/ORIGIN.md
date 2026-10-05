@@ -10,7 +10,7 @@ dependency. Only Python and Pydantic are required.
 
 Package version: `0.1.0`. This finalized snapshot includes `pyproject.toml`,
 `README.md`, `LICENSE`, and `src/**/*.py` only; caches and build output are excluded.
-Source SHA-256: `2a7006a9c37f73b4f0f96d7b973dee8ea132c880da1d0fe81d85680b61377a89`.
+Source SHA-256: `7e9f93666ee15d8a0cb4daf16982ae379695911496b710c17cd74fdb91d1434b`.
 The digest covers files sorted by relative POSIX path, feeding each UTF-8 path,
 a NUL byte, its exact file bytes, then a NUL byte into SHA-256. `ORIGIN.md` is
 consumer provenance and is not part of the source digest.

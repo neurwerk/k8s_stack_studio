@@ -673,14 +673,15 @@ async def test_client_preserves_block_without_rebuilding(client, mock_http_clien
     assert result.decision == "block"
 
 
-async def test_evaluation_rebuilds_nested_mcp_and_maps_diagnostics(client, mock_http_client):
+@pytest.mark.parametrize("key", ["contact", "k" * 129])
+async def test_evaluation_rebuilds_nested_mcp_and_maps_diagnostics(client, mock_http_client, key):
     request = StudioPolicyEvaluationRequest.model_validate(
         {
             "request": {
                 "jsonrpc": "2.0",
                 "id": "call-1",
                 "method": "tools/call",
-                "params": {"name": "lookup", "arguments": {"contact": ["email a@example.com"]}},
+                "params": {"name": "lookup", "arguments": {key: ["email a@example.com"]}},
             }
         }
     )
@@ -689,11 +690,11 @@ async def test_evaluation_rebuilds_nested_mcp_and_maps_diagnostics(client, mock_
     )
     result = await client.evaluate(request)
     assert result.valid
-    assert result.request.model_dump()["params"]["arguments"] == {
-        "contact": ["email *************"]
-    }
+    assert result.request.model_dump()["params"]["arguments"] == {key: ["email *************"]}
     assert result.request.model_dump()["params"]["name"] == "lookup"
-    assert result.diagnostics.logical_detections[0].path == ["params", "arguments", "contact", 0]
+    assert result.diagnostics.logical_detections[0].path == ["params", "arguments", key[:128], 0]
+    assert result.diagnostics.effective_regions[0].path == ["params", "arguments", key[:128], 0]
+    assert result.diagnostics.truncated == (len(key) > 128)
     call = mock_http_client.request.await_args
     assert call is not None
     sent = call.kwargs["json"]["request"]

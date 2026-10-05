@@ -143,7 +143,13 @@ def _restore_diagnostics(data: object, extracted: ExtractedRequest) -> dict[str,
                 raise ValueError("Unknown diagnostic segment")  # noqa: TRY003
             if not isinstance(item.get("end"), int) or item["end"] > lengths[segment_id]:
                 raise ValueError("Diagnostic exceeds segment")  # noqa: TRY003
-            item["path"] = list(extracted.diagnostic_path(segment_id))
+            path = extracted.diagnostic_path(segment_id)
+            bounded_path = tuple(
+                min(part, 10_000_000) if isinstance(part, int) else part[:128] for part in path[:64]
+            )
+            if bounded_path != path:
+                result["truncated"] = True
+            item["path"] = list(bounded_path)
             rows.append(item)
         result[name] = rows
     return result
