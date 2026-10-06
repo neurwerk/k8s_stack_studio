@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Self
+import re
+from typing import Literal, Self
 from urllib.parse import SplitResult, quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -61,7 +62,19 @@ class InvalidContextForgeAccountConfigError(ValueError):
     def __init__(self) -> None:
         """Use a safe error without service credentials."""
         super().__init__(
-            "Native account onboarding requires the catalog, HTTPS URL, token and roles."
+            "Native account onboarding requires the catalog, HTTPS URL, roles and "
+            "a bearer token or an explicitly configured trusted-proxy service identity."
+        )
+
+
+class InvalidContextForgeOAuthConfigError(ValueError):
+    """Personal OAuth requires fixed operator-owned configuration."""
+
+    def __init__(self) -> None:
+        """Keep validation errors free of native configuration and credentials."""
+        super().__init__(
+            "Personal MCP OAuth requires account onboarding, trusted-proxy service auth, "
+            "approved HTTPS Studio/callback origins and per-integration authorization origins."
         )
 
 
@@ -117,6 +130,7 @@ def _parse_url(value: str) -> SplitResult | None:
     try:
         parsed = urlsplit(value)
         _ = parsed.hostname
+        _ = parsed.port
     except ValueError:
         return None
     return parsed
@@ -181,18 +195,23 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
 
-    # Read-only foundation: no account onboarding, OAuth or native HTTP client yet.
+    # Native features remain separately gated until runtime publication/qualification.
     mcp_catalog_enabled: bool = False
     contextforge_team_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
-    mcp_catalog: list[McpRegistration] = Field(default_factory=list, max_length=50)
+    mcp_catalog: list[McpRegistration] = Field(default_factory=list, max_length=200)
     contextforge_account_onboarding_enabled: bool = False
     contextforge_url: str = ""
     contextforge_ca_cert: str = ""
     contextforge_service_token: SecretStr = SecretStr("")
+    contextforge_service_auth_mode: Literal["bearer", "trusted-proxy"] = "bearer"
+    contextforge_service_account_email: str = Field(default="", max_length=254)
     contextforge_global_role_id: str = Field(
         default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$"
     )
     contextforge_team_role_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
+    mcp_connections_enabled: bool = False
+    contextforge_oauth_studio_origin: str = ""
+    contextforge_oauth_callback_url: str = ""
 
     # --- OpenSearch (logs viewer) ---
     # The internal service DNS default is overridden through environment config.
@@ -344,10 +363,75 @@ class Settings(BaseSettings):
             or parsed.path not in {"", "/"}
             or parsed.query
             or parsed.fragment
-            or not self.contextforge_service_token.get_secret_value().strip()
+            or (
+                self.contextforge_service_auth_mode == "bearer"
+                and not self.contextforge_service_token.get_secret_value().strip()
+            )
+            or (
+                self.contextforge_service_auth_mode == "trusted-proxy"
+                and not self.contextforge_service_account_email
+            )
             or not self.contextforge_global_role_id
             or not self.contextforge_team_role_id
             or self.contextforge_global_role_id == self.contextforge_team_role_id
         ):
             raise InvalidContextForgeAccountConfigError
+        return self
+
+    @field_validator("contextforge_service_account_email")
+    @classmethod
+    def validate_contextforge_service_email(cls, value: str) -> str:
+        """Accept only a canonical operator-configured native identity, never request input."""
+        if value and (
+            not value.isascii()
+            or not re.fullmatch(r"[^@\s/\\?#\x00-\x1f\x7f]+@[^@\s/\\?#\x00-\x1f\x7f]+", value)
+        ):
+            raise InvalidContextForgeAccountConfigError
+        return value.lower()
+
+    @model_validator(mode="after")
+    def validate_contextforge_oauth_config(self) -> Self:
+        """Require fixed trusted-proxy authentication and approved browser destinations."""
+        if not self.mcp_connections_enabled:
+            return self
+        studio = _parse_url(self.contextforge_oauth_studio_origin)
+        callback = _parse_url(self.contextforge_oauth_callback_url)
+        origins = (studio, callback)
+        individual = [
+            item
+            for item in self.mcp_catalog
+            if item.authentication_model == "individual-authentication"
+        ]
+        if (
+            not self.contextforge_account_onboarding_enabled
+            or self.contextforge_service_auth_mode != "trusted-proxy"
+            or any(
+                url is None
+                or url.scheme != "https"
+                or not url.hostname
+                or url.username is not None
+                or url.password is not None
+                or url.query
+                or url.fragment
+                for url in origins
+            )
+            or any(
+                character.isspace() or character == "\\"
+                for value in (
+                    self.contextforge_oauth_studio_origin,
+                    self.contextforge_oauth_callback_url,
+                )
+                for character in value
+            )
+            or studio is None
+            or studio.path
+            or callback is None
+            or callback.path != "/oauth/callback"
+            or (callback.scheme, callback.netloc) != (studio.scheme, studio.netloc)
+            or not individual
+            or any(not item.oauth_authorization_origin for item in individual)
+            or len({item.gateway_id for item in self.mcp_catalog}) != len(self.mcp_catalog)
+            or len({item.server_id for item in self.mcp_catalog}) != len(self.mcp_catalog)
+        ):
+            raise InvalidContextForgeOAuthConfigError
         return self

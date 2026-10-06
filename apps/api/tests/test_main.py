@@ -62,6 +62,7 @@ def test_main_requires_lifespan_support(monkeypatch: pytest.MonkeyPatch) -> None
                 "factory": True,
                 "log_level": "info",
                 "lifespan": "on",
+                "access_log": False,
             },
         )
     ]

@@ -63,6 +63,121 @@ Default service URLs in the API settings are intentional Kubernetes service DNS
 names. Deployments override identity, credentials, certificates, and any
 environment-specific endpoints through `K8S_STUDIO_*` environment variables.
 
+## Personal MCP OAuth
+
+Connect/Reconnect/status supports configured `individual-authentication` entries;
+GitHub is an example, not a provider restriction. New compatible providers need
+configuration, not Python handlers. No PAT entry, discovery or registration-management
+API is exposed. Features default off; publication and deployment are separate.
+
+Configuration is API-only, with prefix `K8S_STUDIO_`:
+
+- `MCP_CATALOG_ENABLED`, `MCP_CATALOG`, `CONTEXTFORGE_TEAM_ID`,
+  `CONTEXTFORGE_ACCOUNT_ONBOARDING_ENABLED`, `CONTEXTFORGE_URL`, optional
+  `CONTEXTFORGE_CA_CERT`, `CONTEXTFORGE_GLOBAL_ROLE_ID` and `CONTEXTFORGE_TEAM_ROLE_ID`.
+- `MCP_CONNECTIONS_ENABLED` enables Connect/status when true. No qualification
+  boolean claims to verify encryption or replace runtime controls.
+- `CONTEXTFORGE_SERVICE_AUTH_MODE` defaults to `bearer`, preserving standalone
+  onboarding with a Secret-backed `CONTEXTFORGE_SERVICE_TOKEN` when native bearer
+  authentication is enabled. Personal OAuth requires `trusted-proxy` instead,
+  plus `CONTEXTFORGE_SERVICE_ACCOUNT_EMAIL`: a fixed operator-approved native
+  service identity. Proxy mode sends **no bearer token or cookie** and does not
+  claim token validation. The email is server configuration, never request input.
+- `CONTEXTFORGE_OAUTH_STUDIO_ORIGIN` is an exact HTTPS origin without trailing slash.
+  `CONTEXTFORGE_OAUTH_CALLBACK_URL` is `/oauth/callback` on that same Studio origin;
+  register this exact URL in both native gateway OAuth configuration and the provider app.
+- Each individual catalog entry additionally needs `oauth_authorization_origin`:
+  a fixed HTTPS provider authorization origin. Native operator-owned gateway
+  metadata supplies the authorization/token endpoints and registered client ID.
+  Origins use lowercase hosts, omit port 443 and preserve other ports, matching Base.
+  Studio checks redirect origin/endpoint, callback and popup state; native owns
+  PKCE and provider configuration. Browser input cannot select native identities,
+  destinations or grants.
+
+The catalog accepts up to 200 unique gateway/server mappings. Authorization-code
+popup flows use single-valued parameters; repeated `resource` parameters are unsupported.
+
+`POST /api/me/mcp/{id}/connect` accepts only `{}` and the approved `Origin` header.
+It prepares the verified Keycloak email's native account and starts native OAuth
+as that user, returning only `authorization_url` and `callback_origin`. Reconnect
+is manual. `GET /api/me/mcp/{id}/status` rechecks existing roles/membership read-only,
+never repairing revoked access. Both need `studio-user`, `llm:invoke` and matching
+`mcp:<id>:invoke`. Caller credentials/identity headers are not forwarded, and the
+provisioning service never identifies user OAuth. Traces retain Keycloak subject/
+bridge principal attribution; email changes/conflicts remain operator-managed.
+
+Status is metadata: `valid`/`near_expiry` → `connected`, `missing` → `connect required`,
+`expired` → `refresh pending`, unknown/failure → unavailable. Expiry does not prove
+reconnection is needed or refresh is possible. Revocation may appear only on a call;
+native `invalid_grant` removes the record, while transient refresh failures preserve it.
+
+### Base/operator runtime contract
+
+Pinned ContextForge v1.0.11 source is
+`077071bbb43599dd5ab9372ebdbb9a8e686a9816`:
+
+1. `OAUTH_TOKEN_BACKEND=database` isolates tokens by `(gateway_id, app_user_email)`.
+   Temporary PostgreSQL storage bypasses, but does not fix, the Vault team-scope
+   defect (Base #424). Supply persistent strong `AUTH_ENCRYPTION_SECRET` from
+   OpenBao/ESO. Native encryption has plaintext fallbacks: the operator must check
+   actual ciphertext and restart/decryption in the adopted image, not trust Studio.
+2. Native `MCP_CLIENT_AUTH_ENABLED=false`, `TRUST_PROXY_AUTH=true`,
+   `TRUST_PROXY_AUTH_DANGEROUSLY=true`,
+   `PROXY_USER_HEADER=x-contextforge-account-email`, `MCP_REQUIRE_AUTH=true`,
+   `REQUIRE_USER_IN_DB=true`, `MCPGATEWAY_DIRECT_PROXY_ENABLED=false` require private
+   trusted Gateway/Studio API ingress. Proxy RBAC requires an identity header and
+   **does not validate bearer credentials**, including on administrative APIs.
+   Studio uses its configured service email for provisioning/account checks and
+   the verified human email for OAuth/status. The service must be active, verified,
+   non-admin and distinct
+   from native `PLATFORM_ADMIN_EMAIL`. Its active, non-expiring, non-inheriting
+   global/fixed-team role assignments must collectively contain exactly
+   `admin.user_management`, `teams.read`, `teams.manage_members`; its membership
+   in the configured non-personal team must be active `owner`. Avoid broad native
+   `team_admin` defaults on this account. Studio checks service state/grants/ownership
+   read-only before user preparation/status. Restrict native ingress to trusted
+   workloads; Gateway routes must expose only approved invocation paths, never
+   administrative APIs. A service header is not an independent credential: workload
+   trust is the boundary. No signing key, broker or upstream patch is added.
+3. **Accepted public-visibility limitation:** proxy OAuth lacks `token_teams` and
+   denies native team/private registrations. Gateway/server must use native `public`
+   visibility and fixed-team ownership. Ownership/private ingress do **not** restore
+   native team isolation: public resources can cross teams. Scope is one internal
+   team, private approved routes, platform grants and per-email credentials.
+4. Keep one service-owned non-personal team, active non-admin verified-email users,
+   an empty global role and exactly `tools.read`, `tools.execute`, `servers.read`,
+   `servers.use`, `gateways.read` on the team role, with no inheritance. Set native
+   default role **names**, disable personal-team creation and keep native login,
+   reset, admin, discovery and credential-management endpoints private. Registration
+   ownership, approved tool/server membership and OAuth-only provider headers remain
+   operator-controlled; invocation must not gain caller Authorization via plugins.
+5. Route **exact GET `/oauth/callback`** on the Studio HTTPS Gateway directly to
+   Studio API's existing application Service/port, without prefix rewrite or JWT
+   admission. Keep native `/oauth/callback` and legacy pages private. Studio rejects
+   non-`popup.` states, duplicate/unknown or oversized parameters before forwarding
+   only code/state unchanged to its fixed private `CONTEXTFORGE_URL` callback, over
+   verified TLS using `CONTEXTFORGE_CA_CERT` when needed. No caller headers, cookies,
+   service identity or bearer are sent; provider denials get a local generic error.
+   Native retains state validation, PKCE, code exchange and token storage. Only the
+   pinned native success-popup shape is accepted; Studio renders fresh status-only
+   HTML, never native bodies, cookies, redirects, JWTs or error details. Responses
+   use no-store, no-referrer, nosniff and a nonce-based CSP. Popup origin is now Studio.
+   **Accepted transferable-URL risk:** callback forwarding does not authenticate
+   the completing browser/account. Someone authorizing a copied URL stores their
+   provider connection under the initiator's account. PKCE and popup origin/source
+   checks do not prevent this. Popup messages only trigger authenticated status reads.
+   Studio disables application Uvicorn access logs and HTTPX/httpcore wire diagnostics
+   to avoid callback code/state/header logging; dev Uvicorn uses `--no-access-log` too.
+   Base must suppress callback query/body/header logs at Gateway and native, including
+   native OAuth/DB exception logging. Studio cannot protect those external logs.
+
+For the GitHub sample, operators preregister one approved GitHub App or OAuth App
+for `https://api.githubcopilot.com/mcp`, with GitHub login OAuth endpoints and the
+approved callback. Its client secret comes from OpenBao; native registration copies
+live in PostgreSQL. Compatible Studio/bridge/extProc images, Base wiring and live
+two-user/PII/refresh/restart checks belong to operator adoption. Source validation
+does not claim deployment, actual ciphertext or live OAuth verification.
+
 ## Requirements
 
 Local development needs Docker Compose (default Docker context), Python 3, and

@@ -80,6 +80,11 @@ async def http_client_lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.contextforge_admin_client = await stack.enter_async_context(
                 _create_client(verify=settings.contextforge_ca_cert or True, trust_env=False)
             )
+        if settings.mcp_connections_enabled:
+            # Separate cookie-free proxy client. Never attach the provisioning token.
+            app.state.contextforge_oauth_client = await stack.enter_async_context(
+                _create_client(verify=settings.contextforge_ca_cert or True, trust_env=False)
+            )
         yield
 
 
