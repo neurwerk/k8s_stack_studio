@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from k8s_stack_studio.models.mcp import McpRegistration
+
 
 class InvalidUsageTimezoneError(ValueError):
     """The configured IANA timezone is unavailable in the container image."""
@@ -43,6 +45,14 @@ class MissingPiiEngineHostnameError(ValueError):
     def __init__(self) -> None:
         """Set a safe configuration error message."""
         super().__init__("Configured pii_engine_url must include a hostname.")
+
+
+class InvalidMcpCatalogConfigError(ValueError):
+    """The enabled catalog needs unambiguous operator-owned mappings."""
+
+    def __init__(self) -> None:
+        """Keep validation errors free of registration details."""
+        super().__init__("Enabled MCP catalog requires a stable native team ID and unique MCP IDs.")
 
 
 class RemotePiiEngineInsecureModeError(ValueError):
@@ -160,6 +170,11 @@ class Settings(BaseSettings):
     langfuse_url: str = ""
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
+
+    # Read-only foundation: no account onboarding, OAuth or native HTTP client yet.
+    mcp_catalog_enabled: bool = False
+    contextforge_team_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
+    mcp_catalog: list[McpRegistration] = Field(default_factory=list, max_length=50)
 
     # --- OpenSearch (logs viewer) ---
     # The internal service DNS default is overridden through environment config.
@@ -283,4 +298,14 @@ class Settings(BaseSettings):
             or not self.langfuse_secret_key
         ):
             raise InvalidLangfuseConfigError
+        return self
+
+    @model_validator(mode="after")
+    def validate_mcp_catalog_config(self) -> Self:
+        """Use one stable native team for all approved registrations."""
+        if self.mcp_catalog_enabled and (
+            not self.contextforge_team_id
+            or len({item.id for item in self.mcp_catalog}) != len(self.mcp_catalog)
+        ):
+            raise InvalidMcpCatalogConfigError
         return self

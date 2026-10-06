@@ -21,6 +21,7 @@ class SessionResponse(BaseModel):
     agentgateway_roles: list[str]
     notice_preferences_available: bool
     llm_logs_available: bool
+    mcp_catalog_available: bool = False
 
 
 @router.get("")
@@ -35,4 +36,5 @@ async def get_session(
         agentgateway_roles=sorted(principal.agentgateway_roles),
         notice_preferences_available=await schema_ready(settings.notice_dsn),
         llm_logs_available=settings.llm_logs_enabled,
+        mcp_catalog_available=settings.mcp_catalog_enabled,
     )

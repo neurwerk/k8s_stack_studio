@@ -27,6 +27,7 @@ from k8s_stack_studio.controllers.admin import router as admin_router
 from k8s_stack_studio.controllers.api_keys import router as api_keys_router
 from k8s_stack_studio.controllers.llm_logs import router as llm_logs_router
 from k8s_stack_studio.controllers.logs import router as logs_router
+from k8s_stack_studio.controllers.mcp import router as mcp_router
 from k8s_stack_studio.controllers.notice_preferences import router as notice_router
 from k8s_stack_studio.controllers.policy_engine import router as policy_engine_router
 from k8s_stack_studio.controllers.session import router as session_router
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(aggregate_usage_router)
     app.include_router(session_router)
     app.include_router(notice_router)
+    app.include_router(mcp_router)
 
     # --- Version endpoint (unauthenticated, public) ---
     @app.get("/api/version")
