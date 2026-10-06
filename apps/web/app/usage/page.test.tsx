@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAllDailyUsage, fetchUsagePeople, fetchUserDailyUsage } from "@/lib/api/usage";
 import { fetchUser } from "@/lib/api/admin";
+import { ApiRequestError } from "@/lib/api/client";
 import type { UserDailyUsage } from "@/lib/api/usage";
 import UsagePage from "./page";
 
@@ -148,5 +149,26 @@ describe("Usage page", () => {
     expect(within(screen.getByRole("region", { name: "Usage per person" }))
       .getByRole("button", { name: /other-id/ })).toBeInTheDocument();
     expect(fetchUser).not.toHaveBeenCalled();
+  });
+
+  it("keeps historical usage selectable when its user's profile no longer exists", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchUser).mockRejectedValue(new ApiRequestError(404));
+    render(<UsagePage />);
+
+    const people = await screen.findByRole("region", { name: "Usage per person" });
+    const missing = within(people).getByRole("button", { name: /Unknown – ID other-id/ });
+    expect(missing).toHaveTextContent("$0.125");
+    expect(screen.getByRole("option", { name: "Unknown – ID other-id" })).toBeInTheDocument();
+    await waitFor(() => { expect(fetchUser).toHaveBeenCalledWith("other-id", expect.any(AbortSignal)); });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await user.click(missing);
+    await waitFor(() => {
+      expect(fetchUserDailyUsage).toHaveBeenCalledWith(
+        "other-id", { start: "2026-09-01", end: "2026-09-18" }, expect.any(AbortSignal));
+    });
+    expect(await screen.findByRole("region", { name: "Usage totals" })).toHaveTextContent("210");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

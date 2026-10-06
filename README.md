@@ -160,6 +160,12 @@ a query, or a fragment. `K8S_STUDIO_USAGE_TIMEZONE` controls calendar boundaries
 and defaults to `Europe/Berlin`, including daylight-saving transitions.
 Langfuse tracing is separate from this usage integration.
 
+Historical usage remains visible when a Keycloak profile is unavailable, labeled
+`Unknown – ID <user-id>` instead of a name. Missing profiles are expected lookup
+results, not dashboard failures. For callers allowed to read a profile,
+`/users/<user-id>` shows `User not found` on a 404 and does not display API-key
+management for that missing user. Profile and API-key authorization remain separate.
+
 The optional **LLM & MCP logs** page reads the signed-in person's ten most recent
 matching Langfuse v4 LLM generations and MCP tool calls. The All, LLM, and MCP
 filter changes which observations are returned. The table shows recorded token

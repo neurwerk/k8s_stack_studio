@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { ApiKeyManager } from "@/components/api-key-manager";
 import { UserAccess } from "@/components/user-access";
 import { fetchOwnGroups, fetchUser, fetchUserAccess } from "@/lib/api/admin";
+import { ApiRequestError } from "@/lib/api/client";
 import {
   useCurrentUserId,
   useIsApiKeyAdmin,
@@ -27,6 +28,10 @@ function visibleRoles(roles: string[]): string[] {
 export default function UserDetailPage() {
   const params = useParams();
   const userId = params.user_id as string;
+  return <UserDetail key={userId} userId={userId} />;
+}
+
+function UserDetail({ userId }: { userId: string }) {
   const currentUserId = useCurrentUserId();
   const isKeycloakAdmin = useIsKeycloakAdmin();
   const isApiKeyAdmin = useIsApiKeyAdmin();
@@ -40,27 +45,35 @@ export default function UserDetailPage() {
   const [ownGroupsErrorUserId, setOwnGroupsErrorUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
   const isSelf = currentUserId === userId;
   const canViewProfile = isSelf || isKeycloakAdmin;
   const canManageKeys = isSelf || isApiKeyAdmin;
 
   useEffect(() => {
+    const controller = new AbortController();
     if (!canViewProfile) {
       setLoading(false);
       return;
     }
 
-    fetchUser(userId)
+    fetchUser(userId, controller.signal)
       .then((data) => {
-        setUser(data);
+        if (!controller.signal.aborted) setUser(data);
       })
-      .catch(() => {
-        setError("Unable to load the user profile. Please try again.");
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiRequestError && error.status === 404) {
+          setNotFound(true);
+        } else {
+          setError("Unable to load the user profile. Please try again.");
+        }
       })
       .finally(() => {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
+    return () => { controller.abort(); };
   }, [userId, canViewProfile]);
 
   useEffect(() => {
@@ -123,7 +136,7 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && loading && !canManageKeys) {
+  if (canViewProfile && loading) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -131,7 +144,7 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && error && !canManageKeys) {
+  if (canViewProfile && error) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="alert alert-error max-w-md block p-6 text-sm" role="alert">
@@ -142,10 +155,17 @@ export default function UserDetailPage() {
     );
   }
 
-  if (canViewProfile && !loading && !error && !user && !canManageKeys) {
+  if (canViewProfile && notFound) {
     return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        User not found
+      <div className="flex h-full items-center justify-center text-muted-foreground" role="status">
+        <div className="text-center">
+          <h1 className="text-xl font-semibold">User not found</h1>
+          {isKeycloakAdmin && (
+            <Link href="/users" className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline">
+              <ArrowLeft className="h-4 w-4" /> Back to users
+            </Link>
+          )}
+        </div>
       </div>
     );
   }

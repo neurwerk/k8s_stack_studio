@@ -2,12 +2,14 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import UserDetailPage from "./page";
+import { ApiRequestError } from "@/lib/api/client";
 
 const mocks = vi.hoisted(() => ({
   fetchUser: vi.fn(),
   fetchUserAccess: vi.fn(),
   fetchOwnGroups: vi.fn(),
   noticeAvailable: false,
+  targetUserId: "target-user",
   roles: {
     currentUserId: "viewer-user",
     isApiKeyAdmin: false,
@@ -16,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("next/navigation", () => ({ useParams: () => ({ user_id: "target-user" }) }));
+vi.mock("next/navigation", () => ({ useParams: () => ({ user_id: mocks.targetUserId }) }));
 vi.mock("@/lib/api/admin", () => ({
   fetchUser: mocks.fetchUser, fetchUserAccess: mocks.fetchUserAccess,
   fetchOwnGroups: mocks.fetchOwnGroups,
@@ -44,6 +46,7 @@ describe("UserDetailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.noticeAvailable = false;
+    mocks.targetUserId = "target-user";
     mocks.roles.currentUserId = "viewer-user";
     mocks.roles.isApiKeyAdmin = false;
     mocks.roles.isKeycloakAdmin = false;
@@ -136,5 +139,35 @@ describe("UserDetailPage", () => {
     expect(await screen.findByText("Unable to load the user profile. Please try again."))
       .toBeInTheDocument();
     expect(screen.queryByText("Groups: Engineering")).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("shows User not found on 404, including API-key admins (%s)", async (isApiKeyAdmin) => {
+    mocks.roles.isKeycloakAdmin = true;
+    mocks.roles.isApiKeyAdmin = isApiKeyAdmin;
+    mocks.fetchUser.mockRejectedValue(new ApiRequestError(404));
+    render(<UserDetailPage />);
+
+    expect(await screen.findByRole("heading", { name: "User not found" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to users" })).toHaveAttribute("href", "/users");
+    expect(screen.queryByText(/API key manager:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("API key management")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears the previous profile when navigating to a missing user", async () => {
+    mocks.roles.isKeycloakAdmin = true;
+    mocks.roles.isApiKeyAdmin = true;
+    mocks.fetchUser.mockResolvedValueOnce({
+      id: "target-user", username: "target", firstName: "Target", lastName: "User",
+      createdTimestamp: 0,
+    }).mockRejectedValue(new ApiRequestError(404));
+    const { rerender } = render(<UserDetailPage />);
+    expect(await screen.findByRole("heading", { name: "Target User" })).toBeInTheDocument();
+
+    mocks.targetUserId = "missing-user";
+    rerender(<UserDetailPage />);
+    expect(screen.queryByRole("heading", { name: "Target User" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/API key manager:/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "User not found" })).toBeInTheDocument();
   });
 });
