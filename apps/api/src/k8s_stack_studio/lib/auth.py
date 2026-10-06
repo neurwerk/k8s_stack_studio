@@ -107,6 +107,19 @@ class StudioAdmissionMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Reject authenticated callers that lack Studio application admission."""
+        # Keycloak exclusions are path-only. Never make another callback method public.
+        if (
+            scope["type"] == "http"
+            and scope["path"] == "/oauth/callback"
+            and scope["method"] != "GET"
+        ):
+            response = JSONResponse(
+                status_code=405,
+                content={"detail": "Method not allowed"},
+                headers={"Allow": "GET", "Cache-Control": "no-store"},
+            )
+            await response(scope, receive, send)
+            return
         if scope["type"] != "http" or scope["path"] == "/api/version":
             await self.app(scope, receive, send)
             return
@@ -129,8 +142,8 @@ class StudioAdmissionMiddleware:
 def configure_auth(app: FastAPI, settings: Settings) -> None:
     """Install Keycloak middleware and exception handler on the FastAPI app.
 
-    All routes require a valid JWT (public endpoints like /health and
-    /metrics are served by the separate management app on port 4090).
+    Only version and exact GET popup callback are public on the application port;
+    health and metrics are served by the separate management app on port 4090.
     """
     configured = (
         settings.keycloak_server_url and settings.keycloak_realm and settings.keycloak_client_id
@@ -170,7 +183,7 @@ def configure_auth(app: FastAPI, settings: Settings) -> None:
     setup_keycloak_middleware(
         app,
         keycloak_configuration=config,
-        exclude_patterns=[r"^/api/version$"],
+        exclude_patterns=[r"^/api/version$", r"^/oauth/callback\Z"],
         user_mapper=_map_principal,
     )
 

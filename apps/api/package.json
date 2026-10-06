@@ -12,6 +12,6 @@
     "url": "https://github.com/neurwerk/k8s_stack_studio/issues"
   },
   "scripts": {
-    "dev": "uv run uvicorn k8s_stack_studio.main:create_app --factory --reload --port 4010"
+    "dev": "uv run uvicorn k8s_stack_studio.main:create_app --factory --reload --port 4010 --no-access-log"
   }
 }
