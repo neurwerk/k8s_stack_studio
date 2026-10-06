@@ -76,6 +76,10 @@ async def http_client_lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.langfuse_client = await stack.enter_async_context(
                 _create_client(trust_env=False)
             )
+        if settings.contextforge_account_onboarding_enabled:
+            app.state.contextforge_admin_client = await stack.enter_async_context(
+                _create_client(verify=settings.contextforge_ca_cert or True, trust_env=False)
+            )
         yield
 
 
