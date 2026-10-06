@@ -22,6 +22,7 @@ from k8s_stack_studio.lib.dependencies import (
     get_keycloak_admin,
     require_role,
 )
+from k8s_stack_studio.lib.exceptions import KeycloakAdminRequestError
 from k8s_stack_studio.lib.keycloak_admin import KeycloakAdminClient
 from k8s_stack_studio.models.admin import (
     AdminClientAccess,
@@ -178,7 +179,14 @@ async def get_user_detail(
 
     # Admin viewing another user: forward the admin's bearer token
     user_token = _extract_bearer_token(request)
-    return await admin.get_user(user_id, user_token)
+    try:
+        return await admin.get_user(user_id, user_token)
+    except KeycloakAdminRequestError as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            ) from exc
+        raise
 
 
 # ── GET /api/admin/clients ───────────────────────────────────────────────────

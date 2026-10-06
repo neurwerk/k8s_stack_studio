@@ -34,3 +34,20 @@ class PiiEngineRequestError(PiiEngineError):
         self.status_code = status_code
         self.detail = detail
         super().__init__(f"PII Engine {status_code}: {detail}")
+
+
+class KeycloakAdminError(Exception):
+    """Base exception for Keycloak Admin API failures."""
+
+
+class KeycloakAdminRequestError(KeycloakAdminError):
+    """Keycloak Admin API returned an error response."""
+
+    def __init__(self, status_code: int) -> None:
+        """Store the upstream status without exposing response details."""
+        self.status_code = status_code
+        super().__init__(f"Keycloak Admin API returned HTTP {status_code}")
+
+
+class KeycloakAdminConnectionError(KeycloakAdminError):
+    """Keycloak Admin API could not be reached."""

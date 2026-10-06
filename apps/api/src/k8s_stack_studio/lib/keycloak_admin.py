@@ -23,6 +23,11 @@ from urllib.parse import quote
 import httpx
 
 from k8s_stack_studio.config.settings import Settings
+from k8s_stack_studio.lib.exceptions import (
+    KeycloakAdminConnectionError,
+    KeycloakAdminError,
+    KeycloakAdminRequestError,
+)
 from k8s_stack_studio.models.admin import (
     AdminClient,
     AdminClientAccess,
@@ -178,9 +183,14 @@ class KeycloakAdminClient:
         try:
             resp = await self._client.request(method, url, headers=headers, **kwargs)
             resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise KeycloakAdminRequestError(404) from e
+            _logger.exception("Keycloak admin request (user token) failed: %s %s", method, url)
+            raise KeycloakAdminRequestError(e.response.status_code) from e
         except httpx.HTTPError as e:
             _logger.exception("Keycloak admin request (user token) failed: %s %s", method, url)
-            raise RuntimeError(f"Keycloak admin request failed: {e}") from e  # noqa: TRY003  # TODO(2026-08): define KeycloakAdminError in lib/exceptions.py (Phase 3)
+            raise KeycloakAdminConnectionError from e
         body: dict[str, Any] | list[Any] = resp.json()
         return body
 
@@ -231,7 +241,7 @@ class KeycloakAdminClient:
                 },
                 timeout=5,
             )
-        except (RuntimeError, ValueError):
+        except (KeycloakAdminError, ValueError):
             return unavailable
         if not isinstance(result, list) or len(result) > 1:
             return unavailable
