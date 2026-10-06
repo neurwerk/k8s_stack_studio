@@ -132,7 +132,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const ranked = rankPeople(people, metric);
   const rankedModels = rankModels(summary?.models ?? [], modelMetric);
   const maxModelMetric = rankedModels[0]?.[modelMetric] ?? 0;
-  const label = (id: string) => names[id] ?? (id === userId ? "You" : `${id.slice(0, 8)}…`);
+  const label = (id: string) => names[id] ?? (id === userId ? "You" : `Unknown – ID ${id}`);
   const activeIds = new Set(people.map((person) => person.user_id));
 
   return (
