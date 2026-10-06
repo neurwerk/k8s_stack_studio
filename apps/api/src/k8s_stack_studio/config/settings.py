@@ -6,7 +6,7 @@ from typing import Self
 from urllib.parse import SplitResult, quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from k8s_stack_studio.models.mcp import McpRegistration
@@ -53,6 +53,16 @@ class InvalidMcpCatalogConfigError(ValueError):
     def __init__(self) -> None:
         """Keep validation errors free of registration details."""
         super().__init__("Enabled MCP catalog requires a stable native team ID and unique MCP IDs.")
+
+
+class InvalidContextForgeAccountConfigError(ValueError):
+    """Enabled account onboarding needs fixed native API configuration."""
+
+    def __init__(self) -> None:
+        """Use a safe error without service credentials."""
+        super().__init__(
+            "Native account onboarding requires the catalog, HTTPS URL, token and roles."
+        )
 
 
 class RemotePiiEngineInsecureModeError(ValueError):
@@ -175,6 +185,14 @@ class Settings(BaseSettings):
     mcp_catalog_enabled: bool = False
     contextforge_team_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
     mcp_catalog: list[McpRegistration] = Field(default_factory=list, max_length=50)
+    contextforge_account_onboarding_enabled: bool = False
+    contextforge_url: str = ""
+    contextforge_ca_cert: str = ""
+    contextforge_service_token: SecretStr = SecretStr("")
+    contextforge_global_role_id: str = Field(
+        default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$"
+    )
+    contextforge_team_role_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
 
     # --- OpenSearch (logs viewer) ---
     # The internal service DNS default is overridden through environment config.
@@ -308,4 +326,28 @@ class Settings(BaseSettings):
             or len({item.id for item in self.mcp_catalog}) != len(self.mcp_catalog)
         ):
             raise InvalidMcpCatalogConfigError
+        return self
+
+    @model_validator(mode="after")
+    def validate_contextforge_account_config(self) -> Self:
+        """Enable only a fixed HTTPS administrative endpoint with isolated credentials."""
+        if not self.contextforge_account_onboarding_enabled:
+            return self
+        parsed = _parse_url(self.contextforge_url)
+        if (
+            not self.mcp_catalog_enabled
+            or parsed is None
+            or parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or not self.contextforge_service_token.get_secret_value().strip()
+            or not self.contextforge_global_role_id
+            or not self.contextforge_team_role_id
+            or self.contextforge_global_role_id == self.contextforge_team_role_id
+        ):
+            raise InvalidContextForgeAccountConfigError
         return self
