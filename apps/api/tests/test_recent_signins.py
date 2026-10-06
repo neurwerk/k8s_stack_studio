@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from k8s_stack_studio.controllers.admin import _principal_to_user_dict, router
 from k8s_stack_studio.lib.auth import StudioAdmissionMiddleware, StudioPrincipal
 from k8s_stack_studio.lib.dependencies import get_keycloak_admin
+from k8s_stack_studio.lib.exceptions import KeycloakAdminRequestError
 from k8s_stack_studio.lib.keycloak_admin import KeycloakAdminClient
 
 END = datetime(2026, 9, 11, 12, tzinfo=UTC)
@@ -159,6 +160,19 @@ async def test_list_pagination_reaches_keycloak(settings):
         assert await KeycloakAdminClient(settings, http).list_users("token", "alice", 25, 25) == [
             {"id": "a"}
         ]
+
+
+async def test_missing_admin_user_returns_not_found():
+    admin = AsyncMock()
+    admin.get_user.side_effect = KeycloakAdminRequestError(404)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app(admin, ["studio-user", "keycloak-admin"])),
+        base_url="http://test",
+        headers={"Authorization": "Bearer delegated"},
+    ) as http:
+        response = await http.get("/api/admin/users/missing")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "User not found"}
 
 
 def test_self_profile_does_not_invent_account_or_verification_status():
