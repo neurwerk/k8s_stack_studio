@@ -9,6 +9,7 @@ import {
   FileSearch,
   KeyRound,
   LogOut,
+  Plug,
   ScrollText,
   Settings,
   Shield,
@@ -43,7 +44,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
   const currentUserId = useCurrentUserId();
   const session = useVerifiedSession();
   const llmLogsAvailable = session.llm_logs_available;
-  const configurationActive = ["/policy-engine", "/notices", "/api-keys"].includes(pathname);
+  const configurationActive = ["/policy-engine", "/notices", "/api-keys", "/mcp"].includes(pathname);
   const [configurationOpen, setConfigurationOpen] = useState(configurationActive);
 
   return (
@@ -180,6 +181,18 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
                   }`}>
                   <BellRing className="h-5 w-5 shrink-0" />
                   {!collapsed && <span className="hidden sm:inline">Notices</span>}
+                </Link>
+              )}
+              {session.mcp_catalog_available && (
+                <Link href="/mcp" aria-label="MCP integrations"
+                  aria-current={pathname === "/mcp" ? "page" : undefined}
+                  className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                    pathname === "/mcp"
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                  }`}>
+                  <Plug className="h-5 w-5 shrink-0" />
+                  {!collapsed && <span className="hidden sm:inline">MCP integrations</span>}
                 </Link>
               )}
               <Link href="/api-keys" aria-label="API Keys"
