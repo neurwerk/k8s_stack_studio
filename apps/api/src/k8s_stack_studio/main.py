@@ -1,7 +1,7 @@
 """FastAPI application entry point for the neurwerk studio backend.
 
 Runs two separate ASGI apps on different ports:
-  - App port (4010):     authenticated API → exposed via HTTPRoute
+  - App port (4010):     authenticated API + public version/popup callback → HTTPRoute
   - Mgmt port (4090):    /health + /metrics → internal-only (pod probes + Prometheus)
 """
 
@@ -29,6 +29,7 @@ from k8s_stack_studio.controllers.llm_logs import router as llm_logs_router
 from k8s_stack_studio.controllers.logs import router as logs_router
 from k8s_stack_studio.controllers.mcp import router as mcp_router
 from k8s_stack_studio.controllers.notice_preferences import router as notice_router
+from k8s_stack_studio.controllers.oauth_callback import router as oauth_callback_router
 from k8s_stack_studio.controllers.policy_engine import router as policy_engine_router
 from k8s_stack_studio.controllers.session import router as session_router
 from k8s_stack_studio.controllers.usage import aggregate_router as aggregate_usage_router
@@ -51,6 +52,10 @@ def _create_app_common() -> tuple[Settings, Instrumentator]:
         level=settings.log_level.upper(),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # OAuth callbacks carry codes/state in URLs; transport diagnostics can also
+    # contain credential headers. Keep application errors, not HTTP wire details.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     instrumentator = Instrumentator(
         should_group_status_codes=False,
@@ -107,6 +112,7 @@ def create_app() -> FastAPI:
     app.include_router(session_router)
     app.include_router(notice_router)
     app.include_router(mcp_router)
+    app.include_router(oauth_callback_router)
 
     # --- Version endpoint (unauthenticated, public) ---
     @app.get("/api/version")
@@ -178,6 +184,7 @@ def main() -> None:
         factory=True,
         log_level=settings.log_level,
         lifespan="on",
+        access_log=False,  # Callback query strings contain OAuth code/state.
     )
 
 

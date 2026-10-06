@@ -1,4 +1,4 @@
-"""Native v1.0.11 account provisioning only; never use this service token for OAuth."""
+"""Native provisioning with an explicit service identity, never a user's OAuth identity."""
 
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ INVOCATION_PERMISSIONS = frozenset(
         "servers.use",
         "gateways.read",
     }
+)
+PROVISIONING_PERMISSIONS = frozenset(
+    {"admin.user_management", "teams.read", "teams.manage_members"}
 )
 
 
@@ -48,18 +51,25 @@ class ContextForgeAccountClient:
         params: dict[str, str] | None = None,
         allow: tuple[int, ...] = (),
     ) -> httpx.Response:
+        headers = (
+            {"x-contextforge-account-email": self.settings.contextforge_service_account_email}
+            if self.settings.contextforge_service_auth_mode == "trusted-proxy"
+            else {
+                "Authorization": "Bearer "
+                + self.settings.contextforge_service_token.get_secret_value()
+            }
+        )
+        # Do not merge client/caller cookies or credentials. Proxy mode deliberately
+        # asserts only the fixed service identity; native RBAC does not validate JWTs here.
+        request = httpx.Request(
+            method,
+            self.settings.contextforge_url.rstrip("/") + path,
+            headers=headers,
+            json=payload,
+            params=params,
+        )
         try:
-            result = await self.client.request(
-                method,
-                self.settings.contextforge_url.rstrip("/") + path,
-                headers={
-                    "Authorization": "Bearer "
-                    + self.settings.contextforge_service_token.get_secret_value()
-                },
-                json=payload,
-                params=params,
-                follow_redirects=False,
-            )
+            result = await self.client.send(request, auth=None, follow_redirects=False)
         except httpx.HTTPError:
             raise ContextForgeAccountError from None
         if result.status_code not in allow and not 200 <= result.status_code < 300:
@@ -83,6 +93,8 @@ class ContextForgeAccountClient:
         return user
 
     async def _check_configuration(self) -> None:
+        if self.settings.contextforge_service_auth_mode == "trusted-proxy":
+            await self._check_service_account()
         team = _object(
             self._json(await self._request("GET", f"/teams/{self.settings.contextforge_team_id}"))
         )
@@ -108,6 +120,51 @@ class ContextForgeAccountClient:
                 or set(actual_permissions) != permissions
             ):
                 raise ContextForgeAccountError
+
+    async def _check_service_account(self) -> None:
+        # Native proxy RBAC does not itself require active/verified non-admin users.
+        # Check these explicitly before any user provisioning or OAuth admission.
+        email = self.settings.contextforge_service_account_email
+        path = f"/auth/email/admin/users/{quote(email, safe='')}"
+        user = self._check_user(self._json(await self._request("GET", path)), email)
+        if user.get("is_active") is not True:
+            raise ContextForgeAccountError
+        roles = self._json(await self._request("GET", f"/rbac/users/{quote(email, safe='')}/roles"))
+        if not isinstance(roles, list) or not roles or len(roles) > 10:
+            raise ContextForgeAccountError
+        permissions: set[str] = set()
+        for value in roles:
+            assignment = _object(value)
+            role_id = assignment.get("role_id")
+            if (
+                not isinstance(role_id, str)
+                or assignment.get("user_email") != email
+                or assignment.get("is_active") is not True
+                or assignment.get("expires_at") is not None
+                or (assignment.get("scope"), assignment.get("scope_id"))
+                not in {
+                    ("global", None),
+                    ("team", self.settings.contextforge_team_id),
+                }
+            ):
+                raise ContextForgeAccountError
+            role = _object(
+                self._json(await self._request("GET", f"/rbac/roles/{quote(role_id, safe='')}"))
+            )
+            actual = role.get("permissions")
+            if (
+                role.get("id") != role_id
+                or role.get("scope") != assignment.get("scope")
+                or role.get("is_active") is not True
+                or role.get("inherits_from") is not None
+                or not isinstance(actual, list)
+                or not all(isinstance(item, str) for item in actual)
+            ):
+                raise ContextForgeAccountError
+            permissions.update(cast("list[str]", actual))
+        if permissions != PROVISIONING_PERMISSIONS:
+            raise ContextForgeAccountError
+        await self._ensure_membership(email, created=False, expected_role="owner")
 
     async def _roles(self, email: str) -> set[str]:
         result = self._json(
@@ -135,17 +192,21 @@ class ContextForgeAccountClient:
             found.add(role_id)
         return found
 
-    def _check_membership(self, value: object, email: str) -> None:
+    def _check_membership(
+        self, value: object, email: str, *, expected_role: str = "member"
+    ) -> None:
         member = _object(value)
         if (
             member.get("user_email") != email
             or member.get("team_id") != self.settings.contextforge_team_id
-            or member.get("role") != "member"
+            or member.get("role") != expected_role
             or member.get("is_active") is not True
         ):
             raise ContextForgeAccountError
 
-    async def _ensure_membership(self, email: str, *, created: bool) -> None:
+    async def _ensure_membership(
+        self, email: str, *, created: bool, expected_role: str = "member"
+    ) -> None:
         path = f"/teams/{self.settings.contextforge_team_id}/members"
         if created:
             result = await self._request(
@@ -164,13 +225,25 @@ class ContextForgeAccountClient:
                 raise ContextForgeAccountError
             for value in members:
                 if _object(value).get("user_email") == email:
-                    self._check_membership(value, email)
+                    self._check_membership(value, email, expected_role=expected_role)
                     return
             cursor = page.get("nextCursor")
             if not isinstance(cursor, str) or not cursor:
                 break
             params["cursor"] = cursor
         raise ContextForgeAccountError
+
+    async def check_account(self, email: str) -> None:
+        """Check an existing account read-only; a status lookup must never restore access."""
+        await self._check_configuration()
+        path = f"/auth/email/admin/users/{quote(email, safe='')}"
+        user = self._check_user(self._json(await self._request("GET", path)), email)
+        if user.get("is_active") is not True or await self._roles(email) != {
+            self.settings.contextforge_global_role_id,
+            self.settings.contextforge_team_role_id,
+        }:
+            raise ContextForgeAccountError
+        await self._ensure_membership(email, created=False)
 
     async def prepare_account(self, email: str) -> None:
         """Prepare only this verified email; never reactivate an existing disabled account."""

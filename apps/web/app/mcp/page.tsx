@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { fetchMcpCatalog } from "@/lib/api/mcp";
 import type { McpCatalogEntry } from "@/lib/api/mcp";
 import { useVerifiedSession } from "@/lib/auth/session-context";
+import { McpConnection } from "@/components/mcp-connection";
 
 const authenticationHelp = {
   "no-authentication": "No provider credential is needed.",
@@ -16,10 +17,15 @@ export default function McpPage() {
   if (!session.mcp_catalog_available) {
     return <p className="p-6 text-sm text-muted-foreground">MCP integrations are not enabled.</p>;
   }
-  return <McpCatalog key={JSON.stringify([session.subject, session.agentgateway_roles])} />;
+  return (
+    <McpCatalog
+      key={JSON.stringify([session.subject, session.agentgateway_roles])}
+      connectionsEnabled={!!session.mcp_connections_available}
+    />
+  );
 }
 
-function McpCatalog() {
+function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const [items, setItems] = useState<McpCatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -55,8 +61,9 @@ function McpCatalog() {
         </p>
       </div>
       <div className="alert alert-info text-sm">
-        This catalog is read-only. Provider connection status and Connect controls are not available
-        yet. Operators manage registrations and tool discovery.
+        {connectionsEnabled
+          ? "Connect your own provider account. Operators manage registrations and tool discovery; connecting never grants platform access."
+          : "This catalog is read-only. Provider connection status and Connect controls are not available yet. Operators manage registrations and tool discovery."}
       </div>
       {loading && (
         <p role="status" className="text-sm text-muted-foreground">
@@ -98,10 +105,18 @@ function McpCatalog() {
                   <span className={`badge ${item.permitted ? "badge-success" : "badge-ghost"}`}>
                     {item.permitted ? "Invocation permitted" : "No permission"}
                   </span>
-                  {item.connection_status && (
-                    <span className="badge badge-warning">Status unavailable</span>
-                  )}
+                  {item.connection_status &&
+                    !(
+                      connectionsEnabled &&
+                      item.authentication_model === "individual-authentication" &&
+                      item.permitted
+                    ) && (
+                      <span className="badge badge-warning">Status unavailable</span>
+                    )}
                 </div>
+                {connectionsEnabled &&
+                  item.authentication_model === "individual-authentication" &&
+                  item.permitted && <McpConnection id={item.id} />}
                 {!item.permitted && (
                   <p className="text-sm text-muted-foreground">
                     Ask an operator for platform access. A provider connection never grants
