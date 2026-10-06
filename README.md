@@ -153,7 +153,9 @@ Pinned ContextForge v1.0.11 source is
    operator-controlled; invocation must not gain caller Authorization via plugins.
 5. Route **exact GET `/oauth/callback`** on the Studio HTTPS Gateway directly to
    Studio API's existing application Service/port, without prefix rewrite or JWT
-   admission. Keep native `/oauth/callback` and legacy pages private. Studio rejects
+   admission. Studio's exact callback auth exclusion rejects non-GET methods with
+   405 before routing; every other operational path remains JWT-protected.
+   Keep native `/oauth/callback` and legacy pages private. Studio rejects
    non-`popup.` states, duplicate/unknown or oversized parameters before forwarding
    only code/state unchanged to its fixed private `CONTEXTFORGE_URL` callback, over
    verified TLS using `CONTEXTFORGE_CA_CERT` when needed. No caller headers, cookies,
