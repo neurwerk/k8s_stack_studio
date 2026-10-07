@@ -56,6 +56,9 @@ def _create_app_common() -> tuple[Settings, Instrumentator]:
     # contain credential headers. Keep application errors, not HTTP wire details.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    # MCP transport exceptions may contain private tool results or request data.
+    for name in ("mcp", "httpx2"):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
 
     instrumentator = Instrumentator(
         should_group_status_codes=False,

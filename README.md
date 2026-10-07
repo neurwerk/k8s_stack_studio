@@ -67,8 +67,11 @@ environment-specific endpoints through `K8S_STUDIO_*` environment variables.
 
 Connect/Reconnect/status supports configured `individual-authentication` entries;
 GitHub is an example, not a provider restriction. New compatible providers need
-configuration, not Python handlers. No PAT entry, discovery or registration-management
+configuration, not Python handlers. No PAT entry or registration-management
 API is exposed. Features default off; publication and deployment are separate.
+
+Expandable MCP rows list approved tools and run chart-defined read-only `checks` with fixed arguments through `K8S_STUDIO_MCP_GATEWAY_URL` using the signed-in caller's token and permissions.
+Checks can display an optional labelled JSON field from the result; saved-connection status is read in one batch and rate limits show a retry time.
 
 Configuration is API-only, with prefix `K8S_STUDIO_`:
 
