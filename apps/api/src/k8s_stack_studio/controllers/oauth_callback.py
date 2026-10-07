@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from k8s_stack_studio.config.settings import Settings
+from k8s_stack_studio.lib.contextforge import ContextForgeAccountError
+from k8s_stack_studio.lib.contextforge_oauth import _https_url
 from k8s_stack_studio.lib.dependencies import get_settings
 from k8s_stack_studio.lib.http_client import _create_client
 
@@ -101,12 +103,19 @@ async def oauth_callback(
     params = request.query_params
     if (
         len(params) != len(params.multi_items())
-        or not set(params) <= {"code", "state", "error", "error_description"}
+        or not set(params) <= {"code", "state", "error", "error_description", "iss"}
         or not re.fullmatch(r"popup\.[A-Za-z0-9_-]{20,512}", params.get("state", ""))
         or len(params.get("error", "")) > 100
         or len(params.get("error_description", "")) > 500
+        or len(params.get("iss", "")) > 2048
     ):
         return _popup_response(settings, 400)
+    if "iss" in params:
+        # Syntax-only metadata: never select a destination or claim issuer/state binding.
+        try:
+            _https_url(params["iss"])
+        except ContextForgeAccountError:
+            return _popup_response(settings, 400)
     # Provider denial needs no exchange. Never forward/log/render provider error text.
     code = params.get("code", "")
     if params.get("error") or not 1 <= len(code) <= 2048 or not all(" " <= c <= "~" for c in code):
