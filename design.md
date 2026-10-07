@@ -67,7 +67,7 @@ Spacing follows the site's 4/8/12/16/24/32/48px progression. Default control hei
 1. Add the daisyUI dependency and light custom theme; establish fonts, brand tokens, and a small shared set of component conventions. Update root layout and app shell first.
 2. Update shared navigation, forms, buttons, cards, tables, status indicators, loading/error states. Remove obsolete dark-specific overrides and conflicting token definitions as consumers migrate.
 3. Work through all routes: profile and API keys; users, groups, roles, clients; usage and charts; logs; PII policy editor/tester and YAML preview; authentication/loading screens. Cover role-dependent variants.
-4. Check keyboard navigation, focus, contrast, text overflow, empty/error/loading states, and small-screen behavior. Run web lint, typecheck, tests, and build; inspect representative pages visually in a browser before considering the refactor complete.
+4. Check keyboard navigation, focus, contrast, text overflow, empty/error/loading states, and small-screen behavior. Run web lint, typecheck, and build plus the API tests; inspect representative pages visually in a browser before considering the refactor complete.
 
 ## Acceptance criteria
 

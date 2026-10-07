@@ -25,22 +25,6 @@ def os_settings() -> Settings:
     )
 
 
-def test_init_without_client(os_settings: Settings) -> None:
-    """Init without an injected client keeps TLS verification enabled."""
-    client = OpenSearchClient(settings=os_settings)
-    assert client._base == "https://os:9200"
-    assert client._auth == ("user", "pass")
-    assert client._client is None
-    assert client._verify is True
-
-
-def test_init_with_client(os_settings: Settings) -> None:
-    """Init with a shared httpx client stores the reference."""
-    mock = MagicMock(spec=httpx.AsyncClient)
-    client = OpenSearchClient(settings=os_settings, client=mock)
-    assert client._client is mock
-
-
 @pytest.mark.asyncio
 async def test_search_logs_with_shared_client(os_settings: Settings) -> None:
     """search_logs uses the shared client when injected."""

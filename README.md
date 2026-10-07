@@ -362,7 +362,6 @@ Run the JavaScript and TypeScript checks from the repository root:
 ```bash
 pnpm lint
 pnpm typecheck
-pnpm test
 pnpm build
 ```
 
@@ -374,6 +373,10 @@ uv run ruff format --check
 uv run ty check
 uv run pytest
 ```
+
+Automated tests focus on API behavior and security boundaries. The web app has
+no browser-simulation test suite; lint, type checks and builds remain required.
+Check user-facing flows visually when changing the UI.
 
 ## Containers
 

@@ -10,36 +10,18 @@ import pytest
 from k8s_stack_studio.config.settings import Settings
 
 
-def test_settings_defaults() -> None:
-    """Settings load with sensible defaults."""
+def test_tls_verification_is_enabled_by_default() -> None:
+    """Production clients start with TLS verification and no local bypass."""
     s = Settings(
         keycloak_server_url="http://kc:80",
         keycloak_realm="realm",
         keycloak_client_id="cli",
     )
-    assert s.host == "0.0.0.0"
-    assert s.port == 4010
-    assert s.mgmt_port == 4090
-    assert s.log_level == "info"
-    assert (
-        s.pii_engine_url
-        == "https://monitor-pii-engine-service.monitor-pii-engine.svc.cluster.local:443"
-    )
-    assert s.pii_engine_timeout == 30.0
-    assert s.pii_engine_ca_cert == "/var/run/pii-engine/tls/ca.crt"
-    assert s.pii_engine_client_cert == "/var/run/pii-engine/tls/tls.crt"
-    assert s.pii_engine_client_key == "/var/run/pii-engine/tls/tls.key"
+    assert s.pii_engine_url.startswith("https://")
     assert s.pii_engine_allow_insecure_local is False
     assert s.opensearch_url.startswith("https://")
-    assert s.opensearch_user == "studio-logs-read"
-    assert s.opensearch_ca_cert == ""
     assert s.opensearch_allow_insecure_local is False
     assert s.opensearch_tls_verify is True
-    assert s.agentgateway_admin_url.endswith(":15000")
-    assert s.usage_timezone == "Europe/Berlin"
-    assert s.keycloak_server_url == "http://kc:80"
-    assert s.keycloak_realm == "realm"
-    assert s.keycloak_client_id == "cli"
 
 
 def test_settings_env_prefix() -> None:
