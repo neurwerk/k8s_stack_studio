@@ -3,9 +3,18 @@
 const API_BASE = "/api";
 
 export class ApiRequestError extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    readonly retryAfter: number | null = null,
+  ) {
     super("Request failed. Please try again.");
     this.name = "ApiRequestError";
+  }
+
+  static fromResponse(response: Response): ApiRequestError {
+    const value = response.headers.get("retry-after") ?? "";
+    const seconds = /^\d+$/.test(value) ? Math.min(3600, Math.max(1, Number(value))) : null;
+    return new ApiRequestError(response.status, seconds);
   }
 }
 
@@ -48,7 +57,7 @@ export async function apiPost<TReq, TRes>(path: string, body: TReq): Promise<TRe
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new ApiRequestError(res.status);
+    throw ApiRequestError.fromResponse(res);
   }
   return res.json();
 }
@@ -60,7 +69,7 @@ export async function apiPut<TReq, TRes>(path: string, body: TReq): Promise<TRes
     headers: authHeaders(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new ApiRequestError(res.status);
+  if (!res.ok) throw ApiRequestError.fromResponse(res);
   return res.json();
 }
 
@@ -80,7 +89,7 @@ export async function apiGet<TRes>(
     headers: authHeaders(),
   });
   if (!res.ok) {
-    throw new ApiRequestError(res.status);
+    throw ApiRequestError.fromResponse(res);
   }
   return res.json();
 }

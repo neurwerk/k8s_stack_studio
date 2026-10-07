@@ -197,6 +197,8 @@ class Settings(BaseSettings):
 
     # Native features remain separately gated until runtime publication/qualification.
     mcp_catalog_enabled: bool = False
+    # Fixed authenticated data-plane origin, separate from private analytics.
+    mcp_gateway_url: str = ""
     contextforge_team_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
     mcp_catalog: list[McpRegistration] = Field(default_factory=list, max_length=200)
     contextforge_account_onboarding_enabled: bool = False
@@ -212,6 +214,27 @@ class Settings(BaseSettings):
     mcp_connections_enabled: bool = False
     contextforge_oauth_studio_origin: str = ""
     contextforge_oauth_callback_url: str = ""
+
+    @field_validator("mcp_gateway_url")
+    @classmethod
+    def validate_mcp_gateway_url(cls, value: str) -> str:
+        """Allow a fixed HTTP(S) origin only; callers never select a destination."""
+        if not value:
+            return value
+        parsed = _parse_url(value)
+        if (
+            parsed is None
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or any(c.isspace() or c == "\\" for c in value)
+        ):
+            raise ValueError("MCP gateway must be a fixed HTTP(S) origin")  # noqa: TRY003
+        return value.rstrip("/")
 
     # --- OpenSearch (logs viewer) ---
     # The internal service DNS default is overridden through environment config.

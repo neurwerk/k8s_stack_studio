@@ -8,7 +8,11 @@ from urllib.parse import parse_qsl, urlsplit
 import httpx
 
 from k8s_stack_studio.config.settings import Settings
-from k8s_stack_studio.lib.contextforge import ContextForgeAccountError, _object
+from k8s_stack_studio.lib.contextforge import (
+    ContextForgeAccountError,
+    ContextForgeRateLimitError,
+    _object,
+)
 from k8s_stack_studio.models.mcp import (
     ConnectionStatus,
     McpConnectionStatus,
@@ -64,6 +68,8 @@ class ContextForgeOAuthClient:
             response = await self.client.send(request, auth=None, follow_redirects=False)
         except httpx.HTTPError:
             raise ContextForgeAccountError from None
+        if response.status_code == 429:
+            raise ContextForgeRateLimitError(response.headers.get("retry-after", "60"))
         if response.status_code not in ((302, 307) if popup else (200,)):
             raise ContextForgeAccountError
         return response

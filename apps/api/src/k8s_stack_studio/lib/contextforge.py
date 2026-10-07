@@ -28,6 +28,19 @@ class ContextForgeAccountError(Exception):
     """Native account provisioning failed; upstream content must stay private."""
 
 
+class ContextForgeRateLimitError(ContextForgeAccountError):
+    """Carry only a bounded retry time, never the native error body."""
+
+    def __init__(self, retry_after: str) -> None:
+        """Normalize the native Retry-After seconds for the UI."""
+        self.retry_after = min(3600, max(1, int(retry_after))) if retry_after.isdigit() else 60
+        super().__init__("Connection checks are temporarily rate limited")
+
+
+class ContextForgeAccountMissingError(ContextForgeAccountError):
+    """No personal native account exists yet; connecting can prepare one."""
+
+
 def _object(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ContextForgeAccountError
@@ -72,6 +85,8 @@ class ContextForgeAccountClient:
             result = await self.client.send(request, auth=None, follow_redirects=False)
         except httpx.HTTPError:
             raise ContextForgeAccountError from None
+        if result.status_code == 429:
+            raise ContextForgeRateLimitError(result.headers.get("retry-after", "60"))
         if result.status_code not in allow and not 200 <= result.status_code < 300:
             raise ContextForgeAccountError
         return result
@@ -237,7 +252,10 @@ class ContextForgeAccountClient:
         """Check an existing account read-only; a status lookup must never restore access."""
         await self._check_configuration()
         path = f"/auth/email/admin/users/{quote(email, safe='')}"
-        user = self._check_user(self._json(await self._request("GET", path)), email)
+        result = await self._request("GET", path, allow=(404,))
+        if result.status_code == 404:
+            raise ContextForgeAccountMissingError
+        user = self._check_user(self._json(result), email)
         if user.get("is_active") is not True or await self._roles(email) != {
             self.settings.contextforge_global_role_id,
             self.settings.contextforge_team_role_id,
