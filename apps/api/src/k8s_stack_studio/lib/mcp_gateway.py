@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ from mcp_types import CallToolResult, TextContent, Tool
 from k8s_stack_studio.models.mcp import McpCheck, McpCheckResult, McpRegistration, McpTool
 
 _in_flight = asyncio.Semaphore(4)
+_logger = logging.getLogger(__name__)
 
 
 class McpGatewayError(Exception):
@@ -39,11 +41,13 @@ async def gateway_client(
     origin: str, item: McpRegistration, authorization: str
 ) -> AsyncIterator[Client]:
     """Create a fresh transport per caller; never share credentials, cookies or SDK caches."""
-    url = f"{origin}/mcp/{item.id}"
+    # HTTP clients normalize default ports before request hooks run.
+    url = httpx2.URL(f"{origin}/mcp/{item.id}")
     rejection: McpGatewayError | None = None
+    stage = "initialize"
 
     async def guard(request: httpx2.Request) -> None:
-        if str(request.url) != url or request.method != "POST":
+        if request.url != url or request.method != "POST":
             raise McpGatewayError
         request.headers.pop("cookie", None)
 
@@ -72,15 +76,24 @@ async def gateway_client(
                 event_hooks={"request": [guard], "response": [response_status]},
             ) as http,
         ):
-            transport = streamable_http_client(url, http_client=http, terminate_on_close=False)
+            transport = streamable_http_client(str(url), http_client=http, terminate_on_close=False)
             async with Client(
                 transport, mode="auto", cache=None, read_timeout_seconds=30
             ) as client:
+                stage = "request"
                 yield client
-    except McpGatewayError:
-        raise
-    except Exception:  # noqa: BLE001 -- SDK task groups wrap transport/protocol errors; never expose them.
-        raise rejection or McpGatewayError() from None
+    except Exception as exc:  # noqa: BLE001 -- SDK task groups wrap transport/protocol errors.
+        error = rejection or (exc if isinstance(exc, McpGatewayError) else McpGatewayError())
+        # Log only fixed stages, operator IDs and error types, never exception text,
+        # credentials, request arguments, tool results or a caller's identity.
+        _logger.warning(
+            "MCP request failed: integration=%s stage=%s status=%s error_type=%s",
+            item.id,
+            stage,
+            error.status,
+            type(exc).__name__,
+        )
+        raise error from None
 
 
 async def _tools(client: Client) -> dict[str, Tool]:
