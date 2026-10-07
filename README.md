@@ -20,7 +20,6 @@ Studio is the web dashboard and API for operating AI platform services in neurwe
 
 - **Contributions:** Read [CONTRIBUTING.md](.github/CONTRIBUTING.md) before proposing a change.
 - **Bug reports and feature requests:** Use [GitHub Issues](https://github.com/neurwerk/k8s_stack_studio/issues) for reproducible bugs and clearly scoped feature requests.
-- **Technical guidance:** The versioned [personal MCP OAuth contract](https://github.com/neurwerk/k8s_stack_studio/blob/f8b471c15d18994418dd5df44e410dd4be23799e/README.md#personal-mcp-oauth) and [development instructions](https://github.com/neurwerk/k8s_stack_studio/blob/f8b471c15d18994418dd5df44e410dd4be23799e/README.md#local-development) remain available for Studio 0.16.1.
 
 ## Security
 
