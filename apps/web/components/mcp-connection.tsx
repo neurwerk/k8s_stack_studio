@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { connectMcp, fetchMcpConnectionStatus } from "@/lib/api/mcp";
+import { connectMcp, mcpError } from "@/lib/api/mcp";
 import type { McpConnectionStatus } from "@/lib/api/mcp";
 
 function isMcpOAuthCallback(
@@ -21,17 +21,28 @@ function isMcpOAuthCallback(
   );
 }
 
-export function McpConnection({ id }: { id: string }) {
-  const [status, setStatus] = useState<McpConnectionStatus["status"]>("status unavailable");
+export function McpConnection({
+  id,
+  status,
+  onRefresh,
+}: {
+  id: string;
+  status?: McpConnectionStatus["status"];
+  onRefresh: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [refresh, setRefresh] = useState(0);
+  const refresh = useRef(onRefresh);
   const active = useRef(true);
   const pending = useRef<{ popup: Window; callbackOrigin: string } | null>(null);
 
   function pendingFlow() {
     return pending.current;
   }
+
+  useEffect(() => {
+    refresh.current = onRefresh;
+  }, [onRefresh]);
 
   useEffect(() => {
     active.current = true;
@@ -43,14 +54,14 @@ export function McpConnection({ id }: { id: string }) {
       flow.popup.close();
       pending.current = null;
       setBusy(false);
-      setRefresh((value) => value + 1);
+      refresh.current();
     };
     window.addEventListener("message", onMessage);
     const interval = window.setInterval(() => {
       if (pending.current?.popup.closed) {
         pending.current = null;
         setBusy(false);
-        setRefresh((value) => value + 1);
+        refresh.current();
       }
     }, 1000);
     return () => {
@@ -61,20 +72,6 @@ export function McpConnection({ id }: { id: string }) {
       window.clearInterval(interval);
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchMcpConnectionStatus(id)
-      .then((value) => {
-        if (!cancelled) setStatus(value.status);
-      })
-      .catch(() => {
-        if (!cancelled) setStatus("status unavailable");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, refresh]);
 
   async function connect() {
     // Open synchronously in the click handler so browsers do not block the popup.
@@ -95,60 +92,35 @@ export function McpConnection({ id }: { id: string }) {
       }
       current.callbackOrigin = flow.callback_origin;
       popup.location.href = flow.authorization_url;
-    } catch {
+    } catch (error) {
       popup.close();
       if (active.current && pendingFlow()?.popup === popup) {
         pending.current = null;
         setBusy(false);
-        setError("Could not start the connection. Check your access or try again.");
+        setError(mcpError(error));
       }
     }
   }
 
   return (
-    <div className="space-y-3">
-      <p role="status" className="text-sm capitalize">
-        {status}
-      </p>
-      {status === "refresh pending" && (
-        <p className="text-sm text-muted-foreground">
-          A saved connection has expired. ContextForge attempts refresh on the next call, if possible.
-          This status cannot tell whether refresh is available.
-        </p>
-      )}
-      <p className="text-xs text-muted-foreground">
-        Status reflects the saved connection, not a live provider permission check. Revocation may only
-        be detected on a call.
-      </p>
+    <div className="space-y-2">
+      <button
+        type="button"
+        className="btn btn-sm btn-outline"
+        disabled={busy}
+        onClick={() => void connect()}
+      >
+        {busy
+          ? "Authorizing…"
+          : status === "connected" || status === "refresh pending"
+            ? "Reauthorize"
+            : "Connect"}
+      </button>
       {error && (
-        <p role="alert" className="text-sm text-error">
+        <p role="alert" className="max-w-xs text-xs text-error">
           {error}
         </p>
       )}
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="btn btn-sm btn-primary"
-          disabled={busy}
-          onClick={() => void connect()}
-        >
-          {busy
-            ? "Connecting…"
-            : status === "connected" || status === "refresh pending"
-              ? "Reconnect"
-              : "Connect"}
-        </button>
-        <button
-          type="button"
-          className="btn btn-sm btn-outline"
-          disabled={busy}
-          onClick={() => {
-            setRefresh((value) => value + 1);
-          }}
-        >
-          Check status
-        </button>
-      </div>
     </div>
   );
 }

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Literal
+import json
+from datetime import datetime
+from typing import Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 AuthenticationModel = Literal[
     "no-authentication", "shared-authentication", "individual-authentication"
@@ -24,6 +26,34 @@ def https_origin(value: str) -> str:
     return f"https://{host}{port}"
 
 
+class McpCheckDisplay(BaseModel):
+    """An optional plain-text label and dot-separated JSON field, never a template."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    label: str = Field(min_length=1, max_length=100)
+    field: str = Field(min_length=1, max_length=200, pattern=r"^[a-zA-Z0-9_-]+(\.[a-zA-Z0-9_-]+)*$")
+
+
+class McpCheck(BaseModel):
+    """Operator approval to execute one read-only tool with fixed non-secret arguments."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1, max_length=100)
+    tool: str = Field(min_length=1, max_length=200)
+    arguments: dict[str, JsonValue] = Field(default_factory=dict)
+    display: McpCheckDisplay | None = None
+
+    @field_validator("arguments")
+    @classmethod
+    def bounded_arguments(cls, value: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        """Keep configured check payloads small and JSON-only."""
+        if len(json.dumps(value, allow_nan=False).encode()) > 8192:
+            raise ValueError("MCP check arguments exceed 8192 bytes")  # noqa: TRY003
+        return value
+
+
 class McpRegistration(BaseModel):
     """Fixed mapping to an operator-owned native registration and virtual server."""
 
@@ -35,6 +65,22 @@ class McpRegistration(BaseModel):
     gateway_id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
     server_id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
     oauth_authorization_origin: str = ""
+    approved_tools: list[str] = Field(default_factory=list, max_length=100)
+    # Setup resolves original approved names to their exact gateway-visible names.
+    tool_names: dict[str, str] = Field(default_factory=dict, max_length=100)
+    checks: list[McpCheck] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_checks(self) -> Self:
+        """Reject checks outside the approved tool mapping and ambiguous mappings."""
+        if (
+            any(check.tool not in self.approved_tools for check in self.checks)
+            or not set(self.tool_names) <= set(self.approved_tools)
+            or len(set(self.tool_names.values())) != len(self.tool_names)
+            or any(not name or not wire for name, wire in self.tool_names.items())
+        ):
+            raise ValueError("MCP checks require unique approved tool mappings")  # noqa: TRY003
+        return self
 
     @field_validator("oauth_authorization_origin")
     @classmethod
@@ -79,6 +125,9 @@ class McpConnectionStatus(BaseModel):
     """Personal metadata only; expiry does not prove refresh is unavailable."""
 
     status: ConnectionStatus
+    checked_at: datetime | None = None
+    retry_after: int | None = None
+    message: str | None = None
 
 
 class McpConnectResponse(BaseModel):
@@ -86,3 +135,21 @@ class McpConnectResponse(BaseModel):
 
     authorization_url: str
     callback_origin: str
+
+
+class McpTool(BaseModel):
+    """Only an approved tool's name, description and configured checks."""
+
+    name: str
+    description: str
+    checks: dict[str, McpCheck] = Field(default_factory=dict)
+
+
+class McpCheckResult(BaseModel):
+    """A caller-owned result; kept out of shared caches and application logs."""
+
+    status: Literal["passed", "failed"]
+    checked_at: datetime
+    result: str = ""
+    display_label: str | None = None
+    display_value: str | None = None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -11,14 +12,27 @@ from pydantic import BaseModel, ConfigDict
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.auth import StudioPrincipal
-from k8s_stack_studio.lib.contextforge import ContextForgeAccountClient, ContextForgeAccountError
+from k8s_stack_studio.lib.contextforge import (
+    ContextForgeAccountClient,
+    ContextForgeAccountError,
+    ContextForgeAccountMissingError,
+    ContextForgeRateLimitError,
+)
 from k8s_stack_studio.lib.contextforge_oauth import ContextForgeOAuthClient
 from k8s_stack_studio.lib.dependencies import get_current_principal, get_settings, require_role
+from k8s_stack_studio.lib.mcp_gateway import (
+    McpGatewayError,
+    available_tools,
+    gateway_client,
+    run_check,
+)
 from k8s_stack_studio.models.mcp import (
     McpCatalogEntry,
+    McpCheckResult,
     McpConnectionStatus,
     McpConnectResponse,
     McpRegistration,
+    McpTool,
 )
 
 router = APIRouter(
@@ -61,7 +75,13 @@ def _connection_admission(
     return item, _verified_email(principal)
 
 
-def _native_unavailable() -> HTTPException:
+def _native_unavailable(error: Exception | None = None) -> HTTPException:
+    if isinstance(error, ContextForgeRateLimitError):
+        return HTTPException(
+            status_code=429,
+            detail="Connection checks are temporarily rate limited",
+            headers={"Cache-Control": "no-store", "Retry-After": str(error.retry_after)},
+        )
     return HTTPException(
         status_code=502,
         detail="Native MCP connection is unavailable",
@@ -93,8 +113,8 @@ async def connect(
             authorization_url = await ContextForgeOAuthClient(
                 settings, request.app.state.contextforge_oauth_client, email
             ).authorize(item)
-    except (ContextForgeAccountError, TimeoutError):
-        raise _native_unavailable() from None
+    except (ContextForgeAccountError, TimeoutError) as exc:
+        raise _native_unavailable(exc) from None
     callback = urlsplit(settings.contextforge_oauth_callback_url)
     return McpConnectResponse(
         authorization_url=authorization_url,
@@ -121,8 +141,147 @@ async def connection_status(
             return await ContextForgeOAuthClient(
                 settings, request.app.state.contextforge_oauth_client, email
             ).status(item)
-    except (ContextForgeAccountError, TimeoutError):
-        raise _native_unavailable() from None
+    except (ContextForgeAccountError, TimeoutError) as exc:
+        raise _native_unavailable(exc) from None
+
+
+@router.get("/connections", dependencies=[Depends(_require_connections)])
+async def connection_statuses(
+    request: Request,
+    response: Response,
+    principal: StudioPrincipal = Depends(get_current_principal),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, McpConnectionStatus]:
+    """Verify the caller once per refresh, then read permitted personal connections."""
+    response.headers["Cache-Control"] = "no-store"
+    items = [
+        item
+        for item in settings.mcp_catalog
+        if item.authentication_model == "individual-authentication"
+        and {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles
+    ]
+    if not items:
+        return {}
+    email = _verified_email(principal)
+    try:
+        async with asyncio.timeout(30):
+            await ContextForgeAccountClient(
+                settings, request.app.state.contextforge_admin_client
+            ).check_account(email)
+    except ContextForgeAccountMissingError:
+        return {
+            item.id: McpConnectionStatus(status="connect required", checked_at=datetime.now(UTC))
+            for item in items
+        }
+    except (ContextForgeAccountError, TimeoutError) as exc:
+        raise _native_unavailable(exc) from None
+    semaphore = asyncio.Semaphore(4)
+
+    async def read_status(item: McpRegistration) -> tuple[str, McpConnectionStatus]:
+        try:
+            async with semaphore, asyncio.timeout(15):
+                status = await ContextForgeOAuthClient(
+                    settings, request.app.state.contextforge_oauth_client, email
+                ).status(item)
+                status.checked_at = datetime.now(UTC)
+        except ContextForgeRateLimitError as exc:
+            status = McpConnectionStatus(
+                status="status unavailable",
+                retry_after=exc.retry_after,
+                message="Connection checks are temporarily rate limited.",
+            )
+        except (ContextForgeAccountError, TimeoutError):
+            status = McpConnectionStatus(
+                status="status unavailable", message="Could not check the saved connection."
+            )
+        return item.id, status
+
+    return dict(await asyncio.gather(*(read_status(item) for item in items)))
+
+
+def _tool_admission(
+    integration_id: str, principal: StudioPrincipal, settings: Settings
+) -> McpRegistration:
+    if not (
+        settings.mcp_catalog_enabled
+        and settings.mcp_gateway_url
+        and settings.contextforge_account_onboarding_enabled
+    ):
+        raise HTTPException(status_code=404, detail="MCP checks are not enabled")
+    item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="MCP integration is not available")
+    if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
+        raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
+    return item
+
+
+def _gateway_error(error: McpGatewayError) -> HTTPException:
+    headers = {"Cache-Control": "no-store"}
+    if error.retry_after is not None:
+        headers["Retry-After"] = str(error.retry_after)
+    return HTTPException(status_code=error.status, detail=str(error), headers=headers)
+
+
+async def _prepare_tool_caller(
+    request: Request, principal: StudioPrincipal, settings: Settings
+) -> str:
+    # The middleware has already verified this bearer token. Forward only this
+    # credential; the gateway independently verifies identity and invocation grants.
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="A signed-in caller is required")
+    try:
+        async with asyncio.timeout(30):
+            await ContextForgeAccountClient(
+                settings, request.app.state.contextforge_admin_client
+            ).prepare_account(_verified_email(principal))
+    except (ContextForgeAccountError, TimeoutError) as exc:
+        raise _native_unavailable(exc) from None
+    return authorization
+
+
+@router.post("/{integration_id}/tools")
+async def list_tools(
+    integration_id: str,
+    body: PrepareAccountRequest,
+    request: Request,
+    response: Response,
+    principal: StudioPrincipal = Depends(get_current_principal),
+    settings: Settings = Depends(get_settings),
+) -> list[McpTool]:
+    """User-requested discovery prepares their account, never uses an operator token."""
+    response.headers["Cache-Control"] = "no-store"
+    item = _tool_admission(integration_id, principal, settings)
+    authorization = await _prepare_tool_caller(request, principal, settings)
+    try:
+        async with gateway_client(settings.mcp_gateway_url, item, authorization) as client:
+            return await available_tools(client, item)
+    except McpGatewayError as exc:
+        raise _gateway_error(exc) from None
+
+
+@router.post("/{integration_id}/checks/{check_id}")
+async def check_tool(
+    integration_id: str,
+    check_id: int,
+    body: PrepareAccountRequest,
+    request: Request,
+    response: Response,
+    principal: StudioPrincipal = Depends(get_current_principal),
+    settings: Settings = Depends(get_settings),
+) -> McpCheckResult:
+    """Execute only the chart-selected tool and arguments; no browser tool inputs."""
+    response.headers["Cache-Control"] = "no-store"
+    item = _tool_admission(integration_id, principal, settings)
+    if not 0 <= check_id < len(item.checks):
+        raise HTTPException(status_code=404, detail="MCP check is not configured")
+    authorization = await _prepare_tool_caller(request, principal, settings)
+    try:
+        async with gateway_client(settings.mcp_gateway_url, item, authorization) as client:
+            return await run_check(client, item, item.checks[check_id])
+    except McpGatewayError as exc:
+        raise _gateway_error(exc) from None
 
 
 @router.post("/account")
