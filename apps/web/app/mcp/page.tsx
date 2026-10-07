@@ -78,8 +78,15 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
 
   useEffect(() => {
     if (!retryUntil) return;
-    const timeout = window.setTimeout(() => { setRetryUntil(0); }, Math.max(0, retryUntil - Date.now()));
-    return () => { window.clearTimeout(timeout); };
+    const timeout = window.setTimeout(
+      () => {
+        setRetryUntil(0);
+      },
+      Math.max(0, retryUntil - Date.now()),
+    );
+    return () => {
+      window.clearTimeout(timeout);
+    };
   }, [retryUntil]);
 
   useEffect(() => {
@@ -146,7 +153,6 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
             connectionsEnabled={connectionsEnabled}
             checking={checking}
             connectionError={connectionError}
-            retryBlocked={!!retryUntil}
             onRefresh={() => void refreshConnections()}
           />
         ) : (

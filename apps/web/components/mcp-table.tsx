@@ -19,7 +19,6 @@ interface TableProps {
   connectionsEnabled: boolean;
   checking: boolean;
   connectionError: string;
-  retryBlocked: boolean;
   onRefresh: () => void;
 }
 
@@ -64,7 +63,6 @@ function McpRow({
   connectionsEnabled,
   checking,
   connectionError,
-  retryBlocked,
   onRefresh,
 }: TableProps & { item: McpCatalogEntry }) {
   const [expanded, setExpanded] = useState(false);
@@ -83,8 +81,15 @@ function McpRow({
   }, []);
   useEffect(() => {
     if (!retryUntil) return;
-    const timer = window.setTimeout(() => { setRetryUntil(0); }, Math.max(0, retryUntil - Date.now()));
-    return () => { window.clearTimeout(timer); };
+    const timer = window.setTimeout(
+      () => {
+        setRetryUntil(0);
+      },
+      Math.max(0, retryUntil - Date.now()),
+    );
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [retryUntil]);
   const personal = item.authentication_model === "individual-authentication";
   const connection = connections[item.id];
@@ -197,17 +202,7 @@ function McpRow({
         </td>
         <td className="px-4 py-3">
           {personal && item.permitted && connectionsEnabled && (
-            <div className="flex flex-wrap gap-2">
-              <McpConnection id={item.id} status={connection?.status} onRefresh={onRefresh} />
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost"
-                disabled={checking || retryBlocked}
-                onClick={onRefresh}
-              >
-                {checking ? "Checking…" : "Check status"}
-              </button>
-            </div>
+            <McpConnection id={item.id} status={connection?.status} onRefresh={onRefresh} />
           )}
           {!item.permitted && (
             <span className="text-xs text-muted-foreground">Ask an operator for access</span>
@@ -259,11 +254,11 @@ function McpRow({
                 {tools.map((tool) => (
                   <tr key={tool.name} className="align-top">
                     <td className="font-mono text-xs">{tool.name}</td>
-                      <td className="max-w-xl whitespace-pre-wrap break-words">
-                        <p className="line-clamp-3" title={tool.description}>
-                          {tool.description || "—"}
-                        </p>
-                      </td>
+                    <td className="max-w-xl whitespace-pre-wrap break-words">
+                      <p className="line-clamp-3" title={tool.description}>
+                        {tool.description || "—"}
+                      </p>
+                    </td>
                     <td className="min-w-64">
                       {Object.entries(tool.checks).length ? (
                         Object.entries(tool.checks).map(([id, check]) => (
@@ -318,8 +313,15 @@ function ToolCheck({
   }, []);
   useEffect(() => {
     if (!retryUntil) return;
-    const timer = window.setTimeout(() => { setRetryUntil(0); }, Math.max(0, retryUntil - Date.now()));
-    return () => { window.clearTimeout(timer); };
+    const timer = window.setTimeout(
+      () => {
+        setRetryUntil(0);
+      },
+      Math.max(0, retryUntil - Date.now()),
+    );
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [retryUntil]);
 
   async function run() {

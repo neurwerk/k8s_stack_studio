@@ -111,9 +111,9 @@ export function McpConnection({
         onClick={() => void connect()}
       >
         {busy
-          ? "Connecting…"
+          ? "Authorizing…"
           : status === "connected" || status === "refresh pending"
-            ? "Reconnect"
+            ? "Reauthorize"
             : "Connect"}
       </button>
       {error && (
