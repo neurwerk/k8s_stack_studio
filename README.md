@@ -160,6 +160,9 @@ Pinned ContextForge v1.0.11 source is
    only code/state unchanged to its fixed private `CONTEXTFORGE_URL` callback, over
    verified TLS using `CONTEXTFORGE_CA_CERT` when needed. No caller headers, cookies,
    service identity or bearer are sent; provider denials get a local generic error.
+   Optional `iss` accepts an HTTPS URL up to 2,048 characters, without credentials,
+   query, fragment, whitespace or backslashes. It is ignored after syntax validation;
+   Studio does not bind it to state or use it for routing, forwarding or logging.
    Native retains state validation, PKCE, code exchange and token storage. Only the
    pinned native success-popup shape is accepted; Studio renders fresh status-only
    HTML, never native bodies, cookies, redirects, JWTs or error details. Responses
