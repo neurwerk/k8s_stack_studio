@@ -124,12 +124,13 @@ function McpRow({
   }, [item.id, retryUntil]);
 
   async function refreshRow() {
-    await onRefresh(item.id);
     if (!active.current) return;
     previousRevision.current += 1;
     setTools(null);
     setLastCheck(null);
     setError("");
+    await onRefresh(item.id);
+    if (!active.current) return;
     if (expanded) {
       if (pending.current) reloadPending.current = true;
       else void loadTools();
@@ -225,8 +226,8 @@ function McpRow({
           {personal && item.permitted && connectionsEnabled && (
             <McpConnection id={item.id} status={connection?.status} onRefresh={() => void refreshRow()} />
           )}
-          {item.can_discover && (
-            <McpDiscovery id={item.id} initial={item.publication} onRefresh={() => void refreshRow()} />
+          {personal && item.can_discover && (
+            <McpDiscovery id={item.id} initial={item.publication} onRefresh={refreshRow} />
           )}
           {!item.can_discover && item.permitted && item.publication && (
             <p className="mt-2 text-xs text-muted-foreground">

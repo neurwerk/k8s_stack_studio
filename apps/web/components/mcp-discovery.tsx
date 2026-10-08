@@ -25,17 +25,24 @@ export function McpDiscovery({
 }: {
   id: string;
   initial?: McpPublicationStatus | null;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [status, setStatus] = useState<McpPublicationStatus | null>(null);
+  const [previousInitial, setPreviousInitial] = useState(initial);
   const [error, setError] = useState("");
   const [discoveredAt, setDiscoveredAt] = useState<string | null>(null);
   const [retryUntil, setRetryUntil] = useState(0);
   const active = useRef(true);
   const operation = useRef<AbortController | null>(null);
   const refresh = useRef(onRefresh);
+  // A coordinated Connect/catalog refresh supersedes local polling results.
+  if (previousInitial !== initial) {
+    setPreviousInitial(initial);
+    setStatus(null);
+    setError("");
+  }
   useEffect(() => { refresh.current = onRefresh; }, [onRefresh]);
   useEffect(() => {
     active.current = true;
@@ -64,6 +71,7 @@ export function McpDiscovery({
     setDiscovering(discover);
     setError("");
     let timeout: number | undefined;
+    let refreshed = false;
     try {
       let marker = discoveredAt;
       if (discover) {
@@ -73,6 +81,10 @@ export function McpDiscovery({
         setDiscoveredAt(marker);
         setDiscovering(false);
         setStatus({ state: "pending-discovery", checked_at: null, error_code: null });
+        // Native discovery already mutated tools: invalidate now, not after polling.
+        await refresh.current();
+        refreshed = true;
+        if (!active.current || stopped()) return;
       }
       // Only read status. The operator independently reruns the existing setup Job.
       timeout = window.setTimeout(() => {
@@ -86,7 +98,12 @@ export function McpDiscovery({
           const fresh = !marker || (result.checked_at !== null &&
             Date.parse(result.checked_at) > Date.parse(marker));
           if (fresh || result.state === "unavailable") setStatus(result);
-          if (fresh && (result.state === "published" || result.state === "error")) break;
+          if (fresh && (result.state === "published" || result.state === "error")) {
+            // Publication can change the approved tool mapping again.
+            await refresh.current();
+            refreshed = true;
+            break;
+          }
         } catch (error) {
           if (stopped()) break;
           if (error instanceof ApiRequestError && error.status === 429) {
@@ -114,12 +131,14 @@ export function McpDiscovery({
       if (active.current) {
         setBusy(false);
         setDiscovering(false);
-        refresh.current();
+        if (!refreshed) await refresh.current();
       }
     }
   }
 
   const publication = status ?? initial;
+  const published = publication?.state === "published" && (!discoveredAt ||
+    (publication.checked_at !== null && Date.parse(publication.checked_at) > Date.parse(discoveredAt)));
   return (
     <div className="space-y-2" aria-live="polite">
       <button type="button" className="btn btn-sm btn-outline" disabled={busy || !!retryUntil}
@@ -127,13 +146,13 @@ export function McpDiscovery({
         {busy ? discovering ? "Discovering…" : "Checking publication…" : "Discover tools"}
       </button>
       {publication && <p className="max-w-xs text-xs text-muted-foreground">
-        {publication.state === "published" ? "Tools published" :
+        {published ? "Tools published" :
           publication.state === "error" ? "Publication failed. Check the setup Job." :
           publication.state === "unavailable" ? "Publication status unavailable" :
           discoveredAt ? "Discovered; publication pending. Run the setup publication Job." :
           "Tool discovery pending"}
       </p>}
-      {!busy && discoveredAt && publication?.state !== "published" && (
+      {!busy && discoveredAt && !published && (
         <button type="button" className="btn btn-xs btn-ghost" disabled={!!retryUntil}
           onClick={() => void run(false)}>Check publication</button>
       )}

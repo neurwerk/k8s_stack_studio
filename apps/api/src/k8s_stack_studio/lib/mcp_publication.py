@@ -98,6 +98,12 @@ def _snapshot(
     directory: Path, name: str, settings: Settings
 ) -> tuple[Settings, dict[str, McpPublicationStatus]]:
     publication = _Publication.model_validate_json(_read(directory, name))
+    expected_hash = _read(directory, "catalog_hash")
+    if (
+        not re.fullmatch(r"[a-f0-9]{64}", expected_hash)
+        or publication.catalog_hash != expected_hash
+    ):
+        raise PublicationUnavailableError
     catalog = TypeAdapter(list[McpRegistration]).validate_json(_read(directory, "studio.json"))
     ids = {item.id for item in catalog}
     if (

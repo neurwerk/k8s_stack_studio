@@ -384,6 +384,7 @@ async def get_catalog(
             permitted={"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles,
             can_discover=(
                 _named_operator(principal, settings)
+                and item.authentication_model == "individual-authentication"
                 and {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles
             ),
             publication=request.state.mcp_publication.get(item.id),
@@ -437,8 +438,8 @@ async def discover(
     if request.headers.get("origin") != settings.contextforge_oauth_studio_origin:
         raise HTTPException(status_code=403, detail="Approved Studio origin is required")
     item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
-    if item is None:
-        raise HTTPException(status_code=404, detail="MCP integration is not available")
+    if item is None or item.authentication_model != "individual-authentication":
+        raise HTTPException(status_code=404, detail="MCP OAuth discovery is not available")
     if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     email = _verified_email(principal)

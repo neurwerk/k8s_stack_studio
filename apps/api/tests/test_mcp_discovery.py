@@ -53,6 +53,7 @@ def configured_projection(tmp_path):
     (tmp_path / "..data").symlink_to(data, target_is_directory=True)
     contents = {
         "studio.json": json.dumps([item.model_dump() for item in catalog]),
+        "catalog_hash": "a" * 64,
         "team_id": "fixed-team",
         "global_role_id": "global-empty",
         "team_role_id": "team-invoke",
@@ -110,6 +111,7 @@ def test_live_atomic_projection_and_fail_closed(tmp_path, monkeypatch):
     "key,value",
     [
         ("catalog_hash", "other"),
+        ("catalog_hash", "b" * 64),
         ("checked_at", "2026-01-01T00:00:00"),
         ("integrations", [{"id": "other", "state": "published", "error_code": None}]),
     ],
@@ -339,6 +341,15 @@ async def test_discovery_admission_transport_and_publication(tmp_path, monkeypat
             assert response.headers["cache-control"] == "no-store"
             assert (await client.post("/api/me/mcp/github/connect", json={})).status_code == 200
             assert (await client.get("/api/me/mcp/github/status")).json()["status"] == "connected"
+            original_catalog = (data / "studio.json").read_text()
+            for mode in ("no-authentication", "shared-authentication"):
+                catalog = json.loads(original_catalog)
+                catalog[0]["authentication_model"] = mode
+                (data / "studio.json").write_text(json.dumps(catalog))
+                requests.clear()
+                assert (await client.get("/api/me/mcp/catalog")).json()[0]["can_discover"] is False
+                assert (await client.post(path, json={})).status_code == 404 and not requests
+            (data / "studio.json").write_text(original_catalog)
             for upstream_status, expected in [(409, 409), (429, 429), (200, 502)]:
                 native_status = upstream_status
                 result["success"] = False

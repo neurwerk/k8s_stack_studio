@@ -19,7 +19,8 @@ Studio is the web dashboard and API for operating AI platform services in neurwe
 ## Operator MCP discovery (opt-in)
 
 Personal Connect continues to use ContextForge's existing popup callback. The
-separate **Discover tools** action requires the explicitly bound, verified Studio
+separate **Discover tools** action is only for approved individual OAuth integrations
+and requires the explicitly bound, verified Studio
 operator and exact non-admin native invocation roles plus the fixed team-scoped
 discovery role with only `gateways.update`. Studio never grants or repairs these
 operator privileges. Base's setup audit checks dormant native grants that upstream
@@ -37,9 +38,10 @@ API configuration uses the `K8S_STUDIO_CONTEXTFORGE_` prefix:
 
 When configured, the status path points to
 `/var/run/contextforge-setup/publication.json` in a read-only directory projection
-of the existing setup ConfigMap. Studio reads `studio.json`, `publication.json`, the
+of the existing setup ConfigMap. Studio reads `studio.json`, `publication.json`, `catalog_hash`, the
 existing team/role binding keys, and the operator binding keys from one atomic
-projection generation, validating its catalog hash and matching integration IDs.
+projection generation, requiring the publication hash to equal the well-formed
+live `catalog_hash` and validating matching integration IDs.
 Unverified registrations may be absent, including an entirely empty initial
 catalog. Retained operator role IDs without matching email/subject bindings are
 revocation history, never admission. Studio reloads tool mappings without an API restart;
