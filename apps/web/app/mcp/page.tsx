@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchMcpCatalog, fetchMcpConnections, mcpError } from "@/lib/api/mcp";
+import { fetchMcpCatalog, fetchMcpConnection, fetchMcpConnections, mcpError } from "@/lib/api/mcp";
 import type { McpCatalogEntry, McpConnectionStatus } from "@/lib/api/mcp";
 import { ApiRequestError } from "@/lib/api/client";
 import { useVerifiedSession } from "@/lib/auth/session-context";
@@ -31,6 +31,34 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const [retryUntil, setRetryUntil] = useState(0);
   const active = useRef(false);
   const inFlight = useRef(false);
+
+  async function refreshIntegration(id: string) {
+    const results = await Promise.allSettled([
+      fetchMcpCatalog(),
+      connectionsEnabled && items.find((item) => item.id === id)?.authentication_model ===
+        "individual-authentication" ? fetchMcpConnection(id) : Promise.resolve(null),
+    ]);
+    if (!active.current) return;
+    const [catalog, connection] = results;
+    if (catalog.status === "fulfilled") {
+      setItems(catalog.value);
+      setError("");
+    } else {
+      setItems((previous) => previous.map((item) => item.id === id ? {
+        ...item, publication: { state: "unavailable", checked_at: null, error_code: null },
+      } : item));
+    }
+    if (connection.status === "fulfilled" && connection.value) {
+      const value = connection.value;
+      setConnections((previous) => ({ ...previous, [id]: value }));
+      setConnectionError("");
+    } else if (connection.status === "rejected") {
+      setConnections((previous) => ({ ...previous, [id]: {
+        status: "status unavailable", checked_at: null, retry_after: null,
+        message: mcpError(connection.reason),
+      } }));
+    }
+  }
 
   const refreshConnections = useCallback(async () => {
     if (!connectionsEnabled || inFlight.current || Date.now() < retryUntil) return;
@@ -153,10 +181,10 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
             connectionsEnabled={connectionsEnabled}
             checking={checking}
             connectionError={connectionError}
-            onRefresh={() => void refreshConnections()}
+            onRefresh={refreshIntegration}
           />
         ) : (
-          <p className="text-sm text-muted-foreground">No integrations have been configured.</p>
+          <p className="text-sm text-muted-foreground">No verified integrations are currently available.</p>
         ))}
     </div>
   );

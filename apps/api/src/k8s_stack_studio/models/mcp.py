@@ -116,6 +116,22 @@ class McpCatalogEntry(BaseModel):
     authentication_model: AuthenticationModel
     permitted: bool
     connection_status: Literal["status unavailable"] | None
+    can_discover: bool = False
+    publication: McpPublicationStatus | None = None
+
+
+class McpPublicationStatus(BaseModel):
+    """Safe publication metadata; discovery and saved connections are separate."""
+
+    state: Literal["pending-discovery", "published", "error", "unavailable"]
+    checked_at: datetime | None = None
+    error_code: str | None = None
+
+
+class McpDiscoverResponse(BaseModel):
+    """Native discovery completion is not proof of setup publication."""
+
+    discovered_at: datetime
 
 
 ConnectionStatus = Literal["connected", "refresh pending", "connect required", "status unavailable"]

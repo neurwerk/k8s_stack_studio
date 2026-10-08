@@ -165,3 +165,41 @@ class ContextForgeOAuthClient:
         ):
             raise ContextForgeAccountError
         return location
+
+    async def discover(self, item: McpRegistration) -> None:
+        """Refresh only the approved gateway using this caller's native saved token."""
+        if item.authentication_model != "individual-authentication":
+            raise ContextForgeAccountError
+        await self.check_registration(item)
+        request = httpx.Request(
+            "POST",
+            self.settings.contextforge_url.rstrip("/")
+            + f"/gateways/{item.gateway_id}/tools/refresh",
+            headers={"x-contextforge-account-email": self.email},
+            params={"include_resources": "false", "include_prompts": "false"},
+        )
+        try:
+            response = await self.client.send(request, auth=None, follow_redirects=False)
+        except httpx.HTTPError:
+            raise ContextForgeAccountError from None
+        if response.status_code == 429:
+            raise ContextForgeRateLimitError(response.headers.get("retry-after", "60"))
+        if response.status_code == 409:
+            raise ContextForgeDiscoveryBusyError
+        if response.status_code != 200:
+            raise ContextForgeAccountError
+        try:
+            value = _object(response.json())
+        except ValueError:
+            raise ContextForgeAccountError from None
+        if (
+            value.get("gateway_id") != item.gateway_id
+            or value.get("success") is not True
+            or value.get("error") is not None
+            or value.get("validation_errors") != []
+        ):
+            raise ContextForgeAccountError
+
+
+class ContextForgeDiscoveryBusyError(ContextForgeAccountError):
+    """Another refresh is already running for this integration."""

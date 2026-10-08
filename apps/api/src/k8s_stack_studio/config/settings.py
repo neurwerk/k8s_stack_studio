@@ -214,6 +214,13 @@ class Settings(BaseSettings):
     mcp_connections_enabled: bool = False
     contextforge_oauth_studio_origin: str = ""
     contextforge_oauth_callback_url: str = ""
+    contextforge_operator_discovery_enabled: bool = False
+    contextforge_operator_email: str = Field(default="", max_length=254)
+    contextforge_operator_subject: str = Field(default="", max_length=254)
+    contextforge_operator_role_name: str = "neurwerk-mcp-discovery"
+    # Resolved only from the trusted setup projection, never from browser input.
+    contextforge_operator_role_id: str = ""
+    contextforge_publication_status_path: str = ""
 
     @field_validator("mcp_gateway_url")
     @classmethod
@@ -401,7 +408,7 @@ class Settings(BaseSettings):
             raise InvalidContextForgeAccountConfigError
         return self
 
-    @field_validator("contextforge_service_account_email")
+    @field_validator("contextforge_service_account_email", "contextforge_operator_email")
     @classmethod
     def validate_contextforge_service_email(cls, value: str) -> str:
         """Accept only a canonical operator-configured native identity, never request input."""
@@ -411,6 +418,21 @@ class Settings(BaseSettings):
         ):
             raise InvalidContextForgeAccountConfigError
         return value.lower()
+
+    @model_validator(mode="after")
+    def validate_operator_discovery(self) -> Self:
+        """Discovery needs an explicit bound identity and the existing private proxy."""
+        if self.contextforge_operator_discovery_enabled and (
+            not self.contextforge_account_onboarding_enabled
+            or self.contextforge_service_auth_mode != "trusted-proxy"
+            or not self.contextforge_operator_email
+            or not self.contextforge_operator_subject
+            or not self.contextforge_publication_status_path
+            or not self.contextforge_operator_role_name
+            or not self.contextforge_oauth_studio_origin
+        ):
+            raise InvalidContextForgeAccountConfigError
+        return self
 
     @model_validator(mode="after")
     def validate_contextforge_oauth_config(self) -> Self:
@@ -451,7 +473,7 @@ class Settings(BaseSettings):
             or callback is None
             or callback.path != "/oauth/callback"
             or (callback.scheme, callback.netloc) != (studio.scheme, studio.netloc)
-            or not individual
+            or (not individual and not self.contextforge_publication_status_path)
             or any(not item.oauth_authorization_origin for item in individual)
             or len({item.gateway_id for item in self.mcp_catalog}) != len(self.mcp_catalog)
             or len({item.server_id for item in self.mcp_catalog}) != len(self.mcp_catalog)
