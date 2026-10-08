@@ -37,9 +37,12 @@ API configuration uses the `K8S_STUDIO_CONTEXTFORGE_` prefix:
 
 When configured, the status path points to
 `/var/run/contextforge-setup/publication.json` in a read-only directory projection
-of the existing setup ConfigMap. Studio reads `studio.json`, `catalog_hash`, the
+of the existing setup ConfigMap. Studio reads `studio.json`, `publication.json`, the
 existing team/role binding keys, and the operator binding keys from one atomic
-projection generation. It reloads approved tool mappings without an API restart;
+projection generation, validating its catalog hash and matching integration IDs.
+Unverified registrations may be absent, including an entirely empty initial
+catalog. Retained operator role IDs without matching email/subject bindings are
+revocation history, never admission. Studio reloads tool mappings without an API restart;
 missing or inconsistent metadata is unavailable, not stale readiness. Deployments
 without this path retain their environment-only catalog.
 
@@ -48,8 +51,9 @@ email; ContextForge uses that account's own saved provider connection. No provid
 token reaches Studio or the browser. Successful discovery is not publication:
 the operator independently reruns the existing Base setup publication Job. Studio
 only polls safe per-integration status, approximately every five seconds for up
-to two minutes, and never runs Kubernetes Jobs. An older published timestamp
-cannot prove completion of a new discovery. Timeout leaves publication pending
+to two minutes, and never runs Kubernetes Jobs. Publication `checked_at` is Base's
+conservative verification start time and must be strictly later than Discover
+completion to prove a fresh publication. Timeout leaves publication pending
 and offers a status-only retry. This does not add upstream schema quarantine or
 catalog versioning; follow upstream #7014 and #7021 for those limits.
 

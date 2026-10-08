@@ -84,7 +84,7 @@ export function McpDiscovery({
           const result = await fetchMcpPublication(id, controller.signal);
           if (!active.current || stopped()) return;
           const fresh = !marker || (result.checked_at !== null &&
-            Date.parse(result.checked_at) >= Date.parse(marker));
+            Date.parse(result.checked_at) > Date.parse(marker));
           if (fresh || result.state === "unavailable") setStatus(result);
           if (fresh && (result.state === "published" || result.state === "error")) break;
         } catch (error) {

@@ -27,7 +27,7 @@ class _Integration(BaseModel):
 class _Publication(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    catalog_hash: str = Field(min_length=1, max_length=100)
+    catalog_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     checked_at: str
     integrations: list[_Integration] = Field(max_length=200)
 
@@ -68,25 +68,29 @@ def _binding(directory: Path, settings: Settings) -> str:
         ("global_role_id", "contextforge_global_role_id"),
         ("team_role_id", "contextforge_team_role_id"),
     ]
-    if settings.contextforge_operator_discovery_enabled:
-        fields.extend(
-            [
-                ("operator_email", "contextforge_operator_email"),
-                ("operator_subject", "contextforge_operator_subject"),
-            ]
-        )
     for key, field in fields:
         value = _read(directory, key).strip()
         if not value or value != getattr(settings, field):
             raise PublicationUnavailableError
     if not settings.contextforge_operator_discovery_enabled:
         return ""
+    # These keys are deliberately absent after failed/disabled Base admission.
+    for key, field in (
+        ("operator_email", "contextforge_operator_email"),
+        ("operator_subject", "contextforge_operator_subject"),
+    ):
+        if not (directory / key).exists() or _read(directory, key).strip() != getattr(
+            settings, field
+        ):
+            return ""
+    if not (directory / "operator_role_id").exists():
+        return ""
     role_id = _read(directory, "operator_role_id").strip()
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", role_id) or role_id in {
         settings.contextforge_global_role_id,
         settings.contextforge_team_role_id,
     }:
-        raise PublicationUnavailableError
+        return ""
     return role_id
 
 
@@ -99,24 +103,21 @@ def _snapshot(
     if (
         len(catalog) > 200
         or len(ids) != len(catalog)
-        or ids != {item.id for item in settings.mcp_catalog}
-        or ids != {item.id for item in publication.integrations}
-        or len(publication.integrations) != len(ids)
-        or publication.catalog_hash != _read(directory, "catalog_hash").strip()
+        or not ids <= {item.id for item in publication.integrations}
+        or len(publication.integrations) != len({item.id for item in publication.integrations})
         or len({item.gateway_id for item in catalog}) != len(catalog)
         or len({item.server_id for item in catalog}) != len(catalog)
     ):
         raise PublicationUnavailableError
     statuses = _statuses(publication)
-    approved = {item.id: item for item in settings.mcp_catalog}
+    if any(status.state != "error" for identity, status in statuses.items() if identity not in ids):
+        raise PublicationUnavailableError
     for item in catalog:
-        if item.model_dump(exclude={"tool_names"}) != approved[item.id].model_dump(
-            exclude={"tool_names"}
-        ):
-            raise PublicationUnavailableError
         if statuses[item.id].state == "published" and set(item.tool_names) != set(
             item.approved_tools
         ):
+            raise PublicationUnavailableError
+        if statuses[item.id].state == "pending-discovery" and item.tool_names:
             raise PublicationUnavailableError
     # Re-run the normal configuration validators for live native mappings.
     live = Settings.model_validate(

@@ -53,7 +53,6 @@ def configured_projection(tmp_path):
     (tmp_path / "..data").symlink_to(data, target_is_directory=True)
     contents = {
         "studio.json": json.dumps([item.model_dump() for item in catalog]),
-        "catalog_hash": "approved-hash",
         "team_id": "fixed-team",
         "global_role_id": "global-empty",
         "team_role_id": "team-invoke",
@@ -62,7 +61,7 @@ def configured_projection(tmp_path):
         "operator_role_id": "team-discover",
         "publication.json": json.dumps(
             {
-                "catalog_hash": "approved-hash",
+                "catalog_hash": "a" * 64,
                 "checked_at": datetime.now(UTC).isoformat(),
                 "integrations": [
                     {"id": "github", "state": "pending-discovery", "error_code": None}
@@ -84,6 +83,9 @@ def test_live_atomic_projection_and_fail_closed(tmp_path, monkeypatch):
     catalog = json.loads((data / "studio.json").read_text())
     catalog[0]["tool_names"] = {"read": "native_read"}
     (data / "studio.json").write_text(json.dumps(catalog))
+    publication = json.loads((data / "publication.json").read_text())
+    publication["integrations"][0]["state"] = "published"
+    (data / "publication.json").write_text(json.dumps(publication))
     assert publication_snapshot(settings)[0].mcp_catalog[0].tool_names == {"read": "native_read"}
     assert settings.mcp_catalog[0].tool_names == {}
     from k8s_stack_studio.lib import mcp_publication
@@ -97,7 +99,7 @@ def test_live_atomic_projection_and_fail_closed(tmp_path, monkeypatch):
         return original(directory, name)
 
     monkeypatch.setattr(mcp_publication, "_read", switch)
-    assert publication_snapshot(settings)[1]["github"].state == "pending-discovery"
+    assert publication_snapshot(settings)[1]["github"].state == "published"
     with pytest.raises(PublicationUnavailableError):
         publication_snapshot(settings)
     settings.contextforge_publication_status_path = ""
@@ -119,6 +121,48 @@ def test_invalid_projection_is_not_stale_ready(tmp_path, key, value):
     (data / "publication.json").write_text(json.dumps(publication))
     with pytest.raises(PublicationUnavailableError):
         publication_snapshot(settings)
+
+
+@pytest.mark.parametrize(
+    "withheld", ["missing-email", "missing-subject", "wrong-subject", "disabled"]
+)
+def test_retained_operator_role_is_history_not_admission(tmp_path, withheld):
+    settings, data = configured_projection(tmp_path)
+    if withheld.startswith("missing-"):
+        (data / ("operator_email" if withheld == "missing-email" else "operator_subject")).unlink()
+    elif withheld == "wrong-subject":
+        (data / "operator_subject").write_text("other-subject")
+    else:
+        settings.contextforge_operator_discovery_enabled = False
+    live, statuses = publication_snapshot(settings)
+    assert live.contextforge_operator_role_id == ""
+    assert statuses["github"].state == "pending-discovery"
+
+
+def test_empty_startup_and_omitted_unverified_registration(tmp_path):
+    settings, data = configured_projection(tmp_path)
+    settings = Settings.model_validate({**settings.model_dump(), "mcp_catalog": []})
+    (data / "studio.json").write_text("[]")
+    publication = json.loads((data / "publication.json").read_text())
+    publication["integrations"][0].update(state="error", error_code="provider-unavailable")
+    (data / "publication.json").write_text(json.dumps(publication))
+    live, statuses = publication_snapshot(settings)
+    assert live.mcp_catalog == [] and statuses["github"].state == "error"
+    # The same running API can consume a later verified registration without restart.
+    registration = McpRegistration(
+        id="github",
+        name="GitHub",
+        authentication_model="individual-authentication",
+        gateway_id="fixed-gateway",
+        server_id="fixed-server",
+        oauth_authorization_origin="https://provider.example.test",
+        approved_tools=["read"],
+        tool_names={"read": "github_native_read"},
+    )
+    (data / "studio.json").write_text(json.dumps([registration.model_dump()]))
+    publication["integrations"][0].update(state="published", error_code=None)
+    (data / "publication.json").write_text(json.dumps(publication))
+    assert publication_snapshot(settings)[0].mcp_catalog == [registration]
 
 
 @pytest.mark.parametrize(
@@ -302,6 +346,10 @@ async def test_discovery_admission_transport_and_publication(tmp_path, monkeypat
             result.update(success=True, validation_errors=["private token"])
             assert (await client.post(path, json={})).status_code == 502
             requests.clear()
+            (data / "operator_subject").unlink()
+            assert (await client.get("/api/me/mcp/catalog")).json()[0]["can_discover"] is False
+            assert (await client.post(path, json={})).status_code == 403 and not requests
+            (data / "operator_subject").write_text("bound-subject")
             principal = StudioPrincipal(
                 "other-subject", principal.roles, principal.agentgateway_roles, principal.profile
             )

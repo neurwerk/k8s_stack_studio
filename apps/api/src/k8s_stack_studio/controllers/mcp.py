@@ -68,6 +68,7 @@ def _live_settings(request: Request, settings: Settings = Depends(get_settings))
 def _named_operator(principal: StudioPrincipal, settings: Settings) -> bool:
     return (
         settings.contextforge_operator_discovery_enabled
+        and bool(settings.contextforge_operator_role_id)
         and principal.subject == settings.contextforge_operator_subject
         and principal.profile.get("email_verified") is True
         and isinstance(principal.profile.get("email"), str)
@@ -88,9 +89,14 @@ async def _check_caller(
         settings.contextforge_operator_discovery_enabled
         and email == settings.contextforge_operator_email
     ):
-        if not _named_operator(principal, settings):
+        if principal.subject != settings.contextforge_operator_subject:
             raise HTTPException(status_code=403, detail="Approved MCP operator binding is required")
-        await client.check_operator(email)
+        if _named_operator(principal, settings):
+            await client.check_operator(email)
+        else:
+            # Withheld operator admission may still permit the strict ordinary profile.
+            # Never create or repair the configured operator even in this case.
+            await client.check_account(email)
     elif prepare:
         await client.prepare_account(email)
     else:
@@ -402,13 +408,12 @@ async def publication_status(
     response.headers["Cache-Control"] = "no-store"
     if not settings.mcp_catalog_enabled or not settings.contextforge_publication_status_path:
         raise HTTPException(status_code=404, detail="MCP publication status is not enabled")
-    item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
-    if item is None:
-        raise HTTPException(status_code=404, detail="MCP integration is not available")
-    if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
+    if not {"llm:invoke", f"mcp:{integration_id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     try:
         _, statuses = publication_snapshot(settings)
+        if integration_id not in statuses:
+            raise HTTPException(status_code=404, detail="MCP integration is not available")
         return statuses[integration_id]
     except PublicationUnavailableError:
         return McpPublicationStatus(state="unavailable")

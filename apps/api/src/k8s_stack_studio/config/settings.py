@@ -473,7 +473,7 @@ class Settings(BaseSettings):
             or callback is None
             or callback.path != "/oauth/callback"
             or (callback.scheme, callback.netloc) != (studio.scheme, studio.netloc)
-            or not individual
+            or (not individual and not self.contextforge_publication_status_path)
             or any(not item.oauth_authorization_origin for item in individual)
             or len({item.gateway_id for item in self.mcp_catalog}) != len(self.mcp_catalog)
             or len({item.server_id for item in self.mcp_catalog}) != len(self.mcp_catalog)
