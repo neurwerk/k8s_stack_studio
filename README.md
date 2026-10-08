@@ -56,7 +56,9 @@ only polls safe per-integration status, approximately every five seconds for up
 to two minutes, and never runs Kubernetes Jobs. Publication `checked_at` is Base's
 conservative verification start time and must be strictly later than Discover
 completion to prove a fresh publication. Timeout leaves publication pending
-and offers a status-only retry. This does not add upstream schema quarantine or
+and offers a status-only retry. The affected tool list is invalidated immediately
+after Discover and refreshed again after publication; newer catalog status
+supersedes older local polling results. This does not add upstream schema quarantine or
 catalog versioning; follow upstream #7014 and #7021 for those limits.
 
 ## Contributing and support

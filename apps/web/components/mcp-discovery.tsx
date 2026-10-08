@@ -37,6 +37,7 @@ export function McpDiscovery({
   const active = useRef(true);
   const operation = useRef<AbortController | null>(null);
   const refresh = useRef(onRefresh);
+  const latestInitial = useRef(initial);
   // A coordinated Connect/catalog refresh supersedes local polling results.
   if (previousInitial !== initial) {
     setPreviousInitial(initial);
@@ -44,6 +45,7 @@ export function McpDiscovery({
     setError("");
   }
   useEffect(() => { refresh.current = onRefresh; }, [onRefresh]);
+  useEffect(() => { latestInitial.current = initial; }, [initial]);
   useEffect(() => {
     active.current = true;
     return () => {
@@ -92,13 +94,15 @@ export function McpDiscovery({
       }, 120_000);
       while (!stopped()) {
         let delay = 5;
+        const requestedInitial = latestInitial.current;
         try {
           const result = await fetchMcpPublication(id, controller.signal);
           if (!active.current || stopped()) return;
           const fresh = !marker || (result.checked_at !== null &&
             Date.parse(result.checked_at) > Date.parse(marker));
-          if (fresh || result.state === "unavailable") setStatus(result);
-          if (fresh && (result.state === "published" || result.state === "error")) {
+          const current = requestedInitial === latestInitial.current;
+          if (current && (fresh || result.state === "unavailable")) setStatus(result);
+          if (current && fresh && (result.state === "published" || result.state === "error")) {
             // Publication can change the approved tool mapping again.
             await refresh.current();
             refreshed = true;
@@ -109,7 +113,7 @@ export function McpDiscovery({
           if (error instanceof ApiRequestError && error.status === 429) {
             delay = Math.max(5, error.retryAfter ?? 60);
             setRetryUntil(Date.now() + delay * 1000);
-          } else {
+          } else if (requestedInitial === latestInitial.current) {
             setStatus({ state: "unavailable", checked_at: null, error_code: null });
             setError("Publication status is unavailable.");
             break;
