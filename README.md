@@ -51,7 +51,7 @@ authorized administrator can later explicitly refresh with their own connection.
 Native refresh itself can mutate shared tool records before publication, so
 failed refresh does not guarantee that the prior native catalog is unchanged.
 
-This source change needs a new Studio image release and Base adoption before use.
+This mode is available from Studio `0.16.4` and needs compatible Base adoption before use.
 The old named-person mode below remains available for explicit migration and
 cannot be enabled together with administrator discovery.
 
