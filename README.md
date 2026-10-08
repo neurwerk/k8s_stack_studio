@@ -16,7 +16,46 @@ Studio is the web dashboard and API for operating AI platform services in neurwe
 |  |  |
 | [Dify Add-on](https://github.com/neurwerk/k8s_stack_addon_dify) | Optional Dify package with API and web customizations, including single-workspace enforcement. |
 
-## Operator MCP discovery (opt-in)
+## MCP administrator discovery (opt-in)
+
+Enable `K8S_STUDIO_CONTEXTFORGE_ADMIN_DISCOVERY_ENABLED=true` with the compatible
+Base `adminDiscovery` setup and read-only publication projection. Any signed-in
+`studio-user` with the verified `mcp-admin` realm role, verified email, `llm:invoke`
+and the selected `mcp:<id>:invoke` grant can explicitly choose **Discover tools**.
+No named username, dedicated discovery login or provider-token sharing is needed.
+
+Studio checks the caller's existing active, verified, non-admin ContextForge
+account and fixed-team invocation membership. It then leases the verified
+`contextforge-tool-discovery` team role (`gateways.update` only) to that caller
+through the existing provisioning API, expiring after 120 seconds. It validates
+scope, grantor and expiration before refreshing only the approved gateway as the
+caller. Connect and status/tool checks never grant or renew discovery authority.
+An almost-expired grant returns a bounded retry time; an expired grant can be
+renewed only by a new authorized discovery request. No background refresh or
+first-user/fallback-user selection occurs. The service identity receives no
+discovery permission and never reads provider tokens.
+
+Keycloak's `mcp-admin` role is the authority for explicit discovery renewals;
+removing it blocks the next request with refreshed claims, while already issued
+JWTs retain their normal lifetime. Native grants expire independently; disable
+the native account or its invocation membership to block all native admission.
+This mode intentionally permits reissuing the short-lived discovery grant, but
+never restores disabled accounts, membership, or ordinary invocation grants.
+Native management must remain private: `gateways.update` is broader than refresh,
+and Studio exposes only the fixed refresh action, not an arbitrary API proxy.
+
+Publication still uses the separate Base setup Job, followed by reviewed route
+activation. Existing shared tools do not depend on the discovering user's token
+for other users' invocations. Disconnection does not delete the catalog; another
+authorized administrator can later explicitly refresh with their own connection.
+Native refresh itself can mutate shared tool records before publication, so
+failed refresh does not guarantee that the prior native catalog is unchanged.
+
+This source change needs a new Studio image release and Base adoption before use.
+The old named-person mode below remains available for explicit migration and
+cannot be enabled together with administrator discovery.
+
+### Legacy named operator discovery
 
 Personal Connect continues to use ContextForge's existing popup callback. The
 separate **Discover tools** action is only for approved individual OAuth integrations

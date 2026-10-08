@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from datetime import UTC, datetime, timedelta
 from typing import cast
 from urllib.parse import quote
 
@@ -22,6 +23,9 @@ INVOCATION_PERMISSIONS = frozenset(
 PROVISIONING_PERMISSIONS = frozenset(
     {"admin.user_management", "teams.read", "teams.manage_members"}
 )
+DISCOVERY_ROLE_NAME = "contextforge-tool-discovery"
+DISCOVERY_ROLE_MARKER = "neurwerk-contextforge/setup-v1/admin-discovery"
+DISCOVERY_GRANT_SECONDS = 120
 
 
 class ContextForgeAccountError(Exception):
@@ -186,7 +190,13 @@ class ContextForgeAccountClient:
             await self._request(
                 "GET",
                 f"/rbac/users/{quote(email, safe='')}/roles",
-                params={"active_only": "false"} if operator else None,
+                params={"active_only": "false"}
+                if operator
+                or (
+                    self.settings.contextforge_admin_discovery_enabled
+                    and self.settings.contextforge_admin_discovery_role_id
+                )
+                else None,
             )
         )
         if not isinstance(result, list):
@@ -201,9 +211,22 @@ class ContextForgeAccountClient:
                 self.settings.contextforge_team_id,
             )
         found: set[str] = set()
+        discovery_seen = False
         for value in result:
             role = _object(value)
             role_id = role.get("role_id")
+            if (
+                self.settings.contextforge_admin_discovery_enabled
+                and self.settings.contextforge_admin_discovery_role_id
+                and role_id == self.settings.contextforge_admin_discovery_role_id
+            ):
+                if discovery_seen:
+                    raise ContextForgeAccountError
+                discovery_seen = True
+                await self._check_discovery_role()
+                self._discovery_expiration(role, email)
+                # A leased discovery permission is not an ordinary invocation grant.
+                continue
             if (
                 not isinstance(role_id, str)
                 or role_id not in expected
@@ -217,6 +240,92 @@ class ContextForgeAccountClient:
                 raise ContextForgeAccountError
             found.add(role_id)
         return found
+
+    async def _check_discovery_role(self) -> None:
+        role_id = self.settings.contextforge_admin_discovery_role_id
+        if not self.settings.contextforge_admin_discovery_enabled or not role_id:
+            raise ContextForgeAccountError
+        role = _object(self._json(await self._request("GET", f"/rbac/roles/{role_id}")))
+        if any(
+            role.get(key) != expected
+            for key, expected in {
+                "id": role_id,
+                "name": DISCOVERY_ROLE_NAME,
+                "description": DISCOVERY_ROLE_MARKER,
+                "scope": "team",
+                "is_active": True,
+                "is_system_role": False,
+                "inherits_from": None,
+                "permissions": ["gateways.update"],
+            }.items()
+        ):
+            raise ContextForgeAccountError
+
+    def _discovery_expiration(self, grant: dict[str, object], email: str) -> datetime:
+        if any(
+            grant.get(key) != expected
+            for key, expected in {
+                "role_id": self.settings.contextforge_admin_discovery_role_id,
+                "user_email": email,
+                "scope": "team",
+                "scope_id": self.settings.contextforge_team_id,
+                "is_active": True,
+                "granted_by": self.settings.contextforge_service_account_email,
+            }.items()
+        ):
+            raise ContextForgeAccountError
+        try:
+            granted = datetime.fromisoformat(str(grant["granted_at"]))
+            expires = datetime.fromisoformat(str(grant["expires_at"]))
+            now = datetime.now(UTC)
+            if (
+                granted.utcoffset() != timedelta(0)
+                or expires.utcoffset() != timedelta(0)
+                or not 0 < (expires - granted).total_seconds() <= DISCOVERY_GRANT_SECONDS
+                or granted > now + timedelta(seconds=5)
+            ):
+                raise ContextForgeAccountError
+        except (KeyError, ValueError, TypeError):
+            raise ContextForgeAccountError from None
+        return expires
+
+    async def prepare_discovery(self, email: str) -> None:
+        """Lease native discovery only after the controller authorizes an explicit mcp-admin call.
+
+        Keycloak authorizes each renewal. Status/Connect/tool calls never renew it.
+        Native account and invocation revocations still fail closed. No provider
+        token is read, and the provisioning service never receives discovery rights.
+        """
+        await self.check_account(email)
+        await self._check_discovery_role()
+        path = f"/rbac/users/{quote(email, safe='')}/roles"
+        grants = self._json(await self._request("GET", path, params={"active_only": "false"}))
+        if not isinstance(grants, list):
+            raise ContextForgeAccountError
+        for value in grants:
+            grant = _object(value)
+            if grant.get("role_id") == self.settings.contextforge_admin_discovery_role_id:
+                remaining = (
+                    self._discovery_expiration(grant, email) - datetime.now(UTC)
+                ).total_seconds()
+                if remaining >= 45:
+                    return
+                if remaining > 0:
+                    raise ContextForgeRateLimitError(str(int(remaining) + 1))
+        expires = datetime.now(UTC) + timedelta(seconds=DISCOVERY_GRANT_SECONDS)
+        result = await self._request(
+            "POST",
+            path,
+            payload={
+                "role_id": self.settings.contextforge_admin_discovery_role_id,
+                "scope": "team",
+                "scope_id": self.settings.contextforge_team_id,
+                "expires_at": expires.isoformat(),
+            },
+        )
+        actual_expiry = self._discovery_expiration(_object(self._json(result)), email)
+        if not 45 <= (actual_expiry - datetime.now(UTC)).total_seconds() <= DISCOVERY_GRANT_SECONDS:
+            raise ContextForgeAccountError
 
     async def check_operator(self, email: str) -> None:
         """Read-only verification of the named operator; never create or repair grants."""
