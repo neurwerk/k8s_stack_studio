@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { McpChecks, checkSummary, afterDiscovery } from "../lib/mcp-checks.ts";
+import { McpChecks, checkSummary, afterDiscovery, needsMcpMetadataRefresh } from "../lib/mcp-checks.ts";
 import { McpRefresh, waitForMcpRetry } from "../lib/mcp-refresh.ts";
 import type { McpCatalogEntry, McpTool, McpCheckResult, McpConnectionStatus } from "../lib/api/mcp";
 
@@ -237,5 +237,41 @@ void test("discovery waits for a fresh publication before checks resume", async 
   checks.sync([afterDiscovery(published("2026-01-01T12:00:01Z"), marker)], {}, { fixture: 2 });
   await settled(checks);
   assert.equal(calls, 1);
+  checks.stop();
+});
+
+void test("unavailable catalog remains retryable with a connected account, without premature checks", async (context) => {
+  context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
+  const item = entry("fixture", { authentication_model: "individual-authentication",
+    publication: { state: "unavailable", checked_at: null, error_code: null } });
+  const connection: McpConnectionStatus = { status: "connected", message: null, checked_at: null, retry_after: null };
+  assert.equal(needsMcpMetadataRefresh(item, connection, true, ""), true);
+  assert.equal(needsMcpMetadataRefresh({ ...item, permitted: false }, connection, true, ""), false);
+  let reads = 0;
+  let calls = 0;
+  const checks = new McpChecks(driver({ check: () => { calls++; return Promise.resolve(passed); } }));
+  checks.start(() => { /* No UI subscriber in this test. */ });
+  checks.sync([item], { fixture: connection }, {});
+  checks.recheck("fixture");
+  await settled(checks);
+  assert.equal(calls, 0);
+  const refresh = new McpRefresh<McpCatalogEntry>();
+  const retry = refresh.request(async () => {
+    await waitForMcpRetry(31_000);
+    reads++;
+    return { ...item, publication: { state: "published", checked_at: passed.checked_at, error_code: null } };
+  }, (updated) => {
+    assert.equal(needsMcpMetadataRefresh(updated, connection, true, ""), false);
+    checks.sync([updated], { fixture: connection }, { fixture: 1 });
+  });
+  context.mock.timers.tick(29_999);
+  await tick();
+  assert.equal(reads, 0);
+  assert.equal(calls, 0);
+  context.mock.timers.tick(1);
+  await retry;
+  await settled(checks);
+  assert.equal(reads, 1);
+  assert.equal(calls, 2);
   checks.stop();
 });

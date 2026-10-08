@@ -6,7 +6,7 @@ import { McpConnection } from "@/components/mcp-connection";
 import { McpDiscovery } from "@/components/mcp-discovery";
 import { fetchMcpTools, mcpError, runMcpCheck } from "@/lib/api/mcp";
 import { ApiRequestError } from "@/lib/api/client";
-import { McpChecks, checkSummary, skipReason } from "@/lib/mcp-checks";
+import { McpChecks, checkSummary, skipReason, needsMcpMetadataRefresh } from "@/lib/mcp-checks";
 import type { IntegrationChecks, CheckState } from "@/lib/mcp-checks";
 import type { McpCatalogEntry, McpConnectionStatus, McpCheck } from "@/lib/api/mcp";
 
@@ -99,8 +99,7 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
     .map((result) => `${result.display_label ?? "Account"}: ${result.display_value ?? ""}`))];
   const label = checking && personal && !connection && !connectionError
     ? "Checking connection…" : reason || summary.label;
-  const statusUnavailable = personal && connectionsEnabled &&
-    (!!connectionError || !connection || !!connection.message || connection.status === "status unavailable");
+  const metadataUnavailable = needsMcpMetadataRefresh(item, connection, connectionsEnabled, connectionError);
   const unavailableErrors = [...new Set(Object.values(state?.checks ?? {}).flatMap((check) => check.error ? [check.error] : []))];
 
   return (
@@ -131,9 +130,9 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
         </td>
         <td className="px-4 py-3">
           <div className="flex flex-wrap items-start gap-2">
-            {item.permitted && (!reason || statusUnavailable || pendingRefresh[item.id]) && <button type="button" className="btn btn-sm btn-outline"
+            {item.permitted && (!reason || metadataUnavailable || pendingRefresh[item.id]) && <button type="button" className="btn btn-sm btn-outline"
               disabled={!!pendingRefresh[item.id] || checking && personal || !!state?.busy || now < retryUntil}
-              onClick={() => { if (statusUnavailable) void onRefresh(item.id); else onRecheck(); }}>
+              onClick={() => { if (metadataUnavailable) void onRefresh(item.id); else onRecheck(); }}>
               Recheck
             </button>}
             {personal && item.permitted && connectionsEnabled && <McpConnection id={item.id}

@@ -40,6 +40,13 @@ export function skipReason(item: McpCatalogEntry, connection?: McpConnectionStat
   return "";
 }
 
+export function needsMcpMetadataRefresh(item: McpCatalogEntry, connection: McpConnectionStatus | undefined,
+  connectionsEnabled: boolean, connectionError: string): boolean {
+  return item.permitted && (item.publication?.state === "unavailable" ||
+    item.authentication_model === "individual-authentication" && connectionsEnabled &&
+    (!!connectionError || !connection || !!connection.message || connection.status === "status unavailable"));
+}
+
 export function checkSummary(state?: IntegrationChecks): { label: string; failed: boolean } {
   if (!state) return { label: "Waiting for checks", failed: false };
   const values = Object.values(state.checks);
