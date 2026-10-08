@@ -191,7 +191,11 @@ class ContextForgeAccountClient:
                 "GET",
                 f"/rbac/users/{quote(email, safe='')}/roles",
                 params={"active_only": "false"}
-                if operator or self.settings.contextforge_admin_discovery_enabled
+                if operator
+                or (
+                    self.settings.contextforge_admin_discovery_enabled
+                    and self.settings.contextforge_admin_discovery_role_id
+                )
                 else None,
             )
         )

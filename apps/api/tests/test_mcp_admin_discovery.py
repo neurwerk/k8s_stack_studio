@@ -231,6 +231,61 @@ async def test_native_grant_is_bounded_and_ordinary_reads_never_renew(
             assert len(writes) == (0 if existing == "current" else 1)
 
 
+@pytest.mark.parametrize("readiness", ["missing", "false", "disabled"])
+async def test_withheld_discovery_does_not_block_ordinary_roles_after_expiry(tmp_path, readiness):
+    settings, data = admin_projection(tmp_path)
+    if readiness == "missing":
+        (data / "admin_discovery_ready").unlink()
+    elif readiness == "false":
+        (data / "admin_discovery_ready").write_text("false")
+    else:
+        settings = Settings.model_validate(
+            {**settings.model_dump(), "contextforge_admin_discovery_enabled": False}
+        )
+    settings = publication_snapshot(settings)[0]
+    assert not settings.contextforge_admin_discovery_role_id
+    email = "person@example.test"
+    grants = [
+        {
+            "role_id": role,
+            "user_email": email,
+            "scope": scope,
+            "scope_id": team,
+            "is_active": True,
+            "expires_at": None,
+        }
+        for role, scope, team in [
+            ("global-empty", "global", None),
+            ("team-invoke", "team", "fixed-team"),
+        ]
+    ]
+    grants.append(native_grant(email, remaining=-10))
+
+    def upstream(request):
+        assert request.method == "GET"
+        assert request.url.path == f"/rbac/users/{email}/roles"
+        # Native active_only defaults to true and excludes expired assignments.
+        result = (
+            grants
+            if request.url.params.get("active_only") == "false"
+            else [
+                grant
+                for grant in grants
+                if grant["expires_at"] is None
+                or datetime.fromisoformat(str(grant["expires_at"])) > datetime.now(UTC)
+            ]
+        )
+        return httpx.Response(200, json=result)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as native:
+        account = ContextForgeAccountClient(settings, native)
+        assert await account._roles(email) == {"global-empty", "team-invoke"}
+        # With no verified discovery role, an active extra grant still fails closed.
+        grants[-1] = native_grant(email)
+        with pytest.raises(ContextForgeAccountError):
+            await account._roles(email)
+
+
 @pytest.mark.parametrize(
     "change",
     [
