@@ -18,7 +18,7 @@ interface TableProps {
   connectionsEnabled: boolean;
   checking: boolean;
   connectionError: string;
-  onRefresh: (id: string) => Promise<void>;
+  onRefresh: (id: string, discoveredAt?: string) => Promise<void>;
 }
 
 export function McpTable(props: TableProps) {
@@ -32,8 +32,8 @@ export function McpTable(props: TableProps) {
     }),
   }));
   useEffect(() => {
-    checks.start(() => render((value) => value + 1));
-    return () => checks.stop();
+    checks.start(() => { render((value) => value + 1); });
+    return () => { checks.stop(); };
   }, [checks]);
   useEffect(() => {
     checks.sync(props.items, props.connectionError ? {} : props.connections, props.revisions, props.pendingRefresh);
@@ -52,7 +52,7 @@ export function McpTable(props: TableProps) {
         <tbody>
           {props.items.map((item) => (
             <McpRow key={item.id} item={item} {...props} state={checks.states[item.id]}
-              onRecheck={() => checks.recheck(item.id)} />
+              onRecheck={() => { checks.recheck(item.id); }} />
           ))}
         </tbody>
       </table>
@@ -80,8 +80,8 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!state?.retryUntil) return;
-    const timer = window.setTimeout(() => setNow(Date.now()), Math.max(0, state.retryUntil - Date.now()));
-    return () => window.clearTimeout(timer);
+    const timer = window.setTimeout(() => { setNow(Date.now()); }, Math.max(0, state.retryUntil - Date.now()));
+    return () => { window.clearTimeout(timer); };
   }, [state?.retryUntil]);
   const personal = item.authentication_model === "individual-authentication";
   const connection = connections[item.id];
@@ -102,7 +102,7 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
         <td className="px-4 py-3">
           <button type="button" className="btn btn-ghost btn-sm -ml-2 whitespace-nowrap font-medium"
             disabled={!item.permitted} aria-expanded={expanded} aria-controls={`mcp-tools-${item.id}`}
-            onClick={() => setExpanded(!expanded)}>
+            onClick={() => { setExpanded(!expanded); }}>
             {expanded ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}
             {item.name}
           </button>
@@ -124,14 +124,14 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
         <td className="px-4 py-3">
           <div className="flex flex-wrap items-start gap-2">
             {!reason && <button type="button" className="btn btn-sm btn-outline"
-              disabled={!state || state.busy || now < (state.retryUntil ?? 0)} onClick={onRecheck}>
+              disabled={!state || state.busy || now < state.retryUntil} onClick={onRecheck}>
               Recheck
             </button>}
             {personal && item.permitted && connectionsEnabled && <McpConnection id={item.id}
               status={connection?.status} onRefresh={() => void onRefresh(item.id)} />}
           </div>
           {personal && item.can_discover && <div className="mt-2"><McpDiscovery id={item.id}
-            initial={item.publication} onRefresh={() => onRefresh(item.id)} /></div>}
+            initial={item.publication} onRefresh={(marker) => onRefresh(item.id, marker)} /></div>}
           {!item.can_discover && item.permitted && item.publication?.state !== "published" && item.publication && (
             <p className="mt-2 text-xs text-muted-foreground">
               {item.publication.state === "error" ? "Publication failed" : item.publication.state === "unavailable"

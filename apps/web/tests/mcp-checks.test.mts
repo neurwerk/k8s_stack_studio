@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { McpChecks, checkSummary } from "../lib/mcp-checks.ts";
+import { McpChecks, checkSummary, afterDiscovery } from "../lib/mcp-checks.ts";
 import type { McpCatalogEntry, McpTool, McpCheckResult, McpConnectionStatus } from "../lib/api/mcp";
 
 const entry = (id: string, extra: Partial<McpCatalogEntry> = {}): McpCatalogEntry => ({ id, name: `Fixture integration ${id}`, permitted: true,
@@ -26,10 +26,10 @@ function driver(extra: Partial<Driver> = {}): Driver {
     error: (error) => ({ message: "Fixture check unavailable", retryAfter: error instanceof FixtureRateLimit ? error.retryAfter : undefined }), ...extra };
 }
 
-test("all permitted checks run once without expansion; disconnected, missing state and denied rows skip", async () => {
+void test("all permitted checks run once without expansion; disconnected, missing state and denied rows skip", async () => {
   const calls: string[] = [];
   const checks = new McpChecks(driver({ check: (id, check) => { calls.push(`${id}:${check}`); return Promise.resolve(passed); } }));
-  checks.start(() => {});
+  checks.start(() => { /* No UI subscriber in this test. */ });
   const items = [entry("ready"), entry("personal", { authentication_model: "individual-authentication" }),
     entry("denied", { permitted: false }), entry("missing", { authentication_model: "individual-authentication" }),
     entry("unpublished", { publication: { state: "pending-discovery", checked_at: null, error_code: null } })];
@@ -47,12 +47,12 @@ test("all permitted checks run once without expansion; disconnected, missing sta
   checks.stop();
 });
 
-test("twenty integrations use at most three concurrent requests and retain every result", async () => {
+void test("twenty integrations use at most three concurrent requests and retain every result", async () => {
   let active = 0;
   let maximum = 0;
   const request = async <T>(value: T) => { active++; maximum = Math.max(maximum, active); await tick(); active--; return value; };
   const checks = new McpChecks(driver({ tools: () => request(tools), check: () => request(passed) }));
-  checks.start(() => {});
+  checks.start(() => { /* No UI subscriber in this test. */ });
   checks.sync(Array.from({ length: 20 }, (_, index) => entry(String(index))), {}, {});
   await settled(checks);
   assert.equal(maximum, 3);
@@ -60,14 +60,14 @@ test("twenty integrations use at most three concurrent requests and retain every
   checks.stop();
 });
 
-test("a later passed check cannot hide an earlier tool failure or request failure", async () => {
+void test("a later passed check cannot hide an earlier tool failure or request failure", async () => {
   for (const transportFailure of [false, true]) {
     const checks = new McpChecks(driver({ check: (_id, id) => {
       if (id === "second") return Promise.resolve(passed);
       if (transportFailure) return Promise.reject(new Error("Fixture failure"));
       return Promise.resolve({ ...passed, status: "failed" });
     } }));
-    checks.start(() => {});
+    checks.start(() => { /* No UI subscriber in this test. */ });
     checks.sync([entry("fixture")], {}, {});
     await settled(checks);
     assert.deepEqual(checkSummary(checks.states.fixture), { label: "1 of 2 checks failed", failed: true });
@@ -75,7 +75,7 @@ test("a later passed check cannot hide an earlier tool failure or request failur
   }
 });
 
-test("refresh coalesces, rejects stale results, and never overlaps runs for one integration", async () => {
+void test("refresh coalesces, rejects stale results, and never overlaps runs for one integration", async () => {
   let release: () => void = () => assert.fail("Request not started");
   let toolCalls = 0;
   const calls: string[] = [];
@@ -84,7 +84,7 @@ test("refresh coalesces, rejects stale results, and never overlaps runs for one 
     if (toolCalls === 1) await new Promise<void>((resolve) => { release = resolve; });
     return tools;
   }, check: (id, check) => { calls.push(`${id}:${check}`); return Promise.resolve(passed); } }));
-  checks.start(() => {});
+  checks.start(() => { /* No UI subscriber in this test. */ });
   const items = [entry("fixture")];
   checks.sync(items, {}, {});
   await tick();
@@ -104,30 +104,32 @@ test("refresh coalesces, rejects stale results, and never overlaps runs for one 
   checks.stop();
 });
 
-test("setup replay starts once; unmount cancels queued checks and ignores in-flight completion", async () => {
-  let release: () => void = () => assert.fail("Request not started");
-  let signal: AbortSignal | undefined;
+void test("setup replay starts once; unmount cancels queued checks and ignores in-flight completion", async () => {
+  const releases: (() => void)[] = [];
+  const signals: AbortSignal[] = [];
   let requests = 0;
   const checks = new McpChecks(driver({ tools: async (_id, value) => {
-    requests++; signal = value;
-    await new Promise<void>((resolve) => { release = resolve; });
+    requests++; signals.push(value);
+    await new Promise<void>((resolve) => { releases.push(resolve); });
     return tools;
   } }));
-  checks.start(() => {});
-  checks.sync([entry("fixture")], {}, {});
+  const items = Array.from({ length: 4 }, (_, index) => entry(String(index)));
+  checks.start(() => { /* No UI subscriber in this test. */ });
+  checks.sync(items, {}, {});
   checks.stop();
-  checks.start(() => {});
-  checks.sync([entry("fixture")], {}, {});
+  checks.start(() => { /* No UI subscriber in this test. */ });
+  checks.sync(items, {}, {});
   await tick();
-  assert.equal(requests, 1);
+  assert.equal(requests, 3);
   checks.stop();
-  assert.equal(signal?.aborted, true);
-  release();
+  assert.equal(signals.every((signal) => signal.aborted), true);
+  releases.forEach((release) => { release(); });
   await tick();
-  assert.deepEqual(checks.states.fixture?.checks, {});
+  assert.equal(requests, 3);
+  assert.equal(Object.values(checks.states).every((state) => !Object.keys(state.checks).length), true);
 });
 
-test("Retry-After pauses remaining requests and does not retry the failed check automatically", async (context) => {
+void test("Retry-After pauses remaining requests and does not retry the failed check automatically", async (context) => {
   context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
   const calls: string[] = [];
   const checks = new McpChecks(driver({ check: (_id, id) => {
@@ -135,7 +137,7 @@ test("Retry-After pauses remaining requests and does not retry the failed check 
     if (calls.length === 1) return Promise.reject(new FixtureRateLimit());
     return Promise.resolve(passed);
   } }));
-  checks.start(() => {});
+  checks.start(() => { /* No UI subscriber in this test. */ });
   checks.sync([entry("fixture")], {}, {});
   await tick();
   assert.deepEqual(calls, ["first"]);
@@ -150,5 +152,24 @@ test("Retry-After pauses remaining requests and does not retry the failed check 
   checks.recheck("fixture");
   await settled(checks);
   assert.deepEqual(calls, ["first", "second", "first", "second"]);
+  checks.stop();
+});
+
+void test("discovery waits for a fresh publication before checks resume", async () => {
+  let calls = 0;
+  const checks = new McpChecks(driver({ tools: () => { calls++; return Promise.resolve(tools); } }));
+  checks.start(() => { /* No UI subscriber in this test. */ });
+  const marker = "2026-01-01T12:00:00Z";
+  const published = (checked_at: string | null) => entry("fixture", {
+    publication: { state: "published", checked_at, error_code: null },
+  });
+  for (const timestamp of [null, "2026-01-01T11:59:59Z", marker]) {
+    checks.sync([afterDiscovery(published(timestamp), marker)], {}, { fixture: 1 });
+    await tick();
+    assert.equal(calls, 0);
+  }
+  checks.sync([afterDiscovery(published("2026-01-01T12:00:01Z"), marker)], {}, { fixture: 2 });
+  await settled(checks);
+  assert.equal(calls, 1);
   checks.stop();
 });

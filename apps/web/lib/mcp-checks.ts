@@ -20,6 +20,14 @@ interface Driver {
   error: (error: unknown) => { message: string; retryAfter?: number };
 }
 
+export function afterDiscovery(item: McpCatalogEntry, marker?: string): McpCatalogEntry {
+  if (marker && item.publication?.state === "published" &&
+    (!item.publication.checked_at || !(Date.parse(item.publication.checked_at) > Date.parse(marker)))) {
+    return { ...item, publication: { ...item.publication, state: "pending-discovery" } };
+  }
+  return item;
+}
+
 export function skipReason(item: McpCatalogEntry, connection?: McpConnectionStatus): string {
   if (!item.permitted) return "No permission";
   if (item.publication && item.publication.state !== "published") return "Tools not published";
@@ -34,7 +42,7 @@ export function skipReason(item: McpCatalogEntry, connection?: McpConnectionStat
 export function checkSummary(state?: IntegrationChecks): { label: string; failed: boolean } {
   if (!state) return { label: "Waiting for checks", failed: false };
   const values = Object.values(state.checks);
-  const failed = values.filter((value) => value.error || value.result?.status === "failed").length;
+  const failed = values.filter((value) => !!value.error || value.result?.status === "failed").length;
   const total = state.tools?.reduce((count, tool) => count + Object.keys(tool.checks).length, 0) ?? 0;
   if (failed) return { label: `${String(failed)} of ${String(total)} checks failed${state.busy ? " · checking…" : ""}`, failed: true };
   if (state.busy) return { label: "Checking…", failed: false };
@@ -49,7 +57,7 @@ export function checkSummary(state?: IntegrationChecks): { label: string; failed
 export class McpChecks {
   states: Record<string, IntegrationChecks> = {};
   private driver: Driver;
-  private changed: () => void = () => {};
+  private changed: (() => void) | null = null;
   private controller: AbortController | null = null;
   private versions = new Map<string, string>();
   private eligible = new Set<string>();
@@ -72,7 +80,7 @@ export class McpChecks {
     this.running.clear();
     this.versions.clear();
     this.eligible.clear();
-    this.changed = () => {};
+    this.changed = null;
   }
 
   sync(items: McpCatalogEntry[], connections: Record<string, McpConnectionStatus>, revisions: Record<string, number>, pending: Record<string, boolean> = {}) {
@@ -83,7 +91,7 @@ export class McpChecks {
       this.eligible.delete(id);
       this.versions.delete(id);
       this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
-      delete this.states[id];
+      this.states = Object.fromEntries(Object.entries(this.states).filter(([key]) => key !== id));
     }
     for (const item of items) {
       const reason = pending[item.id] ? "Refreshing integration…" : skipReason(item, connections[item.id]);
@@ -96,9 +104,9 @@ export class McpChecks {
       if (reason) { this.queue.delete(item.id); this.eligible.delete(item.id); }
       else { this.queue.add(item.id); this.eligible.add(item.id); }
     }
-    this.changed();
+    this.changed?.();
     // Deferring also makes React's setup/cleanup/setup replay start no requests.
-    queueMicrotask(() => this.pump());
+    queueMicrotask(() => { this.pump(); });
   }
 
   recheck(id: string) {
@@ -107,7 +115,7 @@ export class McpChecks {
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
     this.states[id] = { ...state, checks: {}, busy: true, message: "" };
     this.queue.add(id);
-    this.changed();
+    this.changed?.();
     this.pump();
   }
 
@@ -156,7 +164,7 @@ export class McpChecks {
       const tools = await this.driver.tools(id, controller.signal);
       if (!current()) return;
       state.tools = tools;
-      this.changed();
+      this.changed?.();
       for (const [checkId] of tools.flatMap((tool) => Object.entries(tool.checks))) {
         if (!await ready()) return;
         try {
@@ -167,12 +175,12 @@ export class McpChecks {
           if (!current()) return;
           state.checks[checkId] = { error: failure(error), checkedAt: new Date().toISOString() };
         }
-        this.changed();
+        this.changed?.();
       }
     } catch (error) {
       if (current()) state.message = failure(error);
     } finally {
-      if (current()) { state.busy = false; this.changed(); }
+      if (current()) { state.busy = false; this.changed?.(); }
     }
   }
 }

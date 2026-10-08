@@ -6,6 +6,7 @@ import type { McpCatalogEntry, McpConnectionStatus } from "@/lib/api/mcp";
 import { ApiRequestError } from "@/lib/api/client";
 import { useVerifiedSession } from "@/lib/auth/session-context";
 import { McpTable } from "@/components/mcp-table";
+import { afterDiscovery } from "@/lib/mcp-checks";
 
 export default function McpPage() {
   const session = useVerifiedSession();
@@ -35,8 +36,10 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const inFlight = useRef(false);
   const refreshing = useRef(new Map<string, Promise<void>>());
   const connectionVersions = useRef<Record<string, number>>({});
+  const publicationAfter = useRef<Record<string, string>>({});
 
-  function refreshIntegration(id: string): Promise<void> {
+  function refreshIntegration(id: string, discoveredAt?: string): Promise<void> {
+    if (discoveredAt) publicationAfter.current[id] = discoveredAt;
     const pending = refreshing.current.get(id);
     if (pending) return pending;
     setPendingRefresh((previous) => ({ ...previous, [id]: true }));
@@ -61,7 +64,7 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
       setItems((previous) => previous.flatMap((item) => {
         if (item.id !== id) return [item];
         const updated = catalog.value.find((entry) => entry.id === id);
-        return updated ? [updated] : [];
+        return updated ? [afterDiscovery(updated, publicationAfter.current[id])] : [];
       }));
       setError("");
     } else {

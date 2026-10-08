@@ -25,7 +25,7 @@ export function McpDiscovery({
 }: {
   id: string;
   initial?: McpPublicationStatus | null;
-  onRefresh: () => Promise<void>;
+  onRefresh: (discoveredAt?: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [discovering, setDiscovering] = useState(false);
@@ -83,7 +83,7 @@ export function McpDiscovery({
         setDiscovering(false);
         setStatus({ state: "pending-discovery", checked_at: null, error_code: null });
         // Native discovery already mutated tools: invalidate now, not after polling.
-        await refresh.current();
+        await refresh.current(marker);
         refreshed = true;
         if (stopped()) return;
       }
@@ -103,7 +103,7 @@ export function McpDiscovery({
           if (current && (fresh || result.state === "unavailable")) setStatus(result);
           if (current && fresh && (result.state === "published" || result.state === "error")) {
             // Publication can change the approved tool mapping again.
-            await refresh.current();
+            await refresh.current(marker ?? undefined);
             refreshed = true;
             break;
           }
@@ -133,7 +133,7 @@ export function McpDiscovery({
       if (active.current) {
         setBusy(false);
         setDiscovering(false);
-        if (!refreshed) await refresh.current();
+        if (!refreshed) await refresh.current(discoveredAt ?? undefined);
       }
     }
   }
