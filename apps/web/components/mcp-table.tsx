@@ -94,7 +94,8 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
   }).sort().at(-1);
   const accounts = [...new Set(results.filter((result) => result.status === "passed" && result.display_value !== null)
     .map((result) => `${result.display_label ?? "Account"}: ${result.display_value ?? ""}`))];
-  const label = reason || (checking && personal && !state?.tools ? "Checking connection…" : summary.label);
+  const label = checking && personal && !connection && !connectionError
+    ? "Checking connection…" : reason || summary.label;
 
   return (
     <Fragment>
@@ -180,7 +181,7 @@ function ToolCheck({ check, value, busy }: { check: McpCheck; value?: CheckState
       <div className="flex items-center justify-between gap-4 text-xs">
         <span className="font-medium">{check.name}</span>
         <span className={failed ? "text-error" : "text-muted-foreground"}>
-          {failed ? "Failed" : value?.result ? "Passed" : busy ? "Queued…" : "Not checked"}
+          {failed ? "Failed" : value?.result ? "Passed" : value?.running ? "Checking…" : busy ? "Queued…" : "Not checked"}
         </span>
       </div>
       {(parameters || result || value?.error) && <details className="text-xs text-muted-foreground">

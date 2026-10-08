@@ -4,6 +4,7 @@ export interface CheckState {
   result?: McpCheckResult;
   error?: string;
   checkedAt?: string;
+  running?: boolean;
 }
 
 export interface IntegrationChecks {
@@ -167,6 +168,8 @@ export class McpChecks {
       this.changed?.();
       for (const [checkId] of tools.flatMap((tool) => Object.entries(tool.checks))) {
         if (!await ready()) return;
+        state.checks[checkId] = { running: true };
+        this.changed?.();
         try {
           const result = await this.driver.check(id, checkId, controller.signal);
           if (!current()) return;

@@ -50,7 +50,7 @@ void test("all permitted checks run once without expansion; disconnected, missin
 void test("twenty integrations use at most three concurrent requests and retain every result", async () => {
   let active = 0;
   let maximum = 0;
-  const request = async <T>(value: T) => { active++; maximum = Math.max(maximum, active); await tick(); active--; return value; };
+  const request = async <T,>(value: T) => { active++; maximum = Math.max(maximum, active); await tick(); active--; return value; };
   const checks = new McpChecks(driver({ tools: () => request(tools), check: () => request(passed) }));
   checks.start(() => { /* No UI subscriber in this test. */ });
   checks.sync(Array.from({ length: 20 }, (_, index) => entry(String(index))), {}, {});
