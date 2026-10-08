@@ -57,6 +57,8 @@ export function McpDiscovery({
   async function run(discover: boolean) {
     if (operation.current || Date.now() < retryUntil) return;
     const controller = new AbortController();
+    // Re-read mutable cancellation state after awaits; do not narrow it across the loop.
+    const stopped = () => controller.signal.aborted;
     operation.current = controller;
     setBusy(true);
     setDiscovering(discover);
@@ -66,25 +68,27 @@ export function McpDiscovery({
       let marker = discoveredAt;
       if (discover) {
         const result = await discoverMcp(id);
-        if (!active.current || controller.signal.aborted) return;
+        if (!active.current || stopped()) return;
         marker = result.discovered_at;
         setDiscoveredAt(marker);
         setDiscovering(false);
         setStatus({ state: "pending-discovery", checked_at: null, error_code: null });
       }
       // Only read status. The operator independently reruns the existing setup Job.
-      timeout = window.setTimeout(() => controller.abort(), 120_000);
-      while (!controller.signal.aborted) {
+      timeout = window.setTimeout(() => {
+        controller.abort();
+      }, 120_000);
+      while (!stopped()) {
         let delay = 5;
         try {
           const result = await fetchMcpPublication(id, controller.signal);
-          if (!active.current || controller.signal.aborted) return;
+          if (!active.current || stopped()) return;
           const fresh = !marker || (result.checked_at !== null &&
             Date.parse(result.checked_at) >= Date.parse(marker));
           if (fresh || result.state === "unavailable") setStatus(result);
           if (fresh && (result.state === "published" || result.state === "error")) break;
         } catch (error) {
-          if (controller.signal.aborted) break;
+          if (stopped()) break;
           if (error instanceof ApiRequestError && error.status === 429) {
             delay = Math.max(5, error.retryAfter ?? 60);
             setRetryUntil(Date.now() + delay * 1000);
@@ -97,7 +101,7 @@ export function McpDiscovery({
         await wait(delay, controller.signal);
       }
     } catch (error) {
-      if (active.current && !controller.signal.aborted) {
+      if (active.current && !stopped()) {
         setStatus({ state: "unavailable", checked_at: null, error_code: null });
         setError(error instanceof ApiRequestError && error.status === 409
           ? "Discovery is already running for this integration." : mcpError(error));
