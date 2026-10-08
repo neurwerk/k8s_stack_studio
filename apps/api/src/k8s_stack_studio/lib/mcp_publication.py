@@ -131,9 +131,28 @@ def _snapshot(
             **settings.model_dump(),
             "mcp_catalog": catalog,
             "contextforge_operator_role_id": _binding(directory, settings),
+            "contextforge_admin_discovery_role_id": _admin_role(directory, settings),
         }
     )
     return live, statuses
+
+
+def _admin_role(directory: Path, settings: Settings) -> str:
+    """A retained ID alone cannot authorize an unverified or disabled setup."""
+    if not settings.contextforge_admin_discovery_enabled:
+        return ""
+    if (
+        not (directory / "admin_discovery_ready").exists()
+        or _read(directory, "admin_discovery_ready") != "true"
+    ):
+        return ""
+    role_id = _read(directory, "admin_discovery_role_id").strip()
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", role_id) or role_id in {
+        settings.contextforge_global_role_id,
+        settings.contextforge_team_role_id,
+    }:
+        return ""
+    return role_id
 
 
 def publication_snapshot(settings: Settings) -> tuple[Settings, dict[str, McpPublicationStatus]]:

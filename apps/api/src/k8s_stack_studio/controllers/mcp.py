@@ -76,6 +76,15 @@ def _named_operator(principal: StudioPrincipal, settings: Settings) -> bool:
     )
 
 
+def _discovery_admin(principal: StudioPrincipal, settings: Settings) -> bool:
+    return (
+        settings.contextforge_admin_discovery_enabled
+        and bool(settings.contextforge_admin_discovery_role_id)
+        and "mcp-admin" in principal.roles
+        and principal.profile.get("email_verified") is True
+    )
+
+
 async def _check_caller(
     request: Request,
     principal: StudioPrincipal,
@@ -383,7 +392,7 @@ async def get_catalog(
             authentication_model=item.authentication_model,
             permitted={"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles,
             can_discover=(
-                _named_operator(principal, settings)
+                (_named_operator(principal, settings) or _discovery_admin(principal, settings))
                 and item.authentication_model == "individual-authentication"
                 and {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles
             ),
@@ -429,12 +438,17 @@ async def discover(
     principal: StudioPrincipal = Depends(get_current_principal),
     settings: Settings = Depends(_live_settings),
 ) -> McpDiscoverResponse:
-    """Explicit operator-only discovery for one fixed approved catalog gateway."""
+    """Explicit administrator discovery using only the verified caller's own connection."""
     response.headers["Cache-Control"] = "no-store"
-    if not settings.contextforge_operator_discovery_enabled:
+    if not (
+        settings.contextforge_operator_discovery_enabled
+        or settings.contextforge_admin_discovery_enabled
+    ):
         raise HTTPException(status_code=404, detail="MCP operator discovery is not enabled")
-    if not _named_operator(principal, settings):
-        raise HTTPException(status_code=403, detail="Approved MCP operator binding is required")
+    if not (_named_operator(principal, settings) or _discovery_admin(principal, settings)):
+        raise HTTPException(
+            status_code=403, detail="MCP discovery administrator permission is required"
+        )
     if request.headers.get("origin") != settings.contextforge_oauth_studio_origin:
         raise HTTPException(status_code=403, detail="Approved Studio origin is required")
     item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
@@ -445,7 +459,12 @@ async def discover(
     email = _verified_email(principal)
     try:
         async with asyncio.timeout(45):
-            await _check_caller(request, principal, settings, email)
+            if settings.contextforge_admin_discovery_enabled:
+                await ContextForgeAccountClient(
+                    settings, request.app.state.contextforge_admin_client
+                ).prepare_discovery(email)
+            else:
+                await _check_caller(request, principal, settings, email)
             await ContextForgeOAuthClient(
                 settings, request.app.state.contextforge_oauth_client, email
             ).discover(item)

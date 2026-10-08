@@ -215,6 +215,9 @@ class Settings(BaseSettings):
     contextforge_oauth_studio_origin: str = ""
     contextforge_oauth_callback_url: str = ""
     contextforge_operator_discovery_enabled: bool = False
+    contextforge_admin_discovery_enabled: bool = False
+    # Loaded only from the verified setup projection, never from browser input.
+    contextforge_admin_discovery_role_id: str = ""
     contextforge_operator_email: str = Field(default="", max_length=254)
     contextforge_operator_subject: str = Field(default="", max_length=254)
     contextforge_operator_role_name: str = "neurwerk-mcp-discovery"
@@ -422,6 +425,15 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_operator_discovery(self) -> Self:
         """Discovery needs an explicit bound identity and the existing private proxy."""
+        if self.contextforge_admin_discovery_enabled and (
+            self.contextforge_operator_discovery_enabled
+            or not self.contextforge_account_onboarding_enabled
+            or not self.mcp_connections_enabled
+            or self.contextforge_service_auth_mode != "trusted-proxy"
+            or not self.contextforge_publication_status_path
+            or not self.contextforge_oauth_studio_origin
+        ):
+            raise InvalidContextForgeAccountConfigError
         if self.contextforge_operator_discovery_enabled and (
             not self.contextforge_account_onboarding_enabled
             or self.contextforge_service_auth_mode != "trusted-proxy"
