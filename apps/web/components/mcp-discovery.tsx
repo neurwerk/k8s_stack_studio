@@ -42,7 +42,6 @@ export function McpDiscovery({
   if (previousInitial !== initial) {
     setPreviousInitial(initial);
     setStatus(null);
-    setError("");
   }
   useEffect(() => { refresh.current = onRefresh; }, [onRefresh]);
   useEffect(() => { latestInitial.current = initial; }, [initial]);
@@ -115,7 +114,6 @@ export function McpDiscovery({
             setRetryUntil(Date.now() + delay * 1000);
           } else if (requestedInitial === latestInitial.current) {
             setStatus({ state: "unavailable", checked_at: null, error_code: null });
-            setError("Publication status is unavailable.");
             break;
           }
         }
@@ -141,7 +139,7 @@ export function McpDiscovery({
   }
 
   const publication = status ?? initial;
-  const published = publication?.state === "published" && (!discoveredAt ||
+  const published = !error && publication?.state === "published" && (!discoveredAt ||
     (publication.checked_at !== null && Date.parse(publication.checked_at) > Date.parse(discoveredAt)));
   return (
     <div className="space-y-2" aria-live="polite">
