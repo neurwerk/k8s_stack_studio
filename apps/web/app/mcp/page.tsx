@@ -184,7 +184,7 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
             onRefresh={refreshIntegration}
           />
         ) : (
-          <p className="text-sm text-muted-foreground">No integrations have been configured.</p>
+          <p className="text-sm text-muted-foreground">No verified integrations are currently available.</p>
         ))}
     </div>
   );
