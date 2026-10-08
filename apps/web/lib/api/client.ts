@@ -50,9 +50,10 @@ function authHeaders(): HeadersInit {
 }
 
 /** Generic typed POST request. */
-export async function apiPost<TReq, TRes>(path: string, body: TReq): Promise<TRes> {
+export async function apiPost<TReq, TRes>(path: string, body: TReq, signal?: AbortSignal): Promise<TRes> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
+    signal,
     headers: authHeaders(),
     body: JSON.stringify(body),
   });

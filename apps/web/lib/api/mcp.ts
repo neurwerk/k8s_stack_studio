@@ -72,14 +72,15 @@ export interface McpCheckResult {
   display_value: string | null;
 }
 
-export function fetchMcpTools(id: string): Promise<McpTool[]> {
-  return apiPost<Record<string, never>, McpTool[]>(`/me/mcp/${encodeURIComponent(id)}/tools`, {});
+export function fetchMcpTools(id: string, signal?: AbortSignal): Promise<McpTool[]> {
+  return apiPost<Record<string, never>, McpTool[]>(`/me/mcp/${encodeURIComponent(id)}/tools`, {}, signal);
 }
 
-export function runMcpCheck(id: string, checkId: string): Promise<McpCheckResult> {
+export function runMcpCheck(id: string, checkId: string, signal?: AbortSignal): Promise<McpCheckResult> {
   return apiPost<Record<string, never>, McpCheckResult>(
     `/me/mcp/${encodeURIComponent(id)}/checks/${encodeURIComponent(checkId)}`,
     {},
+    signal,
   );
 }
 

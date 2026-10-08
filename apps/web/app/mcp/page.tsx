@@ -22,6 +22,8 @@ export default function McpPage() {
 
 function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const [items, setItems] = useState<McpCatalogEntry[]>([]);
+  const [revisions, setRevisions] = useState<Record<string, number>>({});
+  const [pendingRefresh, setPendingRefresh] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -31,8 +33,23 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const [retryUntil, setRetryUntil] = useState(0);
   const active = useRef(false);
   const inFlight = useRef(false);
+  const refreshing = useRef(new Map<string, Promise<void>>());
+  const connectionVersions = useRef<Record<string, number>>({});
 
-  async function refreshIntegration(id: string) {
+  function refreshIntegration(id: string): Promise<void> {
+    const pending = refreshing.current.get(id);
+    if (pending) return pending;
+    setPendingRefresh((previous) => ({ ...previous, [id]: true }));
+    connectionVersions.current[id] = (connectionVersions.current[id] ?? 0) + 1;
+    const operation = refreshOne(id).finally(() => {
+      refreshing.current.delete(id);
+      if (active.current) setPendingRefresh((previous) => ({ ...previous, [id]: false }));
+    });
+    refreshing.current.set(id, operation);
+    return operation;
+  }
+
+  async function refreshOne(id: string) {
     const results = await Promise.allSettled([
       fetchMcpCatalog(),
       connectionsEnabled && items.find((item) => item.id === id)?.authentication_model ===
@@ -41,7 +58,11 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
     if (!active.current) return;
     const [catalog, connection] = results;
     if (catalog.status === "fulfilled") {
-      setItems(catalog.value);
+      setItems((previous) => previous.flatMap((item) => {
+        if (item.id !== id) return [item];
+        const updated = catalog.value.find((entry) => entry.id === id);
+        return updated ? [updated] : [];
+      }));
       setError("");
     } else {
       setItems((previous) => previous.map((item) => item.id === id ? {
@@ -58,11 +79,13 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
         message: mcpError(connection.reason),
       } }));
     }
+    setRevisions((previous) => ({ ...previous, [id]: (previous[id] ?? 0) + 1 }));
   }
 
   const refreshConnections = useCallback(async () => {
     if (!connectionsEnabled || inFlight.current || Date.now() < retryUntil) return;
     inFlight.current = true;
+    const versions = { ...connectionVersions.current };
     setChecking(true);
     setConnectionError("");
     try {
@@ -72,7 +95,9 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
           Object.fromEntries(
             Object.entries(result).map(([id, value]) => [
               id,
-              value.status === "status unavailable" && previous[id]
+              (versions[id] ?? 0) !== (connectionVersions.current[id] ?? 0) && previous[id]
+                ? previous[id]
+                : value.status === "status unavailable" && previous[id]
                 ? { ...previous[id], message: value.message, retry_after: value.retry_after }
                 : value,
             ]),
@@ -137,7 +162,7 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
     };
   }, [refresh]);
 
-  // One account verification for all personal rows; no polling or tool calls on load.
+  // One account verification for all personal rows; tool checks use the page queue.
   const initialRefresh = useRef(refreshConnections);
   useEffect(() => {
     void initialRefresh.current();
@@ -148,7 +173,7 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
       <div>
         <h1 className="text-2xl font-semibold">MCP integrations</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Expand an integration to view its tools and run configured checks.
+          Approved checks run automatically. Expand an integration to view tools and details.
         </p>
       </div>
       {loading && (
@@ -178,6 +203,8 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
           <McpTable
             items={items}
             connections={connections}
+            revisions={revisions}
+            pendingRefresh={pendingRefresh}
             connectionsEnabled={connectionsEnabled}
             checking={checking}
             connectionError={connectionError}
