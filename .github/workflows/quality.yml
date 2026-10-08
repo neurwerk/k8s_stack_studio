@@ -76,6 +76,9 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
+      - name: MCP orchestration regressions
+        run: pnpm --filter web test:mcp
+
       - name: Build
         run: pnpm build
 

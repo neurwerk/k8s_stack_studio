@@ -17,7 +17,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:mcp": "node --experimental-strip-types --test tests/mcp-checks.test.mts"
   },
   "dependencies": {
     "lucide-react": "^0.507.0",

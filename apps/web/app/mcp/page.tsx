@@ -6,6 +6,10 @@ import type { McpCatalogEntry, McpConnectionStatus } from "@/lib/api/mcp";
 import { ApiRequestError } from "@/lib/api/client";
 import { useVerifiedSession } from "@/lib/auth/session-context";
 import { McpTable } from "@/components/mcp-table";
+import { afterDiscovery } from "@/lib/mcp-checks";
+import { McpRefresh, waitForMcpRetry } from "@/lib/mcp-refresh";
+
+type RefreshResult = [PromiseSettledResult<McpCatalogEntry[]>, PromiseSettledResult<McpConnectionStatus | null>];
 
 export default function McpPage() {
   const session = useVerifiedSession();
@@ -22,6 +26,8 @@ export default function McpPage() {
 
 function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const [items, setItems] = useState<McpCatalogEntry[]>([]);
+  const [revisions, setRevisions] = useState<Record<string, number>>({});
+  const [pendingRefresh, setPendingRefresh] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refresh, setRefresh] = useState(0);
@@ -29,19 +35,59 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const [checking, setChecking] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [retryUntil, setRetryUntil] = useState(0);
+  const [statusRetryUntil, setStatusRetryUntil] = useState<Record<string, number>>({});
   const active = useRef(false);
   const inFlight = useRef(false);
+  const refreshing = useRef(new Map<string, McpRefresh<RefreshResult | null>>());
+  const connectionVersions = useRef<Record<string, number>>({});
+  const publicationAfter = useRef<Record<string, string>>({});
+  const statusRetryDeadline = useRef<Record<string, number>>({});
+  const connectionRetryDeadline = useRef(0);
 
-  async function refreshIntegration(id: string) {
-    const results = await Promise.allSettled([
+  function refreshIntegration(id: string, discoveredAt?: string): Promise<void> {
+    if (discoveredAt) publicationAfter.current[id] = discoveredAt;
+    setPendingRefresh((previous) => ({ ...previous, [id]: true }));
+    connectionVersions.current[id] = (connectionVersions.current[id] ?? 0) + 1;
+    let controller = refreshing.current.get(id);
+    if (!controller) {
+      controller = new McpRefresh();
+      refreshing.current.set(id, controller);
+    }
+    return controller.request(() => readIntegration(id), (results) => { acceptIntegration(id, results); }).finally(() => {
+      if (active.current && !controller.busy) setPendingRefresh((previous) => ({ ...previous, [id]: false }));
+    });
+  }
+
+  async function readIntegration(id: string): Promise<RefreshResult | null> {
+    const mounted = () => active.current;
+    await waitForMcpRetry(Math.max(connectionRetryDeadline.current, statusRetryDeadline.current[id] ?? 0));
+    if (!mounted()) return null;
+    const results: RefreshResult = await Promise.allSettled([
       fetchMcpCatalog(),
       connectionsEnabled && items.find((item) => item.id === id)?.authentication_model ===
         "individual-authentication" ? fetchMcpConnection(id) : Promise.resolve(null),
     ]);
-    if (!active.current) return;
+    // Even a superseded response can impose a rate limit on the follow-up read.
+    const seconds = Math.max(0, ...results.map((result) => result.status === "rejected" &&
+      result.reason instanceof ApiRequestError && result.reason.status === 429 ? result.reason.retryAfter ?? 60 : 0),
+      results[1].status === "fulfilled" ? results[1].value?.retry_after ?? 0 : 0);
+    if (seconds) {
+      const deadline = Math.max(statusRetryDeadline.current[id] ?? 0, Date.now() + seconds * 1000);
+      statusRetryDeadline.current[id] = deadline;
+      if (mounted()) setStatusRetryUntil((previous) => ({ ...previous, [id]: deadline }));
+    }
+    return results;
+  }
+
+  function acceptIntegration(id: string, results: RefreshResult | null) {
+    if (!active.current || !results) return;
     const [catalog, connection] = results;
     if (catalog.status === "fulfilled") {
-      setItems(catalog.value);
+      setItems((previous) => previous.flatMap((item) => {
+        if (item.id !== id) return [item];
+        const updated = catalog.value.find((entry) => entry.id === id);
+        return updated ? [afterDiscovery(updated, publicationAfter.current[id])] : [];
+      }));
       setError("");
     } else {
       setItems((previous) => previous.map((item) => item.id === id ? {
@@ -53,16 +99,20 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
       setConnections((previous) => ({ ...previous, [id]: value }));
       setConnectionError("");
     } else if (connection.status === "rejected") {
+      const seconds = connection.reason instanceof ApiRequestError && connection.reason.status === 429
+        ? connection.reason.retryAfter ?? 60 : 0;
       setConnections((previous) => ({ ...previous, [id]: {
-        status: "status unavailable", checked_at: null, retry_after: null,
+        status: "status unavailable", checked_at: null, retry_after: seconds || null,
         message: mcpError(connection.reason),
       } }));
     }
+    setRevisions((previous) => ({ ...previous, [id]: (previous[id] ?? 0) + 1 }));
   }
 
   const refreshConnections = useCallback(async () => {
     if (!connectionsEnabled || inFlight.current || Date.now() < retryUntil) return;
     inFlight.current = true;
+    const versions = { ...connectionVersions.current };
     setChecking(true);
     setConnectionError("");
     try {
@@ -72,7 +122,9 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
           Object.fromEntries(
             Object.entries(result).map(([id, value]) => [
               id,
-              value.status === "status unavailable" && previous[id]
+              (versions[id] ?? 0) !== (connectionVersions.current[id] ?? 0) && previous[id]
+                ? previous[id]
+                : value.status === "status unavailable" && previous[id]
                 ? { ...previous[id], message: value.message, retry_after: value.retry_after }
                 : value,
             ]),
@@ -82,13 +134,17 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
           0,
           ...Object.values(result).map((value) => value.retry_after ?? 0),
         );
-        if (seconds) setRetryUntil(Date.now() + seconds * 1000);
+        if (seconds) {
+          connectionRetryDeadline.current = Date.now() + seconds * 1000;
+          setRetryUntil(connectionRetryDeadline.current);
+        }
       }
     } catch (error) {
       if (active.current) {
         setConnectionError(mcpError(error));
         if (error instanceof ApiRequestError && error.status === 429) {
-          setRetryUntil(Date.now() + (error.retryAfter ?? 60) * 1000);
+          connectionRetryDeadline.current = Date.now() + (error.retryAfter ?? 60) * 1000;
+          setRetryUntil(connectionRetryDeadline.current);
         }
       }
     } finally {
@@ -137,7 +193,7 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
     };
   }, [refresh]);
 
-  // One account verification for all personal rows; no polling or tool calls on load.
+  // One account verification for all personal rows; tool checks use the page queue.
   const initialRefresh = useRef(refreshConnections);
   useEffect(() => {
     void initialRefresh.current();
@@ -148,7 +204,7 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
       <div>
         <h1 className="text-2xl font-semibold">MCP integrations</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Expand an integration to view its tools and run configured checks.
+          Approved checks run automatically. Expand an integration to view tools and details.
         </p>
       </div>
       {loading && (
@@ -178,9 +234,13 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
           <McpTable
             items={items}
             connections={connections}
+            revisions={revisions}
+            pendingRefresh={pendingRefresh}
             connectionsEnabled={connectionsEnabled}
             checking={checking}
             connectionError={connectionError}
+            statusRetryUntil={statusRetryUntil}
+            connectionRetryUntil={retryUntil}
             onRefresh={refreshIntegration}
           />
         ) : (
