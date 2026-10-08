@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useRef, useState, useEffect } from "react";
+import { Fragment, useRef, useState, useEffect, useCallback } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { McpConnection } from "@/components/mcp-connection";
+import { McpDiscovery } from "@/components/mcp-discovery";
 import { fetchMcpTools, mcpError, runMcpCheck } from "@/lib/api/mcp";
 import { ApiRequestError } from "@/lib/api/client";
 import type {
@@ -19,7 +20,7 @@ interface TableProps {
   connectionsEnabled: boolean;
   checking: boolean;
   connectionError: string;
-  onRefresh: () => void;
+  onRefresh: (id: string) => Promise<void>;
 }
 
 export function McpTable(props: TableProps) {
@@ -73,6 +74,8 @@ function McpRow({
   const [retryUntil, setRetryUntil] = useState(0);
   const active = useRef(true);
   const pending = useRef(false);
+  const previousRevision = useRef(0);
+  const reloadPending = useRef(false);
   useEffect(() => {
     active.current = true;
     return () => {
@@ -95,14 +98,15 @@ function McpRow({
   const connection = connections[item.id];
   const statusError = connectionError || connection?.message;
 
-  async function loadTools() {
+  const loadTools = useCallback(async function load() {
     if (pending.current || Date.now() < retryUntil) return;
     pending.current = true;
     setLoading(true);
     setError("");
+    const requestedRevision = previousRevision.current;
     try {
       const result = await fetchMcpTools(item.id);
-      if (active.current) setTools(result);
+      if (active.current && requestedRevision === previousRevision.current) setTools(result);
     } catch (error) {
       if (active.current) {
         setError(mcpError(error));
@@ -112,6 +116,23 @@ function McpRow({
     } finally {
       pending.current = false;
       if (active.current) setLoading(false);
+      if (active.current && reloadPending.current) {
+        reloadPending.current = false;
+        void load();
+      }
+    }
+  }, [item.id, retryUntil]);
+
+  async function refreshRow() {
+    await onRefresh(item.id);
+    if (!active.current) return;
+    previousRevision.current += 1;
+    setTools(null);
+    setLastCheck(null);
+    setError("");
+    if (expanded) {
+      if (pending.current) reloadPending.current = true;
+      else void loadTools();
     }
   }
 
@@ -202,7 +223,18 @@ function McpRow({
         </td>
         <td className="px-4 py-3">
           {personal && item.permitted && connectionsEnabled && (
-            <McpConnection id={item.id} status={connection?.status} onRefresh={onRefresh} />
+            <McpConnection id={item.id} status={connection?.status} onRefresh={() => void refreshRow()} />
+          )}
+          {item.can_discover && (
+            <McpDiscovery id={item.id} initial={item.publication} onRefresh={() => void refreshRow()} />
+          )}
+          {!item.can_discover && item.permitted && item.publication && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              {item.publication.state === "published" ? "Tools published" :
+                item.publication.state === "error" ? "Publication failed" :
+                item.publication.state === "unavailable" ? "Publication status unavailable" :
+                "Tool discovery pending"}
+            </p>
           )}
           {!item.permitted && (
             <span className="text-xs text-muted-foreground">Ask an operator for access</span>
