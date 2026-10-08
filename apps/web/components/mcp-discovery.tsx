@@ -67,7 +67,7 @@ export function McpDiscovery({
     if (operation.current || Date.now() < retryUntil) return;
     const controller = new AbortController();
     // Re-read mutable cancellation state after awaits; do not narrow it across the loop.
-    const stopped = () => controller.signal.aborted;
+    const stopped = () => !active.current || controller.signal.aborted;
     operation.current = controller;
     setBusy(true);
     setDiscovering(discover);
@@ -78,7 +78,7 @@ export function McpDiscovery({
       let marker = discoveredAt;
       if (discover) {
         const result = await discoverMcp(id);
-        if (!active.current || stopped()) return;
+        if (stopped()) return;
         marker = result.discovered_at;
         setDiscoveredAt(marker);
         setDiscovering(false);
@@ -86,7 +86,7 @@ export function McpDiscovery({
         // Native discovery already mutated tools: invalidate now, not after polling.
         await refresh.current();
         refreshed = true;
-        if (!active.current || stopped()) return;
+        if (stopped()) return;
       }
       // Only read status. The operator independently reruns the existing setup Job.
       timeout = window.setTimeout(() => {
@@ -97,7 +97,7 @@ export function McpDiscovery({
         const requestedInitial = latestInitial.current;
         try {
           const result = await fetchMcpPublication(id, controller.signal);
-          if (!active.current || stopped()) return;
+          if (stopped()) return;
           const fresh = !marker || (result.checked_at !== null &&
             Date.parse(result.checked_at) > Date.parse(marker));
           const current = requestedInitial === latestInitial.current;
@@ -122,7 +122,7 @@ export function McpDiscovery({
         await wait(delay, controller.signal);
       }
     } catch (error) {
-      if (active.current && !stopped()) {
+      if (!stopped()) {
         setStatus({ state: "unavailable", checked_at: null, error_code: null });
         setError(error instanceof ApiRequestError && error.status === 409
           ? "Discovery is already running for this integration." : mcpError(error));

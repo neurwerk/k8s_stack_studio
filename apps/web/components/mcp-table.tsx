@@ -124,13 +124,14 @@ function McpRow({
   }, [item.id, retryUntil]);
 
   async function refreshRow() {
-    if (!active.current) return;
+    const mounted = () => active.current;
+    if (!mounted()) return;
     previousRevision.current += 1;
     setTools(null);
     setLastCheck(null);
     setError("");
     await onRefresh(item.id);
-    if (!active.current) return;
+    if (!mounted()) return;
     if (expanded) {
       if (pending.current) reloadPending.current = true;
       else void loadTools();
