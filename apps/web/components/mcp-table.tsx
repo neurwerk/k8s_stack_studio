@@ -18,6 +18,8 @@ interface TableProps {
   connectionsEnabled: boolean;
   checking: boolean;
   connectionError: string;
+  statusRetryUntil: Record<string, number>;
+  connectionRetryUntil: number;
   onRefresh: (id: string, discoveredAt?: string) => Promise<void>;
 }
 
@@ -73,16 +75,17 @@ function CheckedAt({ value }: { value: string }) {
   );
 }
 
-function McpRow({ item, connections, connectionsEnabled, checking, connectionError, onRefresh, pendingRefresh, state, onRecheck }:
+function McpRow({ item, connections, connectionsEnabled, checking, connectionError, connectionRetryUntil, statusRetryUntil, onRefresh, pendingRefresh, state, onRecheck }:
   TableProps & { item: McpCatalogEntry; state?: IntegrationChecks; onRecheck: () => void }) {
   const [expanded, setExpanded] = useState(false);
   // A clock only unlocks the manual action. It never starts another check.
   const [now, setNow] = useState(() => Date.now());
+  const retryUntil = Math.max(state?.retryUntil ?? 0, connectionRetryUntil, statusRetryUntil[item.id] ?? 0);
   useEffect(() => {
-    if (!state?.retryUntil) return;
-    const timer = window.setTimeout(() => { setNow(Date.now()); }, Math.max(0, state.retryUntil - Date.now()));
+    if (!retryUntil) return;
+    const timer = window.setTimeout(() => { setNow(Date.now()); }, Math.max(0, retryUntil - Date.now()));
     return () => { window.clearTimeout(timer); };
-  }, [state?.retryUntil]);
+  }, [retryUntil]);
   const personal = item.authentication_model === "individual-authentication";
   const connection = connections[item.id];
   const reason = pendingRefresh[item.id] ? "Refreshing integration…" : skipReason(item, connectionError ? undefined : connection);
@@ -96,6 +99,9 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
     .map((result) => `${result.display_label ?? "Account"}: ${result.display_value ?? ""}`))];
   const label = checking && personal && !connection && !connectionError
     ? "Checking connection…" : reason || summary.label;
+  const statusUnavailable = personal && connectionsEnabled &&
+    (!!connectionError || !connection || !!connection.message || connection.status === "status unavailable");
+  const unavailableErrors = [...new Set(Object.values(state?.checks ?? {}).flatMap((check) => check.error ? [check.error] : []))];
 
   return (
     <Fragment>
@@ -113,6 +119,7 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
         </td>
         <td className="min-w-56 space-y-1 px-4 py-3" aria-live="polite">
           <p className={`text-sm ${!reason && summary.failed ? "text-error" : "text-foreground"}`}>{label}</p>
+          {!reason && unavailableErrors.map((message) => <p key={message} className="max-w-sm text-xs text-muted-foreground">{message}</p>)}
           {accounts.map((account) => <p key={account} className="max-w-sm break-words text-sm">{account}</p>)}
           {checkedAt && <CheckedAt value={checkedAt} />}
           {personal && !reason && <p className="text-xs text-muted-foreground">
@@ -124,8 +131,9 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
         </td>
         <td className="px-4 py-3">
           <div className="flex flex-wrap items-start gap-2">
-            {!reason && <button type="button" className="btn btn-sm btn-outline"
-              disabled={!state || state.busy || now < state.retryUntil} onClick={onRecheck}>
+            {item.permitted && (!reason || statusUnavailable || pendingRefresh[item.id]) && <button type="button" className="btn btn-sm btn-outline"
+              disabled={!!pendingRefresh[item.id] || checking && personal || !!state?.busy || now < retryUntil}
+              onClick={() => { if (statusUnavailable) void onRefresh(item.id); else onRecheck(); }}>
               Recheck
             </button>}
             {personal && item.permitted && connectionsEnabled && <McpConnection id={item.id}
@@ -173,7 +181,7 @@ function prettyResult(value: string): string {
 }
 
 function ToolCheck({ check, value, busy }: { check: McpCheck; value?: CheckState; busy: boolean }) {
-  const failed = !!value?.error || value?.result?.status === "failed";
+  const failed = value?.result?.status === "failed";
   const parameters = Object.keys(check.arguments).length > 0;
   const result = value?.result?.result ? prettyResult(value.result.result) : "";
   return (
@@ -181,15 +189,15 @@ function ToolCheck({ check, value, busy }: { check: McpCheck; value?: CheckState
       <div className="flex items-center justify-between gap-4 text-xs">
         <span className="font-medium">{check.name}</span>
         <span className={failed ? "text-error" : "text-muted-foreground"}>
-          {failed ? "Failed" : value?.result ? "Passed" : value?.running ? "Checking…" : busy ? "Queued…" : "Not checked"}
+          {failed ? "Failed" : value?.error ? "Unavailable" : value?.result ? "Passed" : value?.running ? "Checking…" : busy ? "Queued…" : "Not checked"}
         </span>
       </div>
-      {(parameters || result || value?.error) && <details className="text-xs text-muted-foreground">
+      {value?.error && <p className="max-w-sm text-xs text-muted-foreground">{value.error}</p>}
+      {(parameters || result) && <details className="text-xs text-muted-foreground">
         <summary className="cursor-pointer">Details</summary>
         <div className="mt-2 space-y-3">
-          {value?.error && <p role="alert" className="max-w-sm text-error">{value.error}</p>}
-          {parameters && <div><p className="mb-1 font-medium">Fixed parameters</p><pre className="max-h-48 max-w-xl overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-card p-3">{JSON.stringify(check.arguments, null, 2)}</pre></div>}
-          {result && <div><p className="mb-1 font-medium">Result</p><pre className="max-h-64 max-w-xl overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-card p-3">{result}</pre></div>}
+          {parameters && <div><p className="mb-1 font-medium">Fixed parameters</p><pre className="max-h-48 max-w-xl overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-card p-3 font-mono">{JSON.stringify(check.arguments, null, 2)}</pre></div>}
+          {result && <div><p className="mb-1 font-medium">Result</p><pre className="max-h-64 max-w-xl overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-card p-3 font-mono">{result}</pre></div>}
         </div>
       </details>}
     </div>

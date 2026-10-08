@@ -7,6 +7,9 @@ import { ApiRequestError } from "@/lib/api/client";
 import { useVerifiedSession } from "@/lib/auth/session-context";
 import { McpTable } from "@/components/mcp-table";
 import { afterDiscovery } from "@/lib/mcp-checks";
+import { McpRefresh, waitForMcpRetry } from "@/lib/mcp-refresh";
+
+type RefreshResult = [PromiseSettledResult<McpCatalogEntry[]>, PromiseSettledResult<McpConnectionStatus | null>];
 
 export default function McpPage() {
   const session = useVerifiedSession();
@@ -32,33 +35,52 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const [checking, setChecking] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const [retryUntil, setRetryUntil] = useState(0);
+  const [statusRetryUntil, setStatusRetryUntil] = useState<Record<string, number>>({});
   const active = useRef(false);
   const inFlight = useRef(false);
-  const refreshing = useRef(new Map<string, Promise<void>>());
+  const refreshing = useRef(new Map<string, McpRefresh<RefreshResult | null>>());
   const connectionVersions = useRef<Record<string, number>>({});
   const publicationAfter = useRef<Record<string, string>>({});
+  const statusRetryDeadline = useRef<Record<string, number>>({});
+  const connectionRetryDeadline = useRef(0);
 
   function refreshIntegration(id: string, discoveredAt?: string): Promise<void> {
     if (discoveredAt) publicationAfter.current[id] = discoveredAt;
-    const pending = refreshing.current.get(id);
-    if (pending) return pending;
     setPendingRefresh((previous) => ({ ...previous, [id]: true }));
     connectionVersions.current[id] = (connectionVersions.current[id] ?? 0) + 1;
-    const operation = refreshOne(id).finally(() => {
-      refreshing.current.delete(id);
-      if (active.current) setPendingRefresh((previous) => ({ ...previous, [id]: false }));
+    let controller = refreshing.current.get(id);
+    if (!controller) {
+      controller = new McpRefresh();
+      refreshing.current.set(id, controller);
+    }
+    return controller.request(() => readIntegration(id), (results) => { acceptIntegration(id, results); }).finally(() => {
+      if (active.current && !controller.busy) setPendingRefresh((previous) => ({ ...previous, [id]: false }));
     });
-    refreshing.current.set(id, operation);
-    return operation;
   }
 
-  async function refreshOne(id: string) {
-    const results = await Promise.allSettled([
+  async function readIntegration(id: string): Promise<RefreshResult | null> {
+    const mounted = () => active.current;
+    await waitForMcpRetry(Math.max(connectionRetryDeadline.current, statusRetryDeadline.current[id] ?? 0));
+    if (!mounted()) return null;
+    const results: RefreshResult = await Promise.allSettled([
       fetchMcpCatalog(),
       connectionsEnabled && items.find((item) => item.id === id)?.authentication_model ===
         "individual-authentication" ? fetchMcpConnection(id) : Promise.resolve(null),
     ]);
-    if (!active.current) return;
+    // Even a superseded response can impose a rate limit on the follow-up read.
+    const seconds = Math.max(0, ...results.map((result) => result.status === "rejected" &&
+      result.reason instanceof ApiRequestError && result.reason.status === 429 ? result.reason.retryAfter ?? 60 : 0),
+      results[1].status === "fulfilled" ? results[1].value?.retry_after ?? 0 : 0);
+    if (seconds) {
+      const deadline = Math.max(statusRetryDeadline.current[id] ?? 0, Date.now() + seconds * 1000);
+      statusRetryDeadline.current[id] = deadline;
+      if (mounted()) setStatusRetryUntil((previous) => ({ ...previous, [id]: deadline }));
+    }
+    return results;
+  }
+
+  function acceptIntegration(id: string, results: RefreshResult | null) {
+    if (!active.current || !results) return;
     const [catalog, connection] = results;
     if (catalog.status === "fulfilled") {
       setItems((previous) => previous.flatMap((item) => {
@@ -77,8 +99,10 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
       setConnections((previous) => ({ ...previous, [id]: value }));
       setConnectionError("");
     } else if (connection.status === "rejected") {
+      const seconds = connection.reason instanceof ApiRequestError && connection.reason.status === 429
+        ? connection.reason.retryAfter ?? 60 : 0;
       setConnections((previous) => ({ ...previous, [id]: {
-        status: "status unavailable", checked_at: null, retry_after: null,
+        status: "status unavailable", checked_at: null, retry_after: seconds || null,
         message: mcpError(connection.reason),
       } }));
     }
@@ -110,13 +134,17 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
           0,
           ...Object.values(result).map((value) => value.retry_after ?? 0),
         );
-        if (seconds) setRetryUntil(Date.now() + seconds * 1000);
+        if (seconds) {
+          connectionRetryDeadline.current = Date.now() + seconds * 1000;
+          setRetryUntil(connectionRetryDeadline.current);
+        }
       }
     } catch (error) {
       if (active.current) {
         setConnectionError(mcpError(error));
         if (error instanceof ApiRequestError && error.status === 429) {
-          setRetryUntil(Date.now() + (error.retryAfter ?? 60) * 1000);
+          connectionRetryDeadline.current = Date.now() + (error.retryAfter ?? 60) * 1000;
+          setRetryUntil(connectionRetryDeadline.current);
         }
       }
     } finally {
@@ -211,6 +239,8 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
             connectionsEnabled={connectionsEnabled}
             checking={checking}
             connectionError={connectionError}
+            statusRetryUntil={statusRetryUntil}
+            connectionRetryUntil={retryUntil}
             onRefresh={refreshIntegration}
           />
         ) : (

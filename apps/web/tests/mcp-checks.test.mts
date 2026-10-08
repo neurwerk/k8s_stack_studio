@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { McpChecks, checkSummary, afterDiscovery } from "../lib/mcp-checks.ts";
+import { McpRefresh, waitForMcpRetry } from "../lib/mcp-refresh.ts";
 import type { McpCatalogEntry, McpTool, McpCheckResult, McpConnectionStatus } from "../lib/api/mcp";
 
 const entry = (id: string, extra: Partial<McpCatalogEntry> = {}): McpCatalogEntry => ({ id, name: `Fixture integration ${id}`, permitted: true,
@@ -70,7 +71,9 @@ void test("a later passed check cannot hide an earlier tool failure or request f
     checks.start(() => { /* No UI subscriber in this test. */ });
     checks.sync([entry("fixture")], {}, {});
     await settled(checks);
-    assert.deepEqual(checkSummary(checks.states.fixture), { label: "1 of 2 checks failed", failed: true });
+    assert.deepEqual(checkSummary(checks.states.fixture), transportFailure
+      ? { label: "1 of 2 checks unavailable", failed: false }
+      : { label: "1 of 2 checks failed", failed: true });
     checks.stop();
   }
 });
@@ -148,10 +151,73 @@ void test("Retry-After pauses remaining requests and does not retry the failed c
   context.mock.timers.tick(1);
   await settled(checks);
   assert.deepEqual(calls, ["first", "second"]);
-  assert.equal(checkSummary(checks.states.fixture).failed, true);
+  assert.deepEqual(checkSummary(checks.states.fixture), { label: "1 of 2 checks unavailable", failed: false });
   checks.recheck("fixture");
   await settled(checks);
   assert.deepEqual(calls, ["first", "second", "first", "second"]);
+  checks.stop();
+});
+
+void test("a Connect callback during an older refresh gets a fresh read, never stale checks", async () => {
+  const items = [entry("fixture", { authentication_model: "individual-authentication" })];
+  const unavailable: McpConnectionStatus = { status: "status unavailable", message: "Fixture status unavailable",
+    checked_at: null, retry_after: null };
+  let release: (value: McpConnectionStatus) => void = () => assert.fail("Read not started");
+  let reads = 0;
+  let calls = 0;
+  const accepted: string[] = [];
+  const checks = new McpChecks(driver({ check: () => { calls++; return Promise.resolve(passed); } }));
+  checks.start(() => { /* No UI subscriber in this test. */ });
+  checks.sync(items, { fixture: unavailable }, {});
+  await settled(checks);
+  assert.equal(calls, 0);
+  const refresh = new McpRefresh<McpConnectionStatus>();
+  const read = () => {
+    reads++;
+    return reads === 1 ? new Promise<McpConnectionStatus>((resolve) => { release = resolve; })
+      : Promise.resolve({ ...unavailable, status: "connected" as const, message: null });
+  };
+  const accept = (connection: McpConnectionStatus) => {
+    accepted.push(connection.status);
+    checks.sync(items, { fixture: connection }, { fixture: 1 });
+  };
+  const first = refresh.request(read, accept);
+  const callback = refresh.request(read, accept);
+  assert.equal(callback, first);
+  release({ ...unavailable, status: "connect required", message: null });
+  await callback;
+  await settled(checks);
+  assert.equal(reads, 2);
+  assert.deepEqual(accepted, ["connected"]);
+  assert.equal(calls, 2);
+  checks.stop();
+});
+
+void test("read-only saved-status retry waits for Retry-After and checks only a verified connection", async (context) => {
+  context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000 });
+  let reads = 0;
+  let calls = 0;
+  const items = [entry("fixture", { authentication_model: "individual-authentication" })];
+  const unavailable: McpConnectionStatus = { status: "status unavailable", message: "Fixture status unavailable",
+    checked_at: null, retry_after: 30 };
+  const checks = new McpChecks(driver({ check: () => { calls++; return Promise.resolve(passed); } }));
+  checks.start(() => { /* No UI subscriber in this test. */ });
+  checks.sync(items, { fixture: unavailable }, {});
+  const refresh = new McpRefresh<McpConnectionStatus>();
+  const retry = refresh.request(async () => {
+    await waitForMcpRetry(31_000);
+    reads++;
+    return { ...unavailable, status: "connected", message: null, retry_after: null };
+  }, (connection) => { checks.sync(items, { fixture: connection }, { fixture: 1 }); });
+  context.mock.timers.tick(29_999);
+  await tick();
+  assert.equal(reads, 0);
+  assert.equal(calls, 0);
+  context.mock.timers.tick(1);
+  await retry;
+  await settled(checks);
+  assert.equal(reads, 1);
+  assert.equal(calls, 2);
   checks.stop();
 });
 

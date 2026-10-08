@@ -43,14 +43,18 @@ export function skipReason(item: McpCatalogEntry, connection?: McpConnectionStat
 export function checkSummary(state?: IntegrationChecks): { label: string; failed: boolean } {
   if (!state) return { label: "Waiting for checks", failed: false };
   const values = Object.values(state.checks);
-  const failed = values.filter((value) => !!value.error || value.result?.status === "failed").length;
+  const failed = values.filter((value) => value.result?.status === "failed").length;
+  const unavailable = values.filter((value) => !!value.error).length;
   const total = state.tools?.reduce((count, tool) => count + Object.keys(tool.checks).length, 0) ?? 0;
-  if (failed) return { label: `${String(failed)} of ${String(total)} checks failed${state.busy ? " · checking…" : ""}`, failed: true };
+  const noun = total === 1 ? "check" : "checks";
+  const suffix = `${unavailable ? ` · ${String(unavailable)} unavailable` : ""}${state.busy ? " · checking…" : ""}`;
+  if (failed) return { label: `${String(failed)} of ${String(total)} ${noun} failed${suffix}`, failed: true };
+  if (unavailable) return { label: `${String(unavailable)} of ${String(total)} ${noun} unavailable${state.busy ? " · checking…" : ""}`, failed: false };
   if (state.busy) return { label: "Checking…", failed: false };
-  if (state.message) return { label: state.message, failed: true };
+  if (state.message) return { label: state.message, failed: false };
   if (!total) return { label: "No checks configured", failed: false };
   const passed = values.filter((value) => value.result?.status === "passed").length;
-  return { label: passed === total ? `${String(total)} checks passed` : `${String(passed)} of ${String(total)} checks completed`, failed: false };
+  return { label: passed === total ? `${String(total)} ${noun} passed` : `${String(passed)} of ${String(total)} ${noun} completed`, failed: false };
 }
 
 // One controller per page visit. Three integration workers; tool calls within each
