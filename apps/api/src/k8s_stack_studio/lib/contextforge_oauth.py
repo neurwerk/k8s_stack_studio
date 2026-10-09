@@ -194,10 +194,10 @@ class ContextForgeOAuthClient:
         except ValueError:
             raise ContextForgeAccountError from None
         if (
-            value.get("gateway_id") != item.gateway_id
+            value.get("gatewayId") != item.gateway_id
             or value.get("success") is not True
             or value.get("error") is not None
-            or value.get("validation_errors") != []
+            or value.get("validationErrors") != []
         ):
             raise ContextForgeAccountError
 

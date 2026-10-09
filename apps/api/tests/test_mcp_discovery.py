@@ -277,11 +277,12 @@ async def test_discovery_admission_transport_and_publication(tmp_path, monkeypat
     )
     requests = []
     native_status = 200
+    # Native GatewayRefreshResponse uses camelCase aliases on the wire.
     result = {
-        "gateway_id": "fixed-gateway",
+        "gatewayId": "fixed-gateway",
         "success": True,
         "error": None,
-        "validation_errors": [],
+        "validationErrors": [],
     }
 
     async def check_operator(self, who):
@@ -381,8 +382,17 @@ async def test_discovery_admission_transport_and_publication(tmp_path, monkeypat
                 native_status = upstream_status
                 result["success"] = False
                 assert (await client.post(path, json={})).status_code == expected
-            result.update(success=True, validation_errors=["private token"])
-            assert (await client.post(path, json={})).status_code == 502
+            result["success"] = True
+            for field, value in [
+                ("gatewayId", "other-gateway"),
+                ("error", "private token"),
+                ("validationErrors", ["private token"]),
+            ]:
+                original = result[field]
+                result[field] = value
+                response = await client.post(path, json={})
+                assert response.status_code == 502 and "private token" not in response.text
+                result[field] = original
             requests.clear()
             (data / "operator_subject").unlink()
             assert (await client.get("/api/me/mcp/catalog")).json()[0]["can_discover"] is False
