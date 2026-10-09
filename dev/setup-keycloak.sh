@@ -15,7 +15,7 @@ else
     -s registrationAllowed=false -s eventsEnabled=true
 fi
 
-for role in studio-user pii-admin opensearch-admin keycloak-admin api-key-admin langfuse-admin; do
+for role in studio-user pii-admin opensearch-admin keycloak-admin api-key-admin langfuse-admin mcp-admin; do
   if ! kc get "roles/$role" -r "$realm" >/dev/null 2>&1; then
     kc create roles -r "$realm" -s name="$role"
   fi
@@ -56,7 +56,7 @@ if [[ -z "$gateway_id" ]]; then
   gateway_id="$(kc create clients -r "$realm" -s clientId=agentgateway \
     -s enabled=true -s publicClient=false -s standardFlowEnabled=false -i)"
 fi
-for role in llm:invoke model:demo-model:invoke; do
+for role in llm:invoke model:demo-model:invoke mcp:context7:invoke mcp:brave:invoke mcp:github:invoke; do
   if ! kc get "clients/$gateway_id/roles/$role" -r "$realm" >/dev/null 2>&1; then
     kc create "clients/$gateway_id/roles" -r "$realm" -s name="$role"
   fi
@@ -87,11 +87,18 @@ for name in developer viewer no-access; do
     kc add-roles -r "$realm" --uid "$user_id" --rolename pii-admin \
       --rolename opensearch-admin --rolename keycloak-admin \
       --rolename api-key-admin --rolename langfuse-admin
+    kc add-roles -r "$realm" --uid "$user_id" --rolename mcp-admin
     kc add-roles -r "$realm" --uid "$user_id" --cid "$realm_management_id" \
       --rolename view-users --rolename query-users --rolename view-realm \
       --rolename view-clients --rolename view-events
     kc add-roles -r "$realm" --uid "$user_id" --cid "$gateway_id" \
-      --rolename llm:invoke --rolename model:demo-model:invoke
+      --rolename llm:invoke --rolename model:demo-model:invoke \
+      --rolename mcp:context7:invoke --rolename mcp:brave:invoke \
+      --rolename mcp:github:invoke
+  else
+    kc add-roles -r "$realm" --uid "$user_id" --cid "$gateway_id" \
+      --rolename llm:invoke --rolename mcp:context7:invoke \
+      --rolename mcp:brave:invoke --rolename mcp:github:invoke
   fi
 done
 

@@ -20,11 +20,12 @@ export default function McpPage() {
     <McpCatalog
       key={JSON.stringify([session.subject, session.agentgateway_roles])}
       connectionsEnabled={!!session.mcp_connections_available}
+      previewEnabled={process.env.NEXT_PUBLIC_STUDIO_MCP_PREVIEW === "true" && session.realm_roles.includes("mcp-admin")}
     />
   );
 }
 
-function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
+function McpCatalog({ connectionsEnabled, previewEnabled }: { connectionsEnabled: boolean; previewEnabled: boolean }) {
   const [items, setItems] = useState<McpCatalogEntry[]>([]);
   const [revisions, setRevisions] = useState<Record<string, number>>({});
   const [pendingRefresh, setPendingRefresh] = useState<Record<string, boolean>>({});
@@ -203,9 +204,6 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
     <div className="space-y-6 p-4 sm:p-6">
       <div>
         <h1 className="text-2xl font-semibold">MCP integrations</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Approved checks run automatically. Expand an integration to view tools and details.
-        </p>
       </div>
       {loading && (
         <p role="status" className="text-sm text-muted-foreground">
@@ -217,7 +215,7 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
           <span>{error}</span>
           <button
             type="button"
-            className="btn btn-sm btn-outline"
+            className="link link-primary text-sm"
             onClick={() => {
               setError("");
               setLoading(true);
@@ -232,6 +230,7 @@ function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
         !error &&
         (items.length ? (
           <McpTable
+            showDiscovery={!previewEnabled}
             items={items}
             connections={connections}
             revisions={revisions}

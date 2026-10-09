@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { KeyRound } from "lucide-react";
 import { connectMcp, mcpError } from "@/lib/api/mcp";
 import type { McpConnectionStatus } from "@/lib/api/mcp";
 
@@ -25,12 +26,17 @@ export function McpConnection({
   id,
   status,
   onRefresh,
+  appearance = "button",
+  confirmReauthorize = false,
 }: {
   id: string;
   status?: McpConnectionStatus["status"];
   onRefresh: () => void;
+  appearance?: "button" | "link";
+  confirmReauthorize?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
   const refresh = useRef(onRefresh);
   const active = useRef(true);
@@ -103,21 +109,38 @@ export function McpConnection({
   }
 
   return (
-    <div className="space-y-2">
-      <button
-        type="button"
-        className="btn btn-sm btn-outline"
-        disabled={busy}
-        onClick={() => void connect()}
-      >
-        {busy
-          ? "Authorizing…"
-          : status === "connected" || status === "refresh pending"
-            ? "Reauthorize"
-            : "Connect"}
-      </button>
+    <div className={appearance === "link" ? "flex flex-col items-start gap-1" : "space-y-2"}>
+      <div className={confirmReauthorize ? "flex flex-wrap justify-end gap-2" : ""}>
+        {confirming && <button type="button" className="btn btn-sm btn-ghost" disabled={busy}
+          onClick={() => { setConfirming(false); }}>
+          Cancel
+        </button>}
+        <button
+          type="button"
+          className={appearance === "link"
+            ? "link link-primary inline-flex h-4 items-center text-xs font-normal leading-4 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
+            : `btn btn-sm btn-outline${confirmReauthorize ? " w-36" : ""}`}
+          disabled={busy}
+          onClick={() => {
+            if (confirmReauthorize && !confirming && (status === "connected" || status === "refresh pending")) {
+              setConfirming(true);
+            } else {
+              setConfirming(false);
+              void connect();
+            }
+          }}
+        >
+          {confirmReauthorize && appearance === "button" && <KeyRound className="h-4 w-4" aria-hidden />}
+          {busy
+            ? "Authorizing…"
+            : confirming ? "Authorize"
+            : status === "connected" || status === "refresh pending"
+              ? "Reauthorize"
+              : "Connect"}
+        </button>
+      </div>
       {error && (
-        <p role="alert" className="max-w-xs text-xs text-error">
+        <p role="alert" className={appearance === "link" ? "max-w-xs text-xs text-error" : "max-w-xs text-sm text-error"}>
           {error}
         </p>
       )}

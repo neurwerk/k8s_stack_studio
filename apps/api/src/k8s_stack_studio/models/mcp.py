@@ -14,6 +14,35 @@ AuthenticationModel = Literal[
 ]
 
 
+class McpCredential(BaseModel):
+    """Chart-owned credential policy; provider secrets never appear in this model."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    owner: Literal["none", "shared", "individual"]
+    required: bool
+    method: Literal["none", "upstream-env", "gateway-header", "oauth"]
+    header: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
+
+    @model_validator(mode="after")
+    def validate_method(self) -> Self:
+        """Permit only supported secret delivery for each credential owner."""
+        if (
+            (self.owner, self.method)
+            not in {
+                ("none", "none"),
+                ("shared", "upstream-env"),
+                ("shared", "gateway-header"),
+                ("individual", "oauth"),
+            }
+            or (self.owner == "none" and self.required)
+            or (self.owner == "individual" and not self.required)
+            or (self.method == "gateway-header" and not self.header)
+        ):
+            raise ValueError("Invalid MCP credential policy")  # noqa: TRY003
+        return self
+
+
 def https_origin(value: str) -> str:
     """Project HTTPS metadata to the canonical origin used by the Base catalog."""
     url = urlsplit(value)
@@ -62,12 +91,15 @@ class McpRegistration(BaseModel):
     id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
     name: str = Field(min_length=1, max_length=100)
     authentication_model: AuthenticationModel
-    gateway_id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
+    credential: McpCredential | None = None
+    upstream_url: str = ""
+    native_url: str = ""
+    gateway_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
     server_id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
     oauth_authorization_origin: str = ""
-    approved_tools: list[str] = Field(default_factory=list, max_length=100)
+    approved_tools: list[str] = Field(default_factory=list, max_length=500)
     # Setup resolves original approved names to their exact gateway-visible names.
-    tool_names: dict[str, str] = Field(default_factory=dict, max_length=100)
+    tool_names: dict[str, str] = Field(default_factory=dict, max_length=500)
     checks: list[McpCheck] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
@@ -80,6 +112,32 @@ class McpRegistration(BaseModel):
             or any(not name or not wire for name, wire in self.tool_names.items())
         ):
             raise ValueError("MCP checks require unique approved tool mappings")  # noqa: TRY003
+        return self
+
+    @model_validator(mode="after")
+    def validate_credential(self) -> Self:
+        """Reject mixed per-user/shared credentials and credential-bearing URLs."""
+        if self.credential and (
+            (self.authentication_model == "individual-authentication")
+            != (self.credential.owner == "individual")
+            or (
+                self.authentication_model == "shared-authentication"
+                and self.credential.owner != "shared"
+            )
+        ):
+            raise ValueError("MCP credential ownership conflicts with authentication")  # noqa: TRY003
+        if self.upstream_url:
+            parsed = urlsplit(self.upstream_url)
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or any(character.isspace() or character == "\\" for character in self.upstream_url)
+            ):
+                raise ValueError("MCP upstream URL must be fixed and credential-free")  # noqa: TRY003
         return self
 
     @field_validator("oauth_authorization_origin")

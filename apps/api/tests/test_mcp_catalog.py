@@ -16,6 +16,41 @@ from k8s_stack_studio.lib.dependencies import get_settings
 from k8s_stack_studio.models.mcp import McpRegistration
 
 
+def test_chart_credential_policy_is_fixed():
+    base = {
+        "id": "context7",
+        "name": "Context7",
+        "authentication_model": "no-authentication",
+        "gateway_id": "gateway",
+        "server_id": "server",
+        "upstream_url": "https://mcp.example.test/mcp",
+    }
+    assert McpRegistration.model_validate(base).credential is None
+    item = McpRegistration.model_validate(
+        base
+        | {
+            "credential": {
+                "owner": "shared",
+                "required": False,
+                "method": "gateway-header",
+                "header": "CONTEXT7_API_KEY",
+            }
+        }
+    )
+    assert item.credential is not None and item.credential.required is False
+    for credential in (
+        {"owner": "individual", "required": True, "method": "oauth"},
+        {"owner": "shared", "required": False, "method": "oauth"},
+        {"owner": "none", "required": True, "method": "none"},
+    ):
+        with pytest.raises(ValueError):
+            McpRegistration.model_validate(base | {"credential": credential})
+    with pytest.raises(ValueError):
+        McpRegistration.model_validate(
+            base | {"upstream_url": "https://user:secret@mcp.example.test/mcp"}
+        )
+
+
 @pytest.mark.parametrize("unsafe_default", [False, True])
 async def test_native_account_preparation_boundary(unsafe_default, caplog):
     """Only verified permissioned emails can activate a least-privilege native account."""

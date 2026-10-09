@@ -64,6 +64,37 @@ MIGRATIONS = (
         ADD COLUMN show_no_faces boolean,
         ADD COLUMN show_detected_faces boolean,
         ADD COLUMN show_unscanned_faces boolean;""",
+    """CREATE TABLE mcp_setups (
+        integration_id text PRIMARY KEY,
+        revision bigint NOT NULL DEFAULT 0,
+        selected_tools jsonb NOT NULL DEFAULT '[]',
+        published_tools jsonb NOT NULL DEFAULT '{}',
+        publication_uncertain boolean NOT NULL DEFAULT false,
+        published_at timestamptz,
+        enabled boolean NOT NULL DEFAULT false,
+        key_configured boolean NOT NULL DEFAULT false,
+        credential_version text NOT NULL DEFAULT '',
+        binding text NOT NULL DEFAULT '',
+        refreshed_at timestamptz,
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        actor text NOT NULL DEFAULT ''
+    );
+    CREATE TABLE mcp_operations (
+        id uuid PRIMARY KEY,
+        integration_id text NOT NULL REFERENCES mcp_setups(integration_id),
+        kind text NOT NULL CHECK (kind IN ('publish', 'disable', 'refresh')),
+        state text NOT NULL CHECK (state IN ('queued', 'applying', 'succeeded', 'failed')),
+        phase text NOT NULL,
+        actor text NOT NULL,
+        request jsonb NOT NULL,
+        credential_version text NOT NULL DEFAULT '',
+        error_code text,
+        started_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX mcp_one_active_operation ON mcp_operations(integration_id)
+        WHERE state IN ('queued', 'applying');
+    CREATE INDEX mcp_operation_history ON mcp_operations(integration_id, started_at DESC);""",
 )
 
 

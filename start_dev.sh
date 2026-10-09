@@ -23,7 +23,11 @@ if ! docker --context default info >/dev/null 2>&1; then
   exit 1
 fi
 python3 "$root/dev/init-env.py"
-compose=(docker --context default compose --project-name studio-dev \
+project=studio-dev
+if [[ "$root" == */.worktrees/* ]]; then
+  project="$(basename "$root")"
+fi
+compose=(docker --context default compose --project-name "${STUDIO_DEV_PROJECT:-$project}" \
   --env-file "$root/.dev-local/credentials.env" -f "$root/docker-compose.dev.yaml")
 case "$action" in
   stop|down|ps) exec "${compose[@]}" "$action" ;;

@@ -23,6 +23,7 @@ class SessionResponse(BaseModel):
     llm_logs_available: bool
     mcp_catalog_available: bool = False
     mcp_connections_available: bool = False
+    mcp_setup_available: bool = False
 
 
 @router.get("")
@@ -39,4 +40,5 @@ async def get_session(
         llm_logs_available=settings.llm_logs_enabled,
         mcp_catalog_available=settings.mcp_catalog_enabled,
         mcp_connections_available=settings.mcp_connections_enabled,
+        mcp_setup_available=settings.mcp_setup_enabled,
     )

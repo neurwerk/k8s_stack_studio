@@ -44,6 +44,8 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
   const currentUserId = useCurrentUserId();
   const session = useVerifiedSession();
   const llmLogsAvailable = session.llm_logs_available;
+  const isMcpAdmin = session.realm_roles.includes("mcp-admin") &&
+    (session.mcp_setup_available || (session.mcp_catalog_available && process.env.NEXT_PUBLIC_STUDIO_MCP_PREVIEW === "true"));
   const configurationActive = ["/policy-engine", "/notices", "/api-keys", "/mcp"].includes(pathname);
   const [configurationOpen, setConfigurationOpen] = useState(configurationActive);
 
@@ -79,6 +81,13 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
             {!collapsed && <span className="hidden sm:inline">LLM &amp; MCP logs</span>}
           </Link>
         )}
+        {(isAdmin || isOpensearchAdmin || isMcpAdmin) && (
+          <div role="separator" aria-label="Admin" className="mx-3 my-3 flex items-center gap-2">
+            <span className="h-px flex-1 bg-sidebar-border" aria-hidden />
+            {!collapsed && <span className="hidden text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 sm:inline">Admin</span>}
+            {!collapsed && <span className="hidden h-px flex-1 bg-sidebar-border sm:block" aria-hidden />}
+          </div>
+        )}
         {isAdmin && (
           <Link
             href="/users"
@@ -97,7 +106,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
         {isOpensearchAdmin && (
           <Link
             href="/logs"
-            aria-label="Admin logs"
+            aria-label="Logs"
             aria-current={pathname === "/logs" ? "page" : undefined}
             className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
               pathname === "/logs"
@@ -106,9 +115,21 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
             }`}
           >
             <FileSearch className="h-5 w-5 shrink-0" />
-            {!collapsed && <span className="hidden sm:inline">Admin logs</span>}
+            {!collapsed && <span className="hidden sm:inline">Logs</span>}
           </Link>
         )}
+        {isMcpAdmin && (
+            <Link href="/admin/mcp" aria-label="MCP Setup"
+              aria-current={pathname === "/admin/mcp" ? "page" : undefined}
+              className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                pathname === "/admin/mcp"
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+              }`}>
+              <Settings className="h-5 w-5 shrink-0" />
+              {!collapsed && <span className="hidden sm:inline">MCP Setup</span>}
+            </Link>
+          )}
       </nav>
 
       {/* Settings */}
