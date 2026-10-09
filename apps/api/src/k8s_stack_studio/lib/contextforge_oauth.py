@@ -168,9 +168,10 @@ class ContextForgeOAuthClient:
 
     async def discover(self, item: McpRegistration) -> None:
         """Refresh only the approved gateway using this caller's native saved token."""
-        if item.authentication_model != "individual-authentication":
+        if item.authentication_model == "individual-authentication":
+            await self.check_registration(item)
+        elif not self.settings.mcp_setup_enabled:
             raise ContextForgeAccountError
-        await self.check_registration(item)
         request = httpx.Request(
             "POST",
             self.settings.contextforge_url.rstrip("/")

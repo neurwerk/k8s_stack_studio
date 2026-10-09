@@ -282,7 +282,7 @@ function LogsView({ queryString }: { queryString: string }) {
   return (
     <div className="mx-auto max-w-[1600px] p-4 sm:p-6">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Admin logs</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Logs</h1>
         <span className="text-sm text-muted-foreground">
           {loading
             ? "Loading…"

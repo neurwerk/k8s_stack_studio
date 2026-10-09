@@ -7,15 +7,15 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 
 from k8s_stack_studio.config.settings import Settings
-from k8s_stack_studio.controllers.mcp import router
+from k8s_stack_studio.controllers.mcp import _tool_admission, router
 from k8s_stack_studio.lib.auth import StudioAdmissionMiddleware, StudioPrincipal
 from k8s_stack_studio.lib.contextforge import ContextForgeAccountClient, ContextForgeAccountError
 from k8s_stack_studio.lib.dependencies import get_settings
 from k8s_stack_studio.lib.mcp_publication import PublicationUnavailableError, publication_snapshot
-from k8s_stack_studio.models.mcp import McpRegistration
+from k8s_stack_studio.models.mcp import McpPublicationStatus, McpRegistration
 
 
 def configured_projection(tmp_path):
@@ -105,6 +105,33 @@ def test_live_atomic_projection_and_fail_closed(tmp_path, monkeypatch):
         publication_snapshot(settings)
     settings.contextforge_publication_status_path = ""
     assert publication_snapshot(settings) == (settings, {})
+
+
+def test_personal_tool_checks_require_live_publication(tmp_path):
+    settings, data = configured_projection(tmp_path)
+    settings.mcp_gateway_url = "https://gateway.example.test"
+    principal = StudioPrincipal(
+        "reader",
+        frozenset({"studio-user"}),
+        frozenset({"llm:invoke", "mcp:github:invoke"}),
+        {},
+    )
+    for state in ("pending-discovery", "error", "unavailable"):
+        request = Request({"type": "http"})
+        request.state.mcp_publication = {"github": McpPublicationStatus(state=state)}
+        with pytest.raises(HTTPException) as denied:
+            _tool_admission("github", principal, settings, request)
+        assert denied.value.status_code == 404
+    publication = json.loads((data / "publication.json").read_text())
+    publication["integrations"][0]["state"] = "published"
+    (data / "publication.json").write_text(json.dumps(publication))
+    catalog = json.loads((data / "studio.json").read_text())
+    catalog[0]["tool_names"] = {"read": "github_read"}
+    (data / "studio.json").write_text(json.dumps(catalog))
+    live, statuses = publication_snapshot(settings)
+    request = Request({"type": "http"})
+    request.state.mcp_publication = statuses
+    assert _tool_admission("github", principal, live, request).id == "github"
 
 
 @pytest.mark.parametrize(

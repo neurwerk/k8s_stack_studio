@@ -135,6 +135,8 @@ services:
     build:
       context: .
       dockerfile: dev/Dockerfile.api
+    # Development-only entry point: the release image still uses the real MCP controllers.
+    command: [uv, run, --no-sync, uvicorn, "mcp_preview:create_app", --factory, --host, 0.0.0.0, --port, "4010", --reload, --reload-dir, /workspace/apps/api/src, --reload-dir, /workspace/apps/api/mcp_preview.py]
     environment:
       K8S_STUDIO_KEYCLOAK_SERVER_URL: http://keycloak:8080
       K8S_STUDIO_KEYCLOAK_REALM: studio-dev
@@ -156,6 +158,7 @@ services:
       K8S_STUDIO_LANGFUSE_SECRET_KEY: sk-lf-studio-dev
     volumes:
       - ./apps/api/src:/workspace/apps/api/src:ro
+      - ./dev/mcp_preview.py:/workspace/apps/api/mcp_preview.py:ro
       - ./.dev-local/tls:/tls:ro
     ports:
       - "127.0.0.1:4010:4010"
@@ -184,6 +187,7 @@ services:
       context: .
       dockerfile: dev/Dockerfile.web
     environment:
+      NEXT_PUBLIC_STUDIO_MCP_PREVIEW: "true"
       OIDC_AUTHORITY: http://localhost:4081/realms/studio-dev
       OIDC_CLIENT_ID: studio
       STUDIO_API_URL: http://api:4010

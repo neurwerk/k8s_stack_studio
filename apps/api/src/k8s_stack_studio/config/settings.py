@@ -224,6 +224,30 @@ class Settings(BaseSettings):
     # Resolved only from the trusted setup projection, never from browser input.
     contextforge_operator_role_id: str = ""
     contextforge_publication_status_path: str = ""
+    mcp_setup_enabled: bool = False
+    mcp_openbao_url: str = "https://infra-openbao.infra-openbao.svc.cluster.local:8200"
+    mcp_openbao_ca_cert: str = "/var/run/contextforge/ca.crt"
+    mcp_openbao_token_file: str = "/var/run/mcp-identity/openbao-token"  # noqa: S105 -- file path
+    mcp_kubernetes_url: str = "https://kubernetes.default.svc"
+    mcp_kubernetes_token_file: str = "/var/run/mcp-identity/kubernetes-token"  # noqa: S105 -- file path
+    mcp_kubernetes_ca_cert: str = "/var/run/mcp-identity/ca.crt"
+    mcp_provider_admin_url: str = (
+        "http://contextforge-providers.infra-agentgateway.svc.cluster.local:15000"
+    )
+
+    @model_validator(mode="after")
+    def validate_mcp_setup(self) -> Self:
+        """Runtime management is an explicit compatible-chart and database opt-in."""
+        if self.mcp_setup_enabled and (
+            not self.notice_dsn
+            or not self.contextforge_admin_discovery_enabled
+            or not self.contextforge_publication_status_path
+            or not self.mcp_openbao_url.startswith("https://")
+            or not self.mcp_kubernetes_url.startswith("https://")
+            or any(item.credential is None or not item.upstream_url for item in self.mcp_catalog)
+        ):
+            raise InvalidContextForgeAccountConfigError
+        return self
 
     @field_validator("mcp_gateway_url")
     @classmethod
@@ -487,7 +511,8 @@ class Settings(BaseSettings):
             or (callback.scheme, callback.netloc) != (studio.scheme, studio.netloc)
             or (not individual and not self.contextforge_publication_status_path)
             or any(not item.oauth_authorization_origin for item in individual)
-            or len({item.gateway_id for item in self.mcp_catalog}) != len(self.mcp_catalog)
+            or len({item.gateway_id for item in self.mcp_catalog if item.gateway_id})
+            != sum(bool(item.gateway_id) for item in self.mcp_catalog)
             or len({item.server_id for item in self.mcp_catalog}) != len(self.mcp_catalog)
         ):
             raise InvalidContextForgeOAuthConfigError

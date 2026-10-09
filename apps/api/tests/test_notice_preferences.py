@@ -90,7 +90,7 @@ async def test_migration_appends_columns_and_preserves_existing_rows(monkeypatch
     assert ("CREATE TABLE notice_users" in " ".join(statements)) == (starting_version == 0)
     assert connection.execute.await_args_list[-1].args == (
         "INSERT INTO notice_schema_version (version) VALUES ($1)",
-        2,
+        len(notice_store.MIGRATIONS),
     )
 
 

@@ -29,7 +29,7 @@ from k8s_stack_studio.lib.mcp_gateway import (
     gateway_client,
     run_check,
 )
-from k8s_stack_studio.lib.mcp_publication import PublicationUnavailableError, publication_snapshot
+from k8s_stack_studio.lib.mcp_publication import PublicationUnavailableError, personal_snapshot
 from k8s_stack_studio.models.mcp import (
     McpCatalogEntry,
     McpCheckResult,
@@ -52,9 +52,9 @@ class PrepareAccountRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-def _live_settings(request: Request, settings: Settings = Depends(get_settings)) -> Settings:
+async def _live_settings(request: Request, settings: Settings = Depends(get_settings)) -> Settings:
     try:
-        live, publication = publication_snapshot(settings)
+        live, publication = await personal_snapshot(settings)
     except PublicationUnavailableError:
         raise HTTPException(
             status_code=502,
@@ -260,7 +260,7 @@ async def connection_statuses(
 
 
 def _tool_admission(
-    integration_id: str, principal: StudioPrincipal, settings: Settings
+    integration_id: str, principal: StudioPrincipal, settings: Settings, request: Request
 ) -> McpRegistration:
     if not (
         settings.mcp_catalog_enabled
@@ -273,6 +273,13 @@ def _tool_admission(
         raise HTTPException(status_code=404, detail="MCP integration is not available")
     if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
+    # The chart's live publication snapshot is an access boundary, not just a
+    # display hint. A pending/error integration must never run personal checks.
+    if settings.contextforge_publication_status_path and (
+        request.state.mcp_publication.get(item.id) is None
+        or request.state.mcp_publication[item.id].state != "published"
+    ):
+        raise HTTPException(status_code=404, detail="MCP tools are not published")
     return item
 
 
@@ -312,7 +319,7 @@ async def list_tools(
 ) -> list[McpTool]:
     """User-requested discovery prepares their account, never uses an operator token."""
     response.headers["Cache-Control"] = "no-store"
-    item = _tool_admission(integration_id, principal, settings)
+    item = _tool_admission(integration_id, principal, settings, request)
     authorization = await _prepare_tool_caller(request, principal, settings)
     try:
         async with gateway_client(settings.mcp_gateway_url, item, authorization) as client:
@@ -333,7 +340,7 @@ async def check_tool(
 ) -> McpCheckResult:
     """Execute only the chart-selected tool and arguments; no browser tool inputs."""
     response.headers["Cache-Control"] = "no-store"
-    item = _tool_admission(integration_id, principal, settings)
+    item = _tool_admission(integration_id, principal, settings, request)
     if not 0 <= check_id < len(item.checks):
         raise HTTPException(status_code=404, detail="MCP check is not configured")
     authorization = await _prepare_tool_caller(request, principal, settings)
@@ -392,7 +399,8 @@ async def get_catalog(
             authentication_model=item.authentication_model,
             permitted={"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles,
             can_discover=(
-                (_named_operator(principal, settings) or _discovery_admin(principal, settings))
+                not settings.mcp_setup_enabled
+                and (_named_operator(principal, settings) or _discovery_admin(principal, settings))
                 and item.authentication_model == "individual-authentication"
                 and {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles
             ),
@@ -421,7 +429,7 @@ async def publication_status(
     if not {"llm:invoke", f"mcp:{integration_id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     try:
-        _, statuses = publication_snapshot(settings)
+        _, statuses = await personal_snapshot(settings)
         if integration_id not in statuses:
             raise HTTPException(status_code=404, detail="MCP integration is not available")
         return statuses[integration_id]
@@ -440,6 +448,8 @@ async def discover(
 ) -> McpDiscoverResponse:
     """Explicit administrator discovery using only the verified caller's own connection."""
     response.headers["Cache-Control"] = "no-store"
+    if settings.mcp_setup_enabled:
+        raise HTTPException(status_code=404, detail="Refresh tools from MCP Setup")
     if not (
         settings.contextforge_operator_discovery_enabled
         or settings.contextforge_admin_discovery_enabled

@@ -143,11 +143,11 @@ export function McpDiscovery({
     (publication.checked_at !== null && Date.parse(publication.checked_at) > Date.parse(discoveredAt)));
   return (
     <div className="space-y-2" aria-live="polite">
-      <button type="button" className="btn btn-sm btn-outline" disabled={busy || !!retryUntil}
+      <button type="button" className="link link-primary inline-flex h-4 items-center text-xs font-normal leading-4 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50" disabled={busy || !!retryUntil}
         onClick={() => void run(true)}>
         {busy ? discovering ? "Discovering…" : "Checking publication…" : "Discover tools"}
       </button>
-      {publication && <p className="max-w-xs text-xs text-muted-foreground">
+      {publication && <p className="max-w-xs text-xs text-foreground">
         {published ? "Tools published" :
           publication.state === "error" ? "Publication failed. Check the setup Job." :
           publication.state === "unavailable" ? "Publication status unavailable" :
@@ -155,7 +155,7 @@ export function McpDiscovery({
           "Tool discovery pending"}
       </p>}
       {!busy && discoveredAt && !published && (
-        <button type="button" className="btn btn-xs btn-ghost" disabled={!!retryUntil}
+        <button type="button" className="link link-primary text-xs font-normal leading-4 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50" disabled={!!retryUntil}
           onClick={() => void run(false)}>Check publication</button>
       )}
       {error && <p role="alert" className="max-w-xs text-xs text-error">{error}</p>}

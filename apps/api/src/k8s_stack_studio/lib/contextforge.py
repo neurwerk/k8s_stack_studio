@@ -23,6 +23,9 @@ INVOCATION_PERMISSIONS = frozenset(
 PROVISIONING_PERMISSIONS = frozenset(
     {"admin.user_management", "teams.read", "teams.manage_members"}
 )
+PUBLISHING_PERMISSIONS = frozenset(
+    {"servers.create", "servers.read", "servers.update", "tools.read", "gateways.read"}
+)
 DISCOVERY_ROLE_NAME = "contextforge-tool-discovery"
 DISCOVERY_ROLE_MARKER = "neurwerk-contextforge/setup-v1/admin-discovery"
 DISCOVERY_GRANT_SECONDS = 120
@@ -181,7 +184,10 @@ class ContextForgeAccountClient:
             ):
                 raise ContextForgeAccountError
             permissions.update(cast("list[str]", actual))
-        if permissions != PROVISIONING_PERMISSIONS:
+        expected = PROVISIONING_PERMISSIONS | (
+            PUBLISHING_PERMISSIONS if self.settings.mcp_setup_enabled else frozenset()
+        )
+        if permissions != expected:
             raise ContextForgeAccountError
         await self._ensure_membership(email, created=False, expected_role="owner")
 

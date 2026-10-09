@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.exceptions import PiiEngineTlsConfigError
+from k8s_stack_studio.lib.mcp_credentials import McpActivation, McpCredentials
 
 
 def _create_client(verify: str | bool = True, *, trust_env: bool = True) -> httpx.AsyncClient:
@@ -85,6 +86,15 @@ async def http_client_lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.contextforge_oauth_client = await stack.enter_async_context(
                 _create_client(verify=settings.contextforge_ca_cert or True, trust_env=False)
             )
+        if settings.mcp_setup_enabled:
+            bao = await stack.enter_async_context(
+                _create_client(verify=settings.mcp_openbao_ca_cert, trust_env=False)
+            )
+            kube = await stack.enter_async_context(
+                _create_client(verify=settings.mcp_kubernetes_ca_cert, trust_env=False)
+            )
+            app.state.mcp_credentials = McpCredentials(settings, bao)
+            app.state.mcp_activation = McpActivation(settings, kube, app.state.agentgateway_client)
         yield
 
 

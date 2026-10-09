@@ -8,6 +8,7 @@ export interface VerifiedSession {
   llm_logs_available: boolean;
   mcp_catalog_available?: boolean;
   mcp_connections_available?: boolean;
+  mcp_setup_available?: boolean;
 }
 
 export async function fetchSession(): Promise<VerifiedSession> {

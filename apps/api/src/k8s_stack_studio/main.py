@@ -7,13 +7,16 @@ Runs two separate ASGI apps on different ports:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version as get_version
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -22,12 +25,14 @@ from starlette.status import (
     HTTP_504_GATEWAY_TIMEOUT,
 )
 
+from k8s_stack_studio import mcp_worker
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.controllers.admin import router as admin_router
 from k8s_stack_studio.controllers.api_keys import router as api_keys_router
 from k8s_stack_studio.controllers.llm_logs import router as llm_logs_router
 from k8s_stack_studio.controllers.logs import router as logs_router
 from k8s_stack_studio.controllers.mcp import router as mcp_router
+from k8s_stack_studio.controllers.mcp_setup import router as mcp_setup_router
 from k8s_stack_studio.controllers.notice_preferences import router as notice_router
 from k8s_stack_studio.controllers.oauth_callback import router as oauth_callback_router
 from k8s_stack_studio.controllers.policy_engine import router as policy_engine_router
@@ -81,7 +86,18 @@ def create_app() -> FastAPI:
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         _logger.info("Studio API starting (authenticated)")
         async with http_client_lifespan(_app):
-            yield
+            worker = (
+                asyncio.create_task(mcp_worker.run(_app, settings))
+                if settings.mcp_setup_enabled
+                else None
+            )
+            try:
+                yield
+            finally:
+                if worker:
+                    worker.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await worker
         _logger.info("Studio API shutting down")
 
     app = FastAPI(
@@ -115,7 +131,15 @@ def create_app() -> FastAPI:
     app.include_router(session_router)
     app.include_router(notice_router)
     app.include_router(mcp_router)
+    app.include_router(mcp_setup_router)
     app.include_router(oauth_callback_router)
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation(request: Request, exc: RequestValidationError) -> JSONResponse:
+        # Pydantic's default errors can echo input containing an entered API key.
+        if request.url.path.startswith("/api/admin/mcp"):
+            return JSONResponse(status_code=422, content={"detail": "Invalid MCP setup request"})
+        return await request_validation_exception_handler(request, exc)
 
     # --- Version endpoint (unauthenticated, public) ---
     @app.get("/api/version")

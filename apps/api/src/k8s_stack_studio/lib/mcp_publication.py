@@ -6,8 +6,10 @@ import re
 from datetime import timedelta
 from pathlib import Path
 
+import asyncpg
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from k8s_stack_studio import mcp_store
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.models.mcp import McpPublicationStatus, McpRegistration
 
@@ -111,11 +113,14 @@ def _snapshot(
         or len(ids) != len(catalog)
         or not ids <= {item.id for item in publication.integrations}
         or len(publication.integrations) != len({item.id for item in publication.integrations})
-        or len({item.gateway_id for item in catalog}) != len(catalog)
+        or len({item.gateway_id for item in catalog if item.gateway_id})
+        != sum(bool(item.gateway_id) for item in catalog)
         or len({item.server_id for item in catalog}) != len(catalog)
     ):
         raise PublicationUnavailableError
     statuses = _statuses(publication)
+    if settings.mcp_setup_enabled and _read(directory, "setup_mode") != "studio-v1":
+        raise PublicationUnavailableError
     if any(status.state != "error" for identity, status in statuses.items() if identity not in ids):
         raise PublicationUnavailableError
     for item in catalog:
@@ -171,3 +176,47 @@ def publication_snapshot(settings: Settings) -> tuple[Settings, dict[str, McpPub
         raise PublicationUnavailableError from None
     else:
         return result
+
+
+async def personal_snapshot(settings: Settings) -> tuple[Settings, dict[str, McpPublicationStatus]]:
+    """Overlay verified Studio publication; bootstrap never supplies user selections."""
+    live, statuses = publication_snapshot(settings)
+    if not settings.mcp_setup_enabled:
+        return live, statuses
+    try:
+        states = await mcp_store.setups(settings.notice_dsn)
+    except (asyncpg.PostgresError, OSError, TimeoutError, ValueError):
+        raise PublicationUnavailableError from None
+    catalog = []
+    for item in live.mcp_catalog:
+        state = states.get(item.id, {})
+        uncertain = state.get("publication_uncertain", False)
+        available = (
+            bool(item.gateway_id)
+            and statuses[item.id].state != "error"
+            and (not state or state.get("binding") in {"", mcp_store.binding(item)})
+        )
+        ready = (
+            available
+            and not uncertain
+            and state.get("binding") == mcp_store.binding(item)
+            and state.get("enabled", False)
+            and bool(state.get("published_tools"))
+        )
+        tools = state["published_tools"] if ready else {}
+        catalog.append(
+            item.model_copy(
+                update={
+                    "approved_tools": list(tools),
+                    "tool_names": tools,
+                    "checks": [check for check in item.checks if check.tool in tools],
+                }
+            )
+        )
+        statuses[item.id] = McpPublicationStatus(
+            state="unavailable"
+            if uncertain or not available
+            else ("published" if ready else "pending-discovery"),
+            checked_at=state.get("published_at"),
+        )
+    return live.model_copy(update={"mcp_catalog": catalog}), statuses
