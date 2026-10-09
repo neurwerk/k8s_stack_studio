@@ -168,10 +168,10 @@ class Native:
             return httpx.Response(
                 self.refresh_status,
                 json={
-                    "gateway_id": "gateway-" + identity,
+                    "gatewayId": "gateway-" + identity,
                     "success": True,
                     "error": None,
-                    "validation_errors": [],
+                    "validationErrors": [],
                 },
             )
         if path.startswith("/servers/"):
