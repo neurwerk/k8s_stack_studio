@@ -64,7 +64,7 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
       if (requestId === keyRequestId.current) setKeys(data);
     } catch {
       if (requestId === keyRequestId.current)
-        setError("Unable to load API keys. Please try again.");
+        setError("Unable to load Neurwerk access keys. Please try again.");
     } finally {
       if (requestId === keyRequestId.current) setLoading(false);
     }
@@ -196,7 +196,7 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
         }
       }
     } catch {
-      setPermissionsError("Unable to create the API key. Please try again.");
+      setPermissionsError("Unable to create the Neurwerk access key. Please try again.");
     } finally {
       setCreating(false);
     }
@@ -210,7 +210,7 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
       if (noticeKeyId === keyId) setNoticeKeyId(null);
       await loadKeys();
     } catch {
-      setError("Unable to revoke the API key. Please try again.");
+      setError("Unable to revoke the Neurwerk access key. Please try again.");
     } finally {
       setActionLoading(null);
     }
@@ -219,8 +219,8 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
   return (
     <section className="card mt-6 border border-border bg-card p-6" aria-labelledby="api-keys-heading">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        {asPage ? <h1 id="api-keys-heading" className="text-2xl font-semibold tracking-tight">API Keys</h1>
-          : <h2 id="api-keys-heading" className="text-lg font-semibold tracking-tight">API Keys</h2>}
+        {asPage ? <h1 id="api-keys-heading" className="text-2xl font-semibold tracking-tight">Neurwerk access keys</h1>
+          : <h2 id="api-keys-heading" className="text-lg font-semibold tracking-tight">Neurwerk access keys</h2>}
         {canManage && (
           <button
             type="button"
@@ -228,10 +228,15 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
             className="btn btn-primary btn-sm gap-1.5"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
-            Create API key
+            Create access key
           </button>
         )}
       </div>
+
+      <p className="mb-4 text-sm text-muted-foreground">
+        These keys identify callers to the AI Gateway. Personal or company provider credentials are separate.
+        Each key retains its own permission grants, expiry and revocation.
+      </p>
 
       {error && (
         <div
@@ -260,7 +265,7 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
             void handleCreate();
           }}
         >
-          <h3 className="text-sm font-semibold">Create API key</h3>
+          <h3 className="text-sm font-semibold">Create Neurwerk access key</h3>
           <p id="api-key-immutable-help" className="mt-1 text-sm text-muted-foreground">
             Permissions and expiry are immutable. Create a replacement key if these settings need to
             change.
@@ -435,7 +440,7 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
           className="card mb-4 border border-success bg-base-100 p-4 text-sm"
           role="status"
         >
-          <p className="font-semibold">API key created</p>
+          <p className="font-semibold">Neurwerk access key created</p>
           <p className="mt-2 break-all font-mono text-xs">{newKeyResult.api_key}</p>
           <p className="mt-2 text-xs">Permissions: {newKeyResult.permissions.join(", ")}</p>
           {createdExpiryDays !== null && (
@@ -469,14 +474,14 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
           role="status"
           aria-live="polite"
         >
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> Loading API keys...
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> Loading Neurwerk access keys...
         </div>
       )}
 
       {!loading && keys.length === 0 && !error && !showCreateForm && (
         <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
           <KeyIcon className="mb-2 h-8 w-8" aria-hidden="true" />
-          <p className="text-sm">No API keys yet</p>
+          <p className="text-sm">No Neurwerk access keys yet</p>
         </div>
       )}
 

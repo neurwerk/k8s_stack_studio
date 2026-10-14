@@ -17,6 +17,19 @@ from k8s_stack_studio.lib.auth import StudioAdmissionMiddleware, StudioPrincipal
 from k8s_stack_studio.lib.dependencies import get_agentgateway
 
 
+def legacy_fields(value):
+    """Keep assertions on the old calendar/metric contract; test additions separately."""
+    if isinstance(value, list):
+        return [legacy_fields(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: legacy_fields(item)
+            for key, item in value.items()
+            if key not in {"accounting", "request_scope"}
+        }
+    return value
+
+
 class DailyTestState(TypedDict):
     now: datetime
     principal: StudioPrincipal | None
@@ -107,7 +120,7 @@ async def test_daily_default_contract_and_sequential_runs(daily_api):
     assert len(body["days"]) == 30
     assert len(payloads) == 4
     assert [day["date"] for day in body["days"]] == sorted(day["date"] for day in body["days"])
-    assert body["days"][0]["models"] == [
+    assert legacy_fields(body["days"][0]["models"]) == [
         {"model": None, "requests": 1, "total_tokens": 0, "cost_usd": 0.0},
         {"model": "model-a", "requests": 3, "total_tokens": 80, "cost_usd": 0.0},
         {"model": "model-b", "requests": 2, "total_tokens": 100, "cost_usd": 0.25},
@@ -119,7 +132,11 @@ async def test_daily_default_contract_and_sequential_runs(daily_api):
     assert payloads[-1]["timeRange"]["to"] == "2026-11-02T12:00:00Z"
     for payload in payloads:
         assert payload["filters"] == {"attributes": {"agentgateway.user": "self"}}
-        assert payload["groupBy"] == [{"field": "requestModel"}]
+        assert payload["groupBy"] == [
+            {"field": "requestModel"},
+            {"field": "attributes", "key": "neurwerk.token_usage_known"},
+            {"field": "attributes", "key": "neurwerk.cost_known"},
+        ]
         assert "bucketCount" not in payload
 
 
@@ -183,7 +200,7 @@ async def test_people_returns_sorted_attributed_users_without_upstream_metadata(
     )
     response = await client.get("/api/usage/people?start=2026-10-25&end=2026-10-25")
     assert response.status_code == 200
-    assert response.json() == {
+    assert legacy_fields(response.json()) == {
         "timezone": "Europe/Berlin",
         "start_date": "2026-10-25",
         "end_date": "2026-10-25",
@@ -193,7 +210,11 @@ async def test_people_returns_sorted_attributed_users_without_upstream_metadata(
         ],
     }
     assert "filters" not in payloads[0]
-    assert payloads[0]["groupBy"] == [{"field": "attributes", "key": "agentgateway.user"}]
+    assert payloads[0]["groupBy"] == [
+        {"field": "attributes", "key": "agentgateway.user"},
+        {"field": "attributes", "key": "neurwerk.token_usage_known"},
+        {"field": "attributes", "key": "neurwerk.cost_known"},
+    ]
     assert "filterOptions" not in response.text
 
 
@@ -308,7 +329,7 @@ async def test_daily_maps_sparse_model_buckets_not_run_totals(daily_api):
     response = await client.get("/api/users/self/usage/daily?start=2026-06-01&end=2026-06-04")
     assert response.status_code == 200
     assert len(payloads) == 1
-    assert response.json()["days"] == [
+    assert legacy_fields(response.json()["days"]) == [
         {"date": "2026-06-01", "models": []},
         {
             "date": "2026-06-02",
@@ -330,7 +351,7 @@ async def test_daily_partial_fractional_span_combines_clamped_buckets(daily_api)
     assert len(payloads) == 1
     assert payloads[0]["bucketSeconds"] == 86400
     assert payloads[0]["timeRange"]["to"] == "2026-11-02T12:00:00.500000Z"
-    assert response.json()["days"][0]["models"] == [
+    assert legacy_fields(response.json()["days"][0]["models"]) == [
         {"model": None, "requests": 2, "total_tokens": 0, "cost_usd": 0.0},
         {"model": "model-a", "requests": 6, "total_tokens": 160, "cost_usd": 0.0},
         {"model": "model-b", "requests": 4, "total_tokens": 200, "cost_usd": 0.5},
@@ -433,7 +454,7 @@ async def test_daily_preserves_skipped_calendar_date(daily_api, start, end, labe
         if day["date"] == "2011-12-30":
             assert day["models"] == []
         else:
-            assert day["models"][2] == {
+            assert legacy_fields(day["models"][2]) == {
                 "model": "model-b",
                 "requests": 2,
                 "total_tokens": 100,
@@ -610,3 +631,103 @@ async def test_daily_rejects_invalid_summary_structure(daily_api, summary):
     state["response"] = httpx.Response(200, json=summary)
     response = await client.get("/api/users/self/usage/daily?start=2026-11-02")
     assert response.status_code == 502
+
+
+@pytest.mark.parametrize("route", ["/api/users/self/usage/daily", "/api/usage/people"])
+async def test_mixed_completeness_groups_recombine_without_losing_reported_usage(daily_api, route):
+    client, payloads, state = daily_api
+    state["principal"] = StudioPrincipal(
+        "self", frozenset({"studio-user", "langfuse-admin"}), frozenset(), {}
+    )
+    dimension = (
+        {"requestModel": "model-a"} if route.endswith("daily") else {"agentgateway.user": "self"}
+    )
+    groups = [
+        {
+            "group": {
+                **dimension,
+                "neurwerk.token_usage_known": "true",
+                "neurwerk.cost_known": "true",
+            },
+            "requests": 2,
+            "totalTokens": 10,
+            "cost": 0.0,
+        },
+        {
+            "group": {
+                **dimension,
+                "neurwerk.token_usage_known": "false",
+                "neurwerk.cost_known": "true",
+            },
+            "requests": 1,
+            "totalTokens": 7,
+            "cost": 0.25,
+        },
+        {"group": dimension, "requests": 3, "totalTokens": 5, "cost": 0.5},
+    ]
+    state["response"] = httpx.Response(
+        200,
+        json={
+            "bucketSeconds": 86400,
+            "groups": groups,
+            "buckets": [{"start": "2026-10-30T23:00:00Z", **item} for item in groups],
+        },
+    )
+    response = await client.get(
+        route,
+        params={
+            "start": "2026-10-31",
+            "end": "2026-10-31",
+            "provider_credential_source": "caller_supplied",
+            "billing_classification": "unknown",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    rows = body["days"][0]["models"] if route.endswith("daily") else body["users"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["requests"] == 6 and row["request_scope"] == "native_llm_records"
+    assert row["total_tokens"] == 22 and row["cost_usd"] == 0.75
+    assert row["accounting"] == {
+        "tokens": {
+            "state": "partial",
+            "reported_sum": 22,
+            "complete_total": None,
+            "known_records": 2,
+            "total_records": 6,
+        },
+        "cost_usd": {
+            "state": "partial",
+            "reported_sum": 0.75,
+            "complete_total": None,
+            "known_records": 3,
+            "total_records": 6,
+        },
+    }
+    attrs = payloads[0]["filters"]["attributes"]
+    assert attrs["neurwerk.provider_credential_source"] == "caller_supplied"
+    assert attrs["neurwerk.billing_classification"] == "unknown"
+    if route.endswith("daily"):
+        assert attrs["agentgateway.user"] == "self"
+
+
+@pytest.mark.parametrize(
+    "route", ["/api/users/self/usage/daily", "/api/users/self/usage", "/api/usage/people"]
+)
+async def test_usage_filters_cannot_select_owner_or_arbitrary_attributes(daily_api, route):
+    client, payloads, state = daily_api
+    state["principal"] = StudioPrincipal(
+        "self", frozenset({"studio-user", "langfuse-admin"}), frozenset(), {}
+    )
+    for params in (
+        {"userId": "other"},
+        {"attributes": '{"agentgateway.user":"other"}'},
+        {"billing_classification": "free"},
+        {"provider_id": "x" * 256},
+        {"provider_credential_source": "personal"},
+        {"request_id": "a\nb"},
+    ):
+        assert (await client.get(route, params=params)).status_code == 422
+    assert payloads == []

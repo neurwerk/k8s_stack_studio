@@ -29,6 +29,7 @@ from k8s_stack_studio import mcp_worker
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.controllers.admin import router as admin_router
 from k8s_stack_studio.controllers.api_keys import router as api_keys_router
+from k8s_stack_studio.controllers.gateway import router as gateway_router
 from k8s_stack_studio.controllers.llm_logs import router as llm_logs_router
 from k8s_stack_studio.controllers.logs import router as logs_router
 from k8s_stack_studio.controllers.mcp import router as mcp_router
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(policy_engine_router)
     app.include_router(admin_router)
     app.include_router(api_keys_router)
+    app.include_router(gateway_router)
     app.include_router(logs_router)
     app.include_router(llm_logs_router)
     app.include_router(usage_router)

@@ -1,12 +1,29 @@
 /** Typed API wrapper for per-user call, token, and cost usage. */
 
 import { apiGet } from "@/lib/api/client";
+import { gatewayParams } from "@/lib/api/gateway-metadata";
+import type { GatewayFilters } from "@/lib/api/gateway-metadata";
+
+export interface UsageMetric {
+  state: "known" | "partial" | "unknown";
+  reported_sum: number;
+  complete_total: number | null;
+  known_records: number;
+  total_records: number;
+}
+
+export interface UsageAccounting {
+  tokens: UsageMetric;
+  cost_usd: UsageMetric;
+}
 
 /** Aggregated usage for a calendar or rolling period. */
 export interface UsagePeriod {
   requests: number;
   total_tokens: number;
   cost_usd: number;
+  request_scope?: "native_llm_records";
+  accounting?: UsageAccounting;
 }
 
 /** Usage across all periods shown in Studio. */
@@ -60,9 +77,10 @@ export function fetchUserDailyUsage(
   userId: string,
   range?: UsageDateRange,
   signal?: AbortSignal,
+  filters: GatewayFilters = {},
 ): Promise<UserDailyUsage> {
   const path = `/users/${encodeURIComponent(userId)}/usage/daily`;
-  const params = range ? { start: range.start, end: range.end } : undefined;
+  const params = { ...range, ...gatewayParams(filters) };
   return signal ? apiGet<UserDailyUsage>(path, params, signal) : apiGet<UserDailyUsage>(path, params);
 }
 
@@ -70,15 +88,16 @@ export function fetchUserDailyUsage(
 export function fetchAllDailyUsage(
   range?: UsageDateRange,
   signal?: AbortSignal,
+  filters: GatewayFilters = {},
 ): Promise<UserDailyUsage> {
   return apiGet<UserDailyUsage>(
     "/usage/daily",
-    range ? { start: range.start, end: range.end } : undefined,
+    { ...range, ...gatewayParams(filters) },
     signal,
   );
 }
 
 /** Active principals for the admin selector and per-person breakdown. */
-export function fetchUsagePeople(range: UsageDateRange, signal?: AbortSignal): Promise<UsagePeople> {
-  return apiGet<UsagePeople>("/usage/people", { start: range.start, end: range.end }, signal);
+export function fetchUsagePeople(range: UsageDateRange, signal?: AbortSignal, filters: GatewayFilters = {}): Promise<UsagePeople> {
+  return apiGet<UsagePeople>("/usage/people", { ...range, ...gatewayParams(filters) }, signal);
 }

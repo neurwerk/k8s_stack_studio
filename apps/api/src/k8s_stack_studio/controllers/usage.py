@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from k8s_stack_studio.lib.agentgateway import (
     AgentGatewayClient,
@@ -17,15 +17,19 @@ from k8s_stack_studio.lib.dependencies import (
     get_current_user_id,
     require_role,
 )
+from k8s_stack_studio.models.gateway_metadata import GatewayFilters, UsageQuery
 from k8s_stack_studio.models.usage import DailyUsageResponse, UsagePeopleResponse, UsageResponse
 
-router = APIRouter(prefix="/api/users", tags=["usage"])
-aggregate_router = APIRouter(prefix="/api/usage", tags=["usage"])
 
-CalendarDate = Annotated[str | None, Query(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")]
+def _no_store(response: Response) -> None:
+    response.headers["Cache-Control"] = "no-store"
 
 
-def _parse_dates(start: CalendarDate, end: CalendarDate) -> tuple[date | None, date | None]:
+router = APIRouter(prefix="/api/users", tags=["usage"], dependencies=[Depends(_no_store)])
+aggregate_router = APIRouter(prefix="/api/usage", tags=["usage"], dependencies=[Depends(_no_store)])
+
+
+def _parse_dates(start: str | None, end: str | None) -> tuple[date | None, date | None]:
     """Parse calendar dates identically for self and admin views."""
     try:
         return (
@@ -62,15 +66,14 @@ async def _require_self_or_usage_admin(user_id: str, request: Request) -> None:
 @router.get("/{user_id}/usage/daily", response_model=DailyUsageResponse)
 async def get_user_daily_usage(
     user_id: str,
-    start: CalendarDate = None,
-    end: CalendarDate = None,
+    filters: Annotated[UsageQuery, Query()],
     _: None = Depends(_require_self_or_usage_admin),
     agentgateway: AgentGatewayClient = Depends(get_agentgateway),
 ) -> DailyUsageResponse:
     """Return inclusive per-model days; default to 30 days ending today, maximum 90."""
-    start_date, end_date = _parse_dates(start, end)
+    start_date, end_date = _parse_dates(filters.start, filters.end)
     try:
-        return await agentgateway.fetch_daily_usage(user_id, start_date, end_date)
+        return await agentgateway.fetch_daily_usage(user_id, start_date, end_date, filters)
     except InvalidUsageRangeError as error:
         raise _invalid_range(error) from error
     except AgentGatewayUsageError as error:
@@ -79,15 +82,14 @@ async def get_user_daily_usage(
 
 @aggregate_router.get("/daily", response_model=DailyUsageResponse)
 async def get_all_daily_usage(
-    start: CalendarDate = None,
-    end: CalendarDate = None,
+    filters: Annotated[UsageQuery, Query()],
     _: None = Depends(require_role("langfuse-admin")),
     agentgateway: AgentGatewayClient = Depends(get_agentgateway),
 ) -> DailyUsageResponse:
     """Aggregate daily model usage; only usage admins may omit the user filter."""
-    start_date, end_date = _parse_dates(start, end)
+    start_date, end_date = _parse_dates(filters.start, filters.end)
     try:
-        return await agentgateway.fetch_all_daily_usage(start_date, end_date)
+        return await agentgateway.fetch_all_daily_usage(start_date, end_date, filters)
     except InvalidUsageRangeError as error:
         raise _invalid_range(error) from error
     except AgentGatewayUsageError as error:
@@ -96,15 +98,14 @@ async def get_all_daily_usage(
 
 @aggregate_router.get("/people", response_model=UsagePeopleResponse)
 async def get_usage_people(
-    start: CalendarDate = None,
-    end: CalendarDate = None,
+    filters: Annotated[UsageQuery, Query()],
     _: None = Depends(require_role("langfuse-admin")),
     agentgateway: AgentGatewayClient = Depends(get_agentgateway),
 ) -> UsagePeopleResponse:
     """List only active attributed principals for the admin picker and chart."""
-    start_date, end_date = _parse_dates(start, end)
+    start_date, end_date = _parse_dates(filters.start, filters.end)
     try:
-        return await agentgateway.fetch_user_breakdown(start_date, end_date)
+        return await agentgateway.fetch_user_breakdown(start_date, end_date, filters)
     except InvalidUsageRangeError as error:
         raise _invalid_range(error) from error
     except AgentGatewayUsageError as error:
@@ -114,11 +115,12 @@ async def get_usage_people(
 @router.get("/{user_id}/usage", response_model=UsageResponse)
 async def get_user_usage(
     user_id: str,
+    filters: Annotated[GatewayFilters, Query()],
     _: None = Depends(_require_self_or_usage_admin),
     agentgateway: AgentGatewayClient = Depends(get_agentgateway),
 ) -> UsageResponse:
     """Return call, token, and cost usage for one Keycloak user UUID."""
     try:
-        return await agentgateway.fetch_usage(user_id)
+        return await agentgateway.fetch_usage(user_id, filters)
     except AgentGatewayUsageError as error:
         raise _usage_unavailable(error) from error

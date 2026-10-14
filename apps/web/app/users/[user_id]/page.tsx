@@ -237,9 +237,9 @@ function UserDetail({ userId }: { userId: string }) {
         </div>
       ) : canManageKeys ? (
         <div className="card border border-border bg-card p-6">
-          <h1 className="text-xl font-semibold">API key management</h1>
+          <h1 className="text-xl font-semibold">Neurwerk access key management</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage API keys for user <span className="break-all font-mono text-xs">{userId}</span>.
+            Manage Neurwerk access keys for user <span className="break-all font-mono text-xs">{userId}</span>.
           </p>
         </div>
       ) : null}

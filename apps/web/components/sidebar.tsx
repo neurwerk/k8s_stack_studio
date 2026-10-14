@@ -9,6 +9,7 @@ import {
   FileSearch,
   KeyRound,
   LogOut,
+  Network,
   Plug,
   ScrollText,
   Settings,
@@ -43,6 +44,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
   const isPiiAdmin = useIsPiiAdmin();
   const currentUserId = useCurrentUserId();
   const session = useVerifiedSession();
+  const isGatewayAdmin = session.realm_roles.includes("gateway-admin");
   const llmLogsAvailable = session.llm_logs_available;
   const isMcpAdmin = session.realm_roles.includes("mcp-admin") &&
     (session.mcp_setup_available || (session.mcp_catalog_available && process.env.NEXT_PUBLIC_STUDIO_MCP_PREVIEW === "true"));
@@ -53,6 +55,16 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
     <>
       {/* Main navigation */}
       <nav aria-label="Main" className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+        <Link href="/gateway" aria-label="AI Gateway"
+          aria-current={pathname === "/gateway" ? "page" : undefined}
+          className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+            pathname === "/gateway"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+              : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+          }`}>
+          <Network className="h-5 w-5 shrink-0" />
+          {!collapsed && <span className="hidden sm:inline">AI Gateway</span>}
+        </Link>
         <Link
           href="/usage"
           aria-label="Usage"
@@ -81,12 +93,24 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
             {!collapsed && <span className="hidden sm:inline">LLM &amp; MCP logs</span>}
           </Link>
         )}
-        {(isAdmin || isOpensearchAdmin || isMcpAdmin) && (
+        {(isAdmin || isOpensearchAdmin || isMcpAdmin || isGatewayAdmin) && (
           <div role="separator" aria-label="Admin" className="mx-3 my-3 flex items-center gap-2">
             <span className="h-px flex-1 bg-sidebar-border" aria-hidden />
             {!collapsed && <span className="hidden text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 sm:inline">Admin</span>}
             {!collapsed && <span className="hidden h-px flex-1 bg-sidebar-border sm:block" aria-hidden />}
           </div>
+        )}
+        {isGatewayAdmin && (
+          <Link href="/admin/gateway" aria-label="Gateway administration"
+            aria-current={pathname === "/admin/gateway" ? "page" : undefined}
+            className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              pathname === "/admin/gateway"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            }`}>
+            <Network className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">Gateway</span>}
+          </Link>
         )}
         {isAdmin && (
           <Link
@@ -216,7 +240,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
                   {!collapsed && <span className="hidden sm:inline">MCP integrations</span>}
                 </Link>
               )}
-              <Link href="/api-keys" aria-label="API Keys"
+              <Link href="/api-keys" aria-label="Neurwerk access keys"
                 aria-current={pathname === "/api-keys" ? "page" : undefined}
                 className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
                   pathname === "/api-keys"
@@ -224,7 +248,7 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
                     : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
                 }`}>
                 <KeyRound className="h-5 w-5 shrink-0" />
-                {!collapsed && <span className="hidden sm:inline">API Keys</span>}
+                {!collapsed && <span className="hidden sm:inline">Neurwerk access keys</span>}
               </Link>
               {isPiiAdmin && (
                 <Link href="/policy-engine" aria-label="PII Policy"

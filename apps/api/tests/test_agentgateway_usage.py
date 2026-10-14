@@ -16,6 +16,7 @@ from k8s_stack_studio.controllers.usage import (
 )
 from k8s_stack_studio.lib.agentgateway import AgentGatewayClient
 from k8s_stack_studio.lib.auth import StudioPrincipal
+from k8s_stack_studio.models.gateway_metadata import GatewayFilters
 
 
 @pytest.fixture
@@ -89,7 +90,10 @@ async def test_fetch_usage_sends_nine_sequential_utc_summaries(
         == {
             "timeRange": {"from": start, "to": end},
             "filters": {"attributes": {"agentgateway.user": "user-1"}},
-            "groupBy": [],
+            "groupBy": [
+                {"field": "attributes", "key": "neurwerk.token_usage_known"},
+                {"field": "attributes", "key": "neurwerk.cost_known"},
+            ],
             "bucketCount": 1,
         }
         for payload, (start, end) in zip(payloads, expected_ranges, strict=True)
@@ -98,6 +102,8 @@ async def test_fetch_usage_sends_nine_sequential_utc_summaries(
     assert usage.total.requests == 7
     assert usage.this_month.total_tokens == 340
     assert usage.last_24_hours.cost_usd == 0.0
+    assert usage.last_24_hours.accounting.cost_usd.state == "unknown"
+    assert usage.last_24_hours.accounting.cost_usd.complete_total is None
 
 
 @pytest.mark.asyncio
@@ -113,6 +119,44 @@ async def test_fetch_usage_treats_empty_groups_as_zero(
     assert usage.total.cost_usd == 0.0
 
 
+@pytest.mark.parametrize(
+    ("flags", "tokens", "cost", "state", "complete_tokens", "complete_cost"),
+    [
+        (
+            {"neurwerk.token_usage_known": "true", "neurwerk.cost_known": "true"},
+            0,
+            0.0,
+            "known",
+            0,
+            0.0,
+        ),
+        (
+            {"neurwerk.token_usage_known": False, "neurwerk.cost_known": False},
+            0,
+            0.0,
+            "unknown",
+            None,
+            None,
+        ),
+        ({}, 12, 0.25, "unknown", None, None),
+    ],
+)
+async def test_period_known_zero_is_distinct_from_historical_or_unknown(
+    agentgateway_settings, flags, tokens, cost, state, complete_tokens, complete_cost
+):
+    group = {"group": flags, "requests": 3, "totalTokens": tokens, "cost": cost}
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=_summary(groups=[group])))
+    ) as client:
+        result = await AgentGatewayClient(agentgateway_settings, client).fetch_usage("self")
+    for period in result.model_dump().values():
+        assert period["accounting"]["tokens"]["state"] == state
+        assert period["accounting"]["tokens"]["complete_total"] == complete_tokens
+        assert period["accounting"]["cost_usd"]["complete_total"] == complete_cost
+        assert period["accounting"]["tokens"]["reported_sum"] == tokens
+        assert period["accounting"]["cost_usd"]["reported_sum"] == cost
+
+
 async def _assert_safe_502(
     settings: Settings,
     handler,
@@ -120,7 +164,7 @@ async def _assert_safe_502(
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         gateway = AgentGatewayClient(settings, client)
         with pytest.raises(HTTPException) as error:
-            await get_user_usage("user-1", None, gateway)
+            await get_user_usage("user-1", GatewayFilters(), None, gateway)
 
     assert error.value.status_code == 502
     assert error.value.detail == "Usage analytics are temporarily unavailable."

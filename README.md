@@ -102,12 +102,171 @@ for interface work, not evidence that a deployed gateway or provider works.
 ### Validation
 
 Run the complete API lint/format/type/pytest checks from `.github/workflows/quality.yml`
-and `pnpm lint`, `pnpm typecheck`, `pnpm --filter web test:mcp`, `pnpm build`.
+and `pnpm lint`, `pnpm typecheck`, `pnpm --filter web test:mcp`,
+`pnpm --filter web test:gateway`, `pnpm build`.
 Set `MCP_SETUP_TEST_DATABASE_URL` to an isolated local PostgreSQL database for the
 production-handler/worker tests; each test creates and removes its own schema.
 CI supplies PostgreSQL. These tests exercise actual setup handlers, authorization,
 native publication and restart/concurrency logic, with external HTTP transports
 mocked; they do not use the development preview router.
+
+## AI Gateway presentation
+
+`/gateway` presents the caller's permitted models, MCP integrations and
+applications. `/admin/gateway` additionally requires `gateway-admin` and shows
+complete configuration plus desired/observed revisions. This visibility role
+does not grant invocation or another user's activity. Existing key management
+uses the term **Neurwerk access keys**; provider credentials are a separate choice.
+
+Base owns the schema-1 JSON documents mounted read-only using these exact variables:
+
+| Environment variable | Document |
+| --- | --- |
+| `STUDIO_GATEWAY_CATALOG_FILE` | `catalog.json`: effective endpoints, destinations and operation profiles |
+| `STUDIO_GATEWAY_STATUS_FILE` | Optional `status.json`: observed revisions, freshness and health |
+| `STUDIO_GATEWAY_TRUST_FILE` | `snapshots.json`: public inspection roots and retained bundles |
+| `STUDIO_GATEWAY_TRUST_REQUIRED_VERSION` | Optional exact 64-character lowercase bundle SHA-256 readiness floor |
+
+Paths default to unconfigured. Studio stores no routing database and receives no
+signing key. Catalog/status sibling reads resolve a projected volume's `..data`
+once. Separate volumes are joined only by matching catalog and policy revisions.
+Each read is limited to 1 MiB; the catalog permits 32 endpoints, 500 destinations,
+128 profiles, and 64 operations per profile. Destination identities are unique
+within their kind; endpoint and profile identities are unique in the catalog.
+URLs must be credential-free HTTPS (HTTP is accepted only for exact loopback
+development addresses). Required permissions are all-of checks on the verified
+AgentGateway grants; credential modes add their own all-of checks. Personal
+responses exclude unentitled destinations and all unreferenced configuration
+and observations. Both authenticated APIs return `Cache-Control: no-store`.
+
+Status has `schema_version`, `catalog_revision`, `applied_policy_revision`,
+`observed_at`, `valid_until`, `endpoints: [{id, state}]`, and
+`profiles: [{id, revision, state}]`. States are `available`, `unavailable` or
+`unknown`. Missing, invalid, future-dated, expired or mismatched evidence is
+unknown; profile health additionally requires its exact revision. Operation
+support is a separate declared property, never a promise that arbitrary website
+flows are inspected. API failures expose fixed messages, not document contents.
+
+### Public inspection roots
+
+Only exact `GET`/`HEAD` download routes bypass both authentication boundaries:
+
+- `/api/gateway/trust/manifest.json` describes current and retained versions.
+- `/api/gateway/trust/bundle.pem` downloads the current PEM bundle.
+- `/api/gateway/trust/bundles/<sha256>.pem` downloads a content-addressed bundle.
+- `/api/gateway/trust/certificates/<sha256>.cer` downloads one certificate as DER.
+
+The complete publication is validated before any asset is served: one CA root
+per PEM field, self-signature, DER fingerprint, unique snapshot versions and
+fingerprints, canonical PEM bundle digest, and current-version membership.
+Intermediates, leaf certificates and private-key material are rejected. Certificate
+validity dates are derived from DER; retained expired roots remain downloadable
+and their dates remain visible. A bundle version equals its canonical PEM SHA-256.
+The manifest exposes `not_before`/`not_after` and no PEM text or filesystem paths.
+Publications are bounded to 64 retained versions and 16 roots per version, within
+the 1 MiB document limit. Only one validated document is cached in process, keyed
+by its exact bytes; every request reads the current file and a bad update never
+falls back to stale good data.
+
+Current manifest/bundle responses use `no-store`; immutable assets use
+`public, max-age=86400, immutable`, exact content lengths, SHA-256 ETags and
+`nosniff`. Missing publication returns 503; an unknown asset in a valid
+publication returns 404. Studio's hostname TLS must be independently trusted.
+The publisher must first distribute retained immutable assets to every replica,
+then advance the current pointer, retaining former-current versions for at least
+31 days or the workstation update window plus one day, whichever is longer.
+Certificates remain while any retained version references them. Root retirement
+and signer readiness are separate Base operations.
+
+When the optional floor is set, **every trust GET/HEAD returns 503** until the
+fully validated snapshot contains that version. No floor preserves existing
+startup behavior. Base uses the API container's
+`/api/gateway/trust/bundles/<required-version>.pem` as its readiness probe
+(initial trust without a floor uses `/api/gateway/trust/bundle.pem`); startup
+and liveness remain `/api/version`. The separate management process has no new
+settings or health route. Stage retained assets, roll the required-version setting,
+verify every serving replica's immutable bundle bytes/digest, then promote current.
+503 responses are fixed and `no-store`, with no paths or configuration contents.
+Expiration does not invalidate retained downloads. Current-root health is shown
+as unavailable when a root is expired or not yet valid; publication, certificate
+validity and loaded-signer health remain separate. Retention is not an instruction
+to install an expired root.
+
+### Usage and personal activity additions (0.18.0)
+
+Existing usage routes keep their authorization and numeric fields:
+`GET /api/users/{user_id}/usage`, `GET /api/users/{user_id}/usage/daily`,
+`GET /api/usage/daily` and
+`GET /api/usage/people`. Self usage is allowed; other principals and aggregate
+usage require `langfuse-admin`. All successful responses are `no-store`.
+`POST /api/me/llm-activity` remains opt-in and strictly self-only, even for admins.
+
+All usage query strings and the activity JSON body accept only these optional
+classification fields, mapped to the identical `neurwerk.<field>` attribute:
+
+| Field | Accepted values |
+| --- | --- |
+| `entry_mode` | `api`, `forward_proxy` |
+| `destination_kind` | `model`, `mcp`, `application` |
+| `provider_credential_source` | `company`, `caller_supplied`, `none` |
+| `billing_classification` | `company_api`, `personal_api`, `subscription`, `unknown` |
+| `destination_id`, `provider_id`, `binding_id`, `protocol_profile`, `operation_id`, `policy_revision`, `requested_model`, `resolved_model`, `request_id` | One exact nonempty string, at most 255 characters, no whitespace/control characters |
+
+Unknown fields, arbitrary metadata/filter objects and caller-selected identities
+are rejected. Calendar routes retain `start`/`end`; activity retains `q`, `type`
+(`all`, `llm`, `mcp`) and its paired timestamp bounds. Selected metadata filters
+are ANDed as exact equality; missing historical attributes do not match a selected
+value, including explicit `unknown` billing. Clear filters to include those rows.
+The server always supplies `agentgateway.user` for a user usage route and `userId`
+for activity; every activity result is checked against that owner and the filters.
+
+Every period, daily model row and person total adds:
+
+```json
+{
+  "request_scope": "native_llm_records",
+  "accounting": {
+    "tokens": {"state": "partial", "reported_sum": 22, "complete_total": null, "known_records": 2, "total_records": 6},
+    "cost_usd": {"state": "unknown", "reported_sum": 0, "complete_total": null, "known_records": 0, "total_records": 6}
+  }
+}
+```
+
+`state` is `known` only when all selected native records have that metric's true
+completeness flag; a mix is `partial`, otherwise `unknown`. Zero selected records
+have known zero totals. `complete_total` is numeric only for `known`;
+`reported_sum` retains all native contributions, including reported legacy retry
+usage. Existing `requests`, `total_tokens`, `cost_usd` remain native record counts
+and reported sums for API compatibility. They are not a distinct logical-request
+or attempt ledger. The UI labels reported chart sums separately and shows unknown
+or partial totals rather than treating absent cost as free service.
+
+Native summaries group by `neurwerk.token_usage_known` and `neurwerk.cost_known`
+alongside model or user dimensions. Native PostgreSQL encodes grouped boolean
+attributes as `"true"`/`"false"`; JSON booleans are also accepted. Missing historical
+flags remain unknown regardless of coalesced numeric sums. These flags must be
+computed by the producer from final native field presence, not aggregate zeros.
+The initial version-5 path has one attempt; completeness covers selected native
+records, not all retries or a provider invoice. Generic applications/CONNECT and
+MCP are not added to native LLM accounting without a supported producer.
+
+Each activity item adds `gateway`, containing the above normalized fields plus
+nullable boolean `token_usage_known` and `cost_known`, and the same `accounting`
+shape for that one observation. Absent/invalid context fields are null, except
+`billing_classification`, which defaults to `unknown`. Existing nullable `tokens`
+and `costUsd` remain reported values. No billing class is inferred from personal
+credentials or Neurwerk key type. A true flag without a reported numeric metric
+still cannot produce a complete total.
+
+Langfuse must expose these **top-level observation metadata keys**, using
+`langfuse.observation.metadata.neurwerk.<field>` in its OTel mapping. Unmapped
+span attributes nested under `attributes` are not a filterable substitute.
+Only declared bounded scalar context is returned; credential/header/cookie objects,
+arbitrary request metadata and generic `response.body` are excluded. The native
+tracing producer supplies sanitized `llm.prompt` and pre-restoration
+`llm.completion` for qualified JSON/SSE operations. Generic application activity
+remains unavailable; neither an application label nor a CONNECT call is invented
+as a generation. Base owns database-attribute and tracing publication wiring.
 
 - **Contributions:** Read [CONTRIBUTING.md](.github/CONTRIBUTING.md) before proposing a change.
 - **Bug reports and feature requests:** Use [GitHub Issues](https://github.com/neurwerk/k8s_stack_studio/issues) for reproducible bugs and clearly scoped feature requests.

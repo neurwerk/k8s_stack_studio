@@ -7,19 +7,19 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, Field
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.dependencies import get_current_user_id, get_settings
 from k8s_stack_studio.lib.langfuse import Activity, ActivityType, LangfuseClient, LangfuseReadError
+from k8s_stack_studio.models.gateway_metadata import GatewayFilters
 
 router = APIRouter(prefix="/api/me/llm-activity", tags=["llm-activity"])
 
 
-class SearchRequest(BaseModel):
+class SearchRequest(GatewayFilters):
     """Only display filters; never accept an upstream filter or owner ID."""
 
-    model_config = {"extra": "forbid"}
     q: Annotated[str, Field(max_length=200)] = ""
     type: ActivityType = "all"
     start: AwareDatetime | None = None
@@ -58,7 +58,9 @@ async def search_llm_activity(
         settings.langfuse_url, settings.langfuse_public_key, settings.langfuse_secret_key, client
     )
     try:
-        result = await langfuse.recent(user_id, start, end, filters.q.strip() or None, filters.type)
+        result = await langfuse.recent(
+            user_id, start, end, filters.q.strip() or None, filters.type, filters
+        )
     except LangfuseReadError as exc:
         raise HTTPException(502, "LLM activity is temporarily unavailable") from exc
     response.headers["Cache-Control"] = "no-store"

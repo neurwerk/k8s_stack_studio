@@ -6,7 +6,8 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 
 import { fetchUserDailyUsage } from "@/lib/api/usage";
 import type { UsageDateRange, UserDailyUsage } from "@/lib/api/usage";
-import { modelColors } from "@/lib/usage-dashboard";
+import { modelColors, usageSummary } from "@/lib/usage-dashboard";
+import { AccountingValue } from "@/components/accounting-value";
 
 const POLL_INTERVAL_MS = 30_000;
 const DAY_MS = 86_400_000;
@@ -158,14 +159,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
     ...new Set(usage?.days.flatMap((day) => day.models.map((item) => item.model)) ?? []),
   ].sort((a, b) => (a ?? "").localeCompare(b ?? ""));
   const colors = modelColors(models);
-  const totals = { total_tokens: 0, cost_usd: 0, requests: 0 };
-  for (const day of usage?.days ?? []) {
-    for (const item of day.models) {
-      totals.total_tokens += item.total_tokens;
-      totals.cost_usd += item.cost_usd;
-      totals.requests += item.requests;
-    }
-  }
+  const totals = usage ? usageSummary(usage).totals : { total_tokens: 0, cost_usd: 0, requests: 0, accounting: undefined };
   const chartData = usage?.days.map((day) => ({
     date: day.date,
     // Synthetic keys avoid treating requested model names containing dots as object paths.
@@ -187,7 +181,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
         <div>
           <h2 className="text-lg font-semibold">Usage</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Daily usage by requested model. Refreshes every 30 seconds.
+            Native LLM records by requested model. Refreshes every 30 seconds.
           </p>
         </div>
         <RefreshCw aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
@@ -208,7 +202,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
                 setMetric(value);
               }}
             >
-              {value === "total_tokens" ? "Tokens" : "USD"}
+              {value === "total_tokens" ? "Reported tokens" : "Reported USD"}
             </button>
           ))}
         </div>
@@ -245,11 +239,11 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
             </p>
           )}
           <dl className="my-5 grid grid-cols-3 gap-3 border-y border-border py-4">
-            {[
-              ["Tokens", formatTokens(totals.total_tokens)],
-              ["Reported USD", formatCost(totals.cost_usd)],
-              ["Calls", formatTokens(totals.requests)],
-            ].map(([label, value]) => (
+            {([
+              ["Tokens", <AccountingValue key="tokens" metric={totals.accounting?.tokens} reported={totals.total_tokens} />],
+              ["Cost (USD)", <AccountingValue key="cost" metric={totals.accounting?.cost_usd} reported={totals.cost_usd} currency />],
+              ["Native LLM records", formatTokens(totals.requests)],
+            ] as const).map(([label, value]) => (
               <div key={label} className="min-w-0">
                 <dt className="text-xs text-muted-foreground">{label}</dt>
                 <dd className="mt-1 break-words text-base font-semibold tabular-nums sm:text-xl">
@@ -265,7 +259,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
           ) : (
             <>
               <p className="mb-2 text-xs text-muted-foreground">
-                {metric === "total_tokens" ? "Tokens" : "USD"} per day
+                Reported {metric === "total_tokens" ? "tokens" : "USD"} per day. Empty bars do not prove zero actual usage.
               </p>
               <div
                 className="h-64 w-full min-w-0 sm:h-72"
@@ -318,7 +312,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
                                {day.date === usage.today ? " - incomplete today" : ""}
                              </p>
                              <p className="border-b border-border pb-2 font-medium">
-                               Total (all models): {formatTokens(dailyTotal.tokens)} tokens /{" "}
+                                Reported sum (all models): {formatTokens(dailyTotal.tokens)} tokens /{" "}
                                {formatCost(dailyTotal.cost)}
                              </p>
                             {day.models
@@ -332,9 +326,9 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
                                     {item.model ?? "Unknown model"}
                                   </p>
                                   <p>
-                                    {formatTokens(item.total_tokens)} tokens /{" "}
-                                    {formatCost(item.cost_usd)} / {formatTokens(item.requests)}{" "}
-                                    calls
+                                    <AccountingValue metric={item.accounting?.tokens} reported={item.total_tokens} /> tokens /{" "}
+                                    <AccountingValue metric={item.accounting?.cost_usd} reported={item.cost_usd} currency /> / {formatTokens(item.requests)}{" "}
+                                    native LLM records
                                   </p>
                                 </div>
                               ))}
@@ -397,7 +391,7 @@ function UsagePanel({ userId }: { userId: string }): React.ReactNode {
           )}
           <p className="mt-4 text-xs text-muted-foreground">
             Totals include all models, even hidden ones. Today ({usage.today}) is incomplete.
-            Reported cost may omit unpriced requests.
+            Unknown usage is not zero or free. Totals cover native records only, not all gateway traffic, a complete retry ledger or a provider invoice.
           </p>
         </>
       )}

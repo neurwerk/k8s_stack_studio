@@ -88,6 +88,7 @@ def get_current_principal(request: Request) -> StudioPrincipal:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
+            headers={"Cache-Control": "no-store"},
         )
     return principal
 
@@ -108,11 +109,13 @@ def require_role(role: str) -> Callable[[Request], None]:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Not authenticated",
+                headers={"Cache-Control": "no-store"},
             )
         if role not in principal.roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing required role: {role}",
+                headers={"Cache-Control": "no-store"},
             )
 
     return _check_role
