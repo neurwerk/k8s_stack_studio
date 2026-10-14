@@ -148,6 +148,7 @@ class Settings(BaseSettings):
         env_prefix="K8S_STUDIO_",
         case_sensitive=False,
         extra="ignore",
+        populate_by_name=True,
     )
 
     host: str = "0.0.0.0"
@@ -188,6 +189,16 @@ class Settings(BaseSettings):
     )
     # Calendar usage periods are calculated in this IANA timezone.
     usage_timezone: str = "Europe/Berlin"
+
+    # Base-owned public projections; these environment names are shared across products.
+    gateway_catalog_file: str = Field(default="", validation_alias="STUDIO_GATEWAY_CATALOG_FILE")
+    gateway_status_file: str = Field(default="", validation_alias="STUDIO_GATEWAY_STATUS_FILE")
+    gateway_trust_file: str = Field(default="", validation_alias="STUDIO_GATEWAY_TRUST_FILE")
+    gateway_trust_required_version: str = Field(
+        default="",
+        validation_alias="STUDIO_GATEWAY_TRUST_REQUIRED_VERSION",
+        pattern=r"^(?:[a-f0-9]{64})?$",
+    )
 
     # A disabled viewer has no Langfuse client and does not need credentials.
     llm_logs_enabled: bool = False

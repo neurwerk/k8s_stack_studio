@@ -10,8 +10,10 @@ import httpx
 from pydantic import ValidationError
 
 from k8s_stack_studio.config.settings import Settings
+from k8s_stack_studio.models.gateway_metadata import GatewayFilters
 from k8s_stack_studio.models.usage import (
     AgentGatewayDailySummary,
+    AgentGatewayModelKey,
     AgentGatewaySummary,
     AgentGatewayUserSummary,
     DailyUsage,
@@ -24,6 +26,10 @@ from k8s_stack_studio.models.usage import (
 )
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_COMPLETENESS_GROUPS = [
+    {"field": "attributes", "key": "neurwerk.token_usage_known"},
+    {"field": "attributes", "key": "neurwerk.cost_known"},
+]
 
 
 class AgentGatewayUsageError(RuntimeError):
@@ -49,19 +55,30 @@ class AgentGatewayClient:
         self._timezone = ZoneInfo(settings.usage_timezone)
 
     async def fetch_daily_usage(
-        self, user_id: str, start: date | None = None, end: date | None = None
+        self,
+        user_id: str,
+        start: date | None = None,
+        end: date | None = None,
+        filters: GatewayFilters | None = None,
     ) -> DailyUsageResponse:
         """Query consecutive equal-duration calendar days together, isolating today."""
-        return await self._daily_usage(user_id, start, end)
+        return await self._daily_usage(user_id, start, end, filters)
 
     async def fetch_all_daily_usage(
-        self, start: date | None = None, end: date | None = None
+        self,
+        start: date | None = None,
+        end: date | None = None,
+        filters: GatewayFilters | None = None,
     ) -> DailyUsageResponse:
         """Query aggregate model usage without a user filter (admin route only)."""
-        return await self._daily_usage(None, start, end)
+        return await self._daily_usage(None, start, end, filters)
 
     async def _daily_usage(
-        self, user_id: str | None, start: date | None, end: date | None
+        self,
+        user_id: str | None,
+        start: date | None,
+        end: date | None,
+        filters: GatewayFilters | None,
     ) -> DailyUsageResponse:
         """Share one calendar and DST contract across self and all-user views."""
         now = _utc_now()
@@ -80,6 +97,7 @@ class AgentGatewayClient:
                     seconds,
                     start + timedelta(days=len(days)),
                     len(run),
+                    filters,
                 )
             )
         return DailyUsageResponse(
@@ -111,7 +129,10 @@ class AgentGatewayClient:
         return start, end, midnights
 
     async def fetch_user_breakdown(
-        self, start: date | None = None, end: date | None = None
+        self,
+        start: date | None = None,
+        end: date | None = None,
+        filters: GatewayFilters | None = None,
     ) -> UsagePeopleResponse:
         """Return only verified attributed user IDs and totals for admin selection."""
         now = _utc_now()
@@ -121,8 +142,11 @@ class AgentGatewayClient:
             return UsagePeopleResponse(
                 timezone=self._timezone.key, start_date=start, end_date=end, users=[]
             )
-        payload = self._summary_payload(None, midnights[0], until)
-        payload["groupBy"] = [{"field": "attributes", "key": "agentgateway.user"}]
+        payload = self._summary_payload(None, midnights[0], until, filters)
+        payload["groupBy"] = [
+            {"field": "attributes", "key": "agentgateway.user"},
+            *_COMPLETENESS_GROUPS,
+        ]
         try:
             response = await self._client.post(
                 f"{self._base}/api/logs/analytics/summary", json=payload
@@ -131,23 +155,19 @@ class AgentGatewayClient:
             summary = AgentGatewayUserSummary.model_validate_json(response.content)
         except (httpx.HTTPError, ValidationError, ValueError) as error:
             raise AgentGatewayUsageError from error
-        users: list[UserUsageTotal] = []
-        seen: set[str] = set()
+        users_by_id: dict[str, UserUsageTotal] = {}
+        if len({item.group for item in summary.groups}) != len(summary.groups):
+            raise AgentGatewayUsageError
         for item in summary.groups:
             user_id = item.group.user_id
             if user_id is None:
                 continue  # A record without a verified principal is not a person.
-            if not user_id or len(user_id) > 255 or user_id in seen:
+            if not user_id or len(user_id) > 255:
                 raise AgentGatewayUsageError
-            seen.add(user_id)
-            users.append(
-                UserUsageTotal(
-                    user_id=user_id,
-                    requests=item.requests,
-                    total_tokens=item.total_tokens,
-                    cost_usd=item.cost or 0.0,
-                )
-            )
+            users_by_id.setdefault(user_id, UserUsageTotal(user_id=user_id)).add(item)
+        if len(users_by_id) > 5000:
+            raise AgentGatewayUsageError
+        users = list(users_by_id.values())
         users.sort(key=lambda item: (-item.total_tokens, item.user_id))
         return UsagePeopleResponse(
             timezone=self._timezone.key, start_date=start, end_date=end, users=users
@@ -161,6 +181,7 @@ class AgentGatewayClient:
         seconds: int,
         first_day: date,
         day_count: int,
+        filters: GatewayFilters | None,
     ) -> list[DailyUsage]:
         """Map aligned model buckets into days, including sparse and partial days."""
         days = {
@@ -172,10 +193,10 @@ class AgentGatewayClient:
         if end <= start:
             # Keep skipped dates and midnight today empty; Gateway expands empty ranges.
             return list(days.values())
-        payload = self._summary_payload(user_id, start, end)
+        payload = self._summary_payload(user_id, start, end, filters)
         del payload["bucketCount"]
         payload["bucketSeconds"] = seconds
-        payload["groupBy"] = [{"field": "requestModel"}]
+        payload["groupBy"] = [{"field": "requestModel"}, *_COMPLETENESS_GROUPS]
         try:
             response = await self._client.post(
                 f"{self._base}/api/logs/analytics/summary", json=payload
@@ -188,12 +209,12 @@ class AgentGatewayClient:
         effective_seconds = min(seconds, max(1, int((end - start).total_seconds())))
         if summary.bucket_seconds != effective_seconds:
             raise AgentGatewayUsageError
-        if len({group.group.request_model for group in summary.groups}) != len(summary.groups):
+        if len({group.group for group in summary.groups}) != len(summary.groups):
             raise AgentGatewayUsageError
-        seen: set[tuple[datetime, str | None]] = set()
+        seen: set[tuple[datetime, AgentGatewayModelKey]] = set()
         models: dict[tuple[date, str | None], ModelUsage] = {}
         for bucket in summary.buckets:
-            key = (bucket.start, bucket.group.request_model)
+            key = (bucket.start, bucket.group)
             if (
                 not start <= bucket.start < end
                 or (bucket.start - start) % timedelta(seconds=effective_seconds)
@@ -207,20 +228,19 @@ class AgentGatewayClient:
                 models[model_key] = ModelUsage(model=bucket.group.request_model)
                 days[day].models.append(models[model_key])
             # Fractional partial-day spans can produce two clamped upstream buckets.
-            model = models[model_key]
-            model.requests += bucket.requests
-            model.total_tokens += bucket.total_tokens
-            model.cost_usd += bucket.cost or 0.0
+            models[model_key].add(bucket)
         for usage in days.values():
             usage.models.sort(key=lambda item: (item.model is not None, item.model or ""))
         return list(days.values())
 
-    async def fetch_usage(self, user_id: str) -> UsageResponse:
+    async def fetch_usage(
+        self, user_id: str, filters: GatewayFilters | None = None
+    ) -> UsageResponse:
         """Return all supported calendar and rolling usage periods for a user."""
         now = _utc_now()
         usage: dict[str, UsagePeriod] = {}
         for name, (start, end) in self._periods(now).items():
-            usage[name] = await self._fetch_period(user_id, start, end)
+            usage[name] = await self._fetch_period(user_id, start, end, filters)
         return UsageResponse.model_validate(usage)
 
     def _periods(self, now: datetime) -> dict[str, tuple[datetime, datetime]]:
@@ -247,29 +267,25 @@ class AgentGatewayClient:
         user_id: str,
         start: datetime,
         end: datetime,
+        filters: GatewayFilters | None,
     ) -> UsagePeriod:
-        """Fetch and validate one ungrouped analytics summary."""
+        """Fetch and combine groups that retain native completeness evidence."""
         try:
             response = await self._client.post(
                 f"{self._base}/api/logs/analytics/summary",
-                json=self._summary_payload(user_id, start, end),
+                json=self._summary_payload(user_id, start, end, filters),
             )
             response.raise_for_status()
             summary = AgentGatewaySummary.model_validate(response.json())
         except (httpx.HTTPError, ValidationError, ValueError) as error:
             raise AgentGatewayUsageError from error
 
-        if len(summary.groups) > 1:
+        if len({item.group for item in summary.groups}) != len(summary.groups):
             raise AgentGatewayUsageError
-        if not summary.groups:
-            return UsagePeriod()
-
-        group = summary.groups[0]
-        return UsagePeriod(
-            requests=group.requests,
-            total_tokens=group.total_tokens,
-            cost_usd=group.cost or 0.0,
-        )
+        usage = UsagePeriod()
+        for group in summary.groups:
+            usage.add(group)
+        return usage
 
     @classmethod
     def _summary_payload(
@@ -277,6 +293,7 @@ class AgentGatewayClient:
         user_id: str | None,
         start: datetime,
         end: datetime,
+        filters: GatewayFilters | None = None,
     ) -> dict[str, object]:
         """Create the private analytics request for one principal and period."""
         payload: dict[str, object] = {
@@ -284,11 +301,14 @@ class AgentGatewayClient:
                 "from": cls._isoformat_utc(start),
                 "to": cls._isoformat_utc(end),
             },
-            "groupBy": [],
+            "groupBy": _COMPLETENESS_GROUPS,
             "bucketCount": 1,
         }
+        attributes = filters.attributes() if filters else {}
         if user_id is not None:
-            payload["filters"] = {"attributes": {"agentgateway.user": user_id}}
+            attributes["agentgateway.user"] = user_id
+        if attributes:
+            payload["filters"] = {"attributes": attributes}
         return payload
 
     @staticmethod

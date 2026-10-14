@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.17.1",
+  "version": "0.18.0",
   "private": true,
   "license": "MIT",
   "homepage": "https://github.com/neurwerk/k8s_stack_studio#readme",
@@ -18,7 +18,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:mcp": "node --experimental-strip-types --test tests/mcp-checks.test.mts"
+    "test:mcp": "node --experimental-strip-types --test tests/mcp-checks.test.mts",
+    "test:gateway": "node --experimental-strip-types --test tests/gateway-view.test.mts"
   },
   "dependencies": {
     "lucide-react": "^0.507.0",

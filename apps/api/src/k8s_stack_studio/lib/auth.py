@@ -23,6 +23,7 @@ from starlette.authentication import AuthenticationError, BaseUser
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from k8s_stack_studio.config.settings import Settings
+from k8s_stack_studio.lib.gateway_trust import TRUST_PUBLIC_PATTERNS, is_public_trust_path
 
 _logger = logging.getLogger(__name__)
 
@@ -107,6 +108,17 @@ class StudioAdmissionMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Reject authenticated callers that lack Studio application admission."""
+        if scope["type"] == "http" and is_public_trust_path(scope["path"]):
+            if scope["method"] in {"GET", "HEAD"}:
+                await self.app(scope, receive, send)
+            else:
+                response = JSONResponse(
+                    status_code=405,
+                    content={"detail": "Method not allowed"},
+                    headers={"Allow": "GET, HEAD", "Cache-Control": "no-store"},
+                )
+                await response(scope, receive, send)
+            return
         # Keycloak exclusions are path-only. Never make another callback method public.
         if (
             scope["type"] == "http"
@@ -126,13 +138,18 @@ class StudioAdmissionMiddleware:
         if scope["path"].startswith("/api/"):
             principal = scope.get("user")
             if not isinstance(principal, StudioPrincipal):
-                response = JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+                response = JSONResponse(
+                    status_code=401,
+                    content={"detail": "Not authenticated"},
+                    headers={"Cache-Control": "no-store"},
+                )
                 await response(scope, receive, send)
                 return
             if "studio-user" not in principal.roles:
                 response = JSONResponse(
                     status_code=403,
                     content={"detail": "Missing required role: studio-user"},
+                    headers={"Cache-Control": "no-store"},
                 )
                 await response(scope, receive, send)
                 return
@@ -142,7 +159,7 @@ class StudioAdmissionMiddleware:
 def configure_auth(app: FastAPI, settings: Settings) -> None:
     """Install Keycloak middleware and exception handler on the FastAPI app.
 
-    Only version and exact GET popup callback are public on the application port;
+    Version, exact GET popup callback and GET/HEAD trust assets are public;
     health and metrics are served by the separate management app on port 4090.
     """
     configured = (
@@ -183,13 +200,15 @@ def configure_auth(app: FastAPI, settings: Settings) -> None:
     setup_keycloak_middleware(
         app,
         keycloak_configuration=config,
-        exclude_patterns=[r"^/api/version$", r"^/oauth/callback\Z"],
+        exclude_patterns=[r"^/api/version$", r"^/oauth/callback\Z", *TRUST_PUBLIC_PATTERNS],
         user_mapper=_map_principal,
     )
 
     @app.exception_handler(AuthenticationError)
     async def _auth_error_handler(request: Request, exc: AuthenticationError) -> JSONResponse:
-        return JSONResponse(status_code=401, content={"detail": str(exc)})
+        return JSONResponse(
+            status_code=401, content={"detail": str(exc)}, headers={"Cache-Control": "no-store"}
+        )
 
     _logger.info(
         "Keycloak auth middleware installed (realm=%s, client=%s)",

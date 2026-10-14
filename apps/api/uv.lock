@@ -466,11 +466,12 @@ wheels = [
 
 [[package]]
 name = "k8s-stack-studio"
-version = "0.17.1"
+version = "0.18.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "asyncpg" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "fastapi-keycloak-middleware" },
     { name = "httpx" },
@@ -496,6 +497,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12.0" },
     { name = "asyncpg", specifier = ">=0.30.0" },
+    { name = "cryptography", specifier = ">=49.0.0" },
     { name = "fastapi", specifier = ">=0.138.2" },
     { name = "fastapi-keycloak-middleware", specifier = ">=1.6.0" },
     { name = "httpx", specifier = ">=0.28.0" },

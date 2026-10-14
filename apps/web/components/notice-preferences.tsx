@@ -136,7 +136,7 @@ export function NoticeSettings({ keyId, asPage = false }: { keyId?: string; asPa
   return (
     <section className="card mt-6 border border-border bg-card p-6">
       {asPage ? <h1 className="text-2xl font-semibold">Notice display</h1>
-        : <h2 className="text-lg font-semibold">{keyId ? "API key notices" : "Notice display"}</h2>}
+        : <h2 className="text-lg font-semibold">{keyId ? "Neurwerk access key notices" : "Notice display"}</h2>}
       <p className="mt-1 text-sm text-muted-foreground">
         {keyId
           ? "Override your profile's informational notices for this key; turning them off does not hide API errors or disable PII scanning."

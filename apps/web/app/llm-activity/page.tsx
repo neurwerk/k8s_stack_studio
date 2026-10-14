@@ -5,19 +5,13 @@ import { ArrowDown, ChevronDown, ChevronUp } from "lucide-react";
 import { fetchLlmActivity } from "@/lib/api/llm-activity";
 import type { Activity, ActivityFilters, ActivityType } from "@/lib/api/llm-activity";
 import { useVerifiedSession } from "@/lib/auth/session-context";
+import { GatewayClassificationFilters } from "@/components/gateway-filters";
+import { AccountingValue } from "@/components/accounting-value";
+import type { GatewayFilters } from "@/lib/api/gateway-metadata";
+import { billingLabels } from "@/lib/api/gateway-metadata";
 
 function pretty(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
-}
-
-function formatTokens(value: number | null): string {
-  return value === null ? "—" : new Intl.NumberFormat("en-US").format(value);
-}
-
-function formatCost(value: number | null): string {
-  return value === null ? "—" : new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", minimumFractionDigits: 4, maximumFractionDigits: 6,
-  }).format(value);
 }
 
 function statusFor(item: Activity): string {
@@ -119,6 +113,7 @@ function ActivityView() {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [type, setType] = useState<ActivityType>("all");
+  const [gatewayFilters, setGatewayFilters] = useState<GatewayFilters>({});
   const [items, setItems] = useState<Activity[]>([]);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [fullPayloadRows, setFullPayloadRows] = useState<Set<string>>(new Set());
@@ -193,6 +188,7 @@ function ActivityView() {
       <p className="mb-4 text-sm text-muted-foreground">
         Your 10 most recent matching LLM exchanges and MCP calls. Result previews show recorded
         responses; matching session IDs share a text color. Expand a row for recorded details.
+        Generic application activity is unavailable until a supported producer exists. These records are not a complete conversation or retry history.
       </p>
       <form
         className="card mb-4 space-y-3 border border-border bg-card p-4 sm:p-6"
@@ -209,7 +205,7 @@ function ActivityView() {
               setError("From must be before To.");
               return;
             }
-            void search({ q: query.trim(), type, start: from, end: to });
+            void search({ ...gatewayFilters, q: query.trim(), type, start: from, end: to });
           } catch {
             setError("Enter a valid time range.");
           }
@@ -226,12 +222,13 @@ function ActivityView() {
             Activity type
             <select className="select select-bordered w-full bg-base-100 text-sm" value={type}
               onChange={(event) => { setType(event.target.value as ActivityType); }}>
-              <option value="all">All activity</option>
+              <option value="all">LLM and MCP</option>
               <option value="llm">LLM</option>
               <option value="mcp">MCP</option>
             </select>
           </label>
         </div>
+        <GatewayClassificationFilters value={gatewayFilters} onChange={setGatewayFilters} />
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(14rem,18rem)_minmax(14rem,18rem)_auto]">
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             From (local time)
@@ -249,7 +246,7 @@ function ActivityView() {
       </form>
 
       {error && <p role="alert" className="alert alert-error mb-4 text-sm">{error}</p>}
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className="@container overflow-x-auto rounded-lg border border-border bg-card">
         <table className="table w-full min-w-[1280px] table-fixed text-left text-sm">
           <colgroup>
             <col className="w-48" />
@@ -294,6 +291,7 @@ function ActivityView() {
                       <span className={`badge badge-sm font-medium ${item.type === "TOOL" ? "badge-secondary" : "badge-primary"}`}>
                         {item.type === "TOOL" ? "MCP" : "LLM"}
                       </span>
+                      <span className="mt-1 block text-muted-foreground">{billingLabels[item.gateway?.billing_classification ?? "unknown"]}</span>
                     </td>
                     <td className="truncate px-3 py-1.5 align-top font-mono text-xs" title={item.sessionId ?? undefined}>
                       {item.sessionId ? (
@@ -305,8 +303,8 @@ function ActivityView() {
                     <td className="truncate px-3 py-1.5 align-top font-mono text-xs" title={activityName}>
                       {activityName}
                     </td>
-                    <td className="px-3 py-1.5 text-right align-top font-mono text-xs tabular-nums">{formatTokens(item.tokens)}</td>
-                    <td className="px-3 py-1.5 text-right align-top font-mono text-xs tabular-nums">{formatCost(item.costUsd)}</td>
+                    <td className="px-3 py-1.5 text-right align-top font-mono text-xs tabular-nums"><AccountingValue metric={item.accounting?.tokens} reported={item.tokens ?? 0} /></td>
+                    <td className="px-3 py-1.5 text-right align-top font-mono text-xs tabular-nums"><AccountingValue metric={item.accounting?.cost_usd} reported={item.costUsd ?? 0} currency /></td>
                     <td className="px-3 py-1.5 align-top font-mono text-xs">
                       <button type="button" aria-expanded={expanded}
                         aria-label={`${expanded ? "Hide" : "Show"} details for ${activityName}`}
@@ -322,7 +320,7 @@ function ActivityView() {
                   {expanded && (
                     <tr className="border-b border-border bg-muted/20">
                       <td colSpan={7} className="p-3">
-                        <div className="rounded-md border border-border bg-background p-4">
+                        <div className="sticky left-3 w-[calc(100cqw-1.5rem)] rounded-md border border-border bg-background p-4">
                           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                             <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-3">
                               <div><span className="font-medium text-foreground">Timestamp:</span> {item.startTime}</div>
@@ -345,6 +343,15 @@ function ActivityView() {
                               {fullPayload ? "Message view" : "Recorded payload"}
                             </button>
                           </div>
+                          {item.gateway && <section aria-label="Gateway context" className="mb-4 min-w-0 rounded-lg border border-border bg-card p-4">
+                            <h2 className="mb-2 text-sm font-semibold">Gateway context</h2>
+                            <dl className="grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-3">
+                              {Object.entries(item.gateway).map(([name, value]) => <div key={name} className="min-w-0">
+                                <dt className="text-muted-foreground">{name.replaceAll("_", " ")}</dt>
+                                <dd className="break-all font-mono">{value === null ? "Unknown" : name === "billing_classification" ? billingLabels[String(value)] : String(value)}</dd>
+                              </div>)}
+                            </dl>
+                          </section>}
                           {fullPayload && (
                             <p className="mb-3 text-xs text-muted-foreground">
                               This is the observation recorded by Langfuse, not the original HTTP wire request.

@@ -7,6 +7,9 @@ import {
 } from "recharts";
 
 import { fetchUser } from "@/lib/api/admin";
+import { AccountingValue } from "@/components/accounting-value";
+import { GatewayClassificationFilters } from "@/components/gateway-filters";
+import type { GatewayFilters } from "@/lib/api/gateway-metadata";
 import { fetchAllDailyUsage, fetchUsagePeople, fetchUserDailyUsage } from "@/lib/api/usage";
 import type { UsageDateRange, UsagePeople, UserDailyUsage } from "@/lib/api/usage";
 import { useCurrentUserId, useHasRole, useIsKeycloakAdmin } from "@/lib/auth/roles";
@@ -63,7 +66,9 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateError, setDateError] = useState<string | null>(null);
-  const key = JSON.stringify([selected, range?.start, range?.end, refresh]);
+  const [filters, setFilters] = useState<GatewayFilters>({});
+  const [draftFilters, setDraftFilters] = useState<GatewayFilters>({});
+  const key = JSON.stringify([selected, range?.start, range?.end, filters, refresh]);
   const shown = result?.key === key ? result : undefined;
 
   useEffect(() => {
@@ -73,14 +78,14 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
       setError(null);
       try {
         const getDaily = (bounds?: UsageDateRange) => selected === "all"
-          ? fetchAllDailyUsage(bounds, controller.signal)
-          : fetchUserDailyUsage(selected, bounds, controller.signal);
+          ? fetchAllDailyUsage(bounds, controller.signal, filters)
+          : fetchUserDailyUsage(selected, bounds, controller.signal, filters);
         let usage = await getDaily(range);
         const bounds = range ?? presetRange(usage.today, "month");
         if (usage.start_date !== bounds.start || usage.end_date !== bounds.end) {
           usage = await getDaily(bounds);
         }
-        const people = isAdmin ? await fetchUsagePeople(bounds, controller.signal) : null;
+        const people = isAdmin ? await fetchUsagePeople(bounds, controller.signal, filters) : null;
         if (controller.signal.aborted) return;
         setResult({ key, range: bounds, usage, people });
         setDraftStart(bounds.start);
@@ -93,7 +98,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     };
     void load();
     return () => { controller.abort(); };
-  }, [selected, range, isAdmin, key]);
+  }, [selected, range, isAdmin, filters, key]);
 
   useEffect(() => {
     if (!canReadNames || !shown?.people) return;
@@ -140,7 +145,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Usage</h1>
-          <p className="mt-1 text-sm text-muted-foreground">AgentGateway requests, reported tokens and USD.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Native LLM records, token usage and cost completeness.</p>
         </div>
         <button type="button" onClick={() => { setRefresh((value) => value + 1); }}
           className="btn btn-outline inline-flex items-center gap-2">
@@ -210,6 +215,12 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           </span>
           {dateError && <p role="alert" className="w-full text-sm text-destructive">{dateError}</p>}
         </form>
+        <form className="mt-5 space-y-3 border-t border-border pt-4" onSubmit={(event) => {
+          event.preventDefault(); setFilters({ ...draftFilters });
+        }}>
+          <GatewayClassificationFilters value={draftFilters} onChange={setDraftFilters} />
+          <button type="submit" className="btn btn-primary btn-sm">Apply classification</button>
+        </form>
       </section>
 
       {!shown && (
@@ -223,13 +234,12 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           {error && <p role="alert" className="text-sm text-destructive">{error} Showing the last loaded range.</p>}
           <section aria-label="Usage totals" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             {([
-              ["Tokens", count(summary.totals.total_tokens)],
-              ["Reported USD", dollars(summary.totals.cost_usd)],
-              ["Requests", count(summary.totals.requests)],
+              ["Tokens", <AccountingValue key="tokens" metric={summary.totals.accounting.tokens} reported={summary.totals.total_tokens} />],
+              ["Cost (USD)", <AccountingValue key="cost" metric={summary.totals.accounting.cost_usd} reported={summary.totals.cost_usd} currency />],
+              ["Native LLM records", count(summary.totals.requests)],
               ["Models", count(summary.models.length)],
-              [selected === "all" ? "Active users" : "Tokens / request",
-                selected === "all" ? count(people.length) : count(summary.totals.requests
-                  ? Math.round(summary.totals.total_tokens / summary.totals.requests) : 0)],
+              [selected === "all" ? "Active users" : "Token completeness",
+                selected === "all" ? count(people.length) : summary.totals.accounting.tokens.state],
             ] as const).map(([title, value]) => (
               <div key={title} className={panel}>
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
@@ -243,8 +253,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               <label className="text-xs text-muted-foreground">Rank by{" "}
                 <select className={control} value={modelMetric}
                   onChange={(event) => { setModelMetric(event.target.value as PersonMetric); }}>
-                  <option value="total_tokens">Tokens</option><option value="cost_usd">USD</option>
-                  <option value="requests">Requests</option>
+                  <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option>
+                  <option value="requests">Native LLM records</option>
                 </select>
               </label>
             </div>
@@ -252,7 +262,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               <table className="table w-full min-w-[640px] text-left text-sm">
                 <thead className="border-b border-border text-xs uppercase text-muted-foreground">
                   <tr><th className="py-3 pr-4">Model</th><th className="px-3 text-right">Tokens</th>
-                    <th className="px-3 text-right">Reported USD</th><th className="pl-3 text-right">Requests</th></tr>
+                    <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">Native LLM records</th></tr>
                 </thead>
                 <tbody>
                   {rankedModels.map((model) => (
@@ -264,8 +274,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                             style={{ width: usageBarWidth(model[modelMetric], maxModelMetric) }} />
                         </div>
                       </td>
-                      <td className="px-3 text-right tabular-nums">{count(model.total_tokens)}</td>
-                      <td className="px-3 text-right tabular-nums">{dollars(model.cost_usd)}</td>
+                      <td className="px-3 text-right tabular-nums"><AccountingValue metric={model.accounting?.tokens} reported={model.total_tokens} /></td>
+                      <td className="px-3 text-right tabular-nums"><AccountingValue metric={model.accounting?.cost_usd} reported={model.cost_usd} currency /></td>
                       <td className="pl-3 text-right tabular-nums">{count(model.requests)}</td>
                     </tr>
                   ))}
@@ -284,8 +294,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                   <p className="mt-1 text-sm text-muted-foreground">Top {count(Math.min(20, ranked.length))} of {count(ranked.length)} active users.</p></div>
                 <label className="text-xs text-muted-foreground">Rank by{" "}
                   <select className={control} value={metric} onChange={(event) => { setMetric(event.target.value as PersonMetric); }}>
-                    <option value="total_tokens">Tokens</option><option value="cost_usd">USD</option>
-                    <option value="requests">Requests</option>
+                    <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option>
+                    <option value="requests">Native LLM records</option>
                   </select>
                 </label>
               </div>
@@ -297,7 +307,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                     <span className="truncate">{label(person.user_id)}</span>
                      <span className="h-3 rounded-full bg-muted"><span className="block h-full rounded-full bg-primary"
                       style={{ width: usageBarWidth(person[metric], ranked[0]?.[metric] ?? 0) }} /></span>
-                    <span className="text-right tabular-nums">{metric === "cost_usd" ? dollars(person.cost_usd) : count(person[metric])}</span>
+                    <span className="text-right tabular-nums">{metric === "requests" ? count(person.requests) :
+                      <AccountingValue metric={person.accounting?.[metric === "cost_usd" ? "cost_usd" : "tokens"]} reported={person[metric]} currency={metric === "cost_usd"} />}</span>
                   </button>
                 ))}
                 {ranked.length === 0 && <p className="text-sm text-muted-foreground">No attributed users in this range.</p>}
@@ -307,15 +318,16 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
 
           <section className={panel} aria-label="Usage trend">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-xl font-semibold">Usage Trend</h2>
+              <h2 className="text-xl font-semibold">Reported usage trend</h2>
               <label className="text-xs text-muted-foreground">Show{" "}
                 <select className={control} value={trendMetric}
                   onChange={(event) => { setTrendMetric(event.target.value as PersonMetric); }}>
-                  <option value="total_tokens">Tokens</option><option value="cost_usd">USD</option>
-                  <option value="requests">Requests</option>
+                  <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option>
+                  <option value="requests">Native LLM records</option>
                 </select>
               </label>
             </div>
+            <p className="mt-2 text-xs text-muted-foreground">Bars show reported sums only. Missing usage can produce an empty bar; it does not mean zero actual usage or free service.</p>
             {summary.models.length === 0 ? (
               <p className="py-12 text-center text-sm text-muted-foreground">No usage in this range.</p>
             ) : (
@@ -358,13 +370,13 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                <table className="table w-full min-w-[560px] text-left text-sm">
                  <thead className="sticky top-0 border-b border-border bg-card text-xs uppercase text-muted-foreground">
                   <tr><th className="py-3">Date</th><th className="px-3 text-right">Tokens</th>
-                    <th className="px-3 text-right">Reported USD</th><th className="pl-3 text-right">Requests</th></tr>
+                    <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">Native LLM records</th></tr>
                 </thead>
                 <tbody>{[...summary.daily].reverse().map((day) => (
                   <tr key={day.date} className="border-b border-border/70 last:border-0">
                     <td className="py-3">{dayLabel(day.date)}</td>
-                    <td className="px-3 text-right tabular-nums">{count(day.total_tokens)}</td>
-                    <td className="px-3 text-right tabular-nums">{dollars(day.cost_usd)}</td>
+                    <td className="px-3 text-right tabular-nums"><AccountingValue metric={day.accounting.tokens} reported={day.total_tokens} /></td>
+                    <td className="px-3 text-right tabular-nums"><AccountingValue metric={day.accounting.cost_usd} reported={day.cost_usd} currency /></td>
                     <td className="pl-3 text-right tabular-nums">{count(day.requests)}</td>
                   </tr>
                 ))}</tbody>
@@ -374,7 +386,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
         </>
       )}
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
-        <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" /> Data is reported by AgentGateway; costs may omit unpriced requests.
+        <BarChart3 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> Native LLM records only: not a count of all gateway traffic or upstream attempts. Generic application accounting is unavailable. Complete totals cover selected records, not a complete retry ledger or provider invoice.
       </p>
     </main>
   );

@@ -150,3 +150,88 @@ async def test_personal_activity_boundary(activity_api):
     state["enabled"] = False
     assert (await client.post("/api/me/llm-activity", json={})).status_code == 404
     assert calls == []
+
+
+async def test_classified_activity_stays_self_only_and_allowlisted(activity_api):
+    client, calls, state = activity_api
+    state["principal"] = StudioPrincipal(
+        "self", frozenset({"studio-user", "langfuse-admin", "gateway-admin"}), frozenset(), {}
+    )
+    row = observation("normalized")
+    metadata = {
+        "neurwerk.entry_mode": "forward_proxy",
+        "neurwerk.destination_kind": "model",
+        "neurwerk.destination_id": "example",
+        "neurwerk.provider_credential_source": "caller_supplied",
+        "neurwerk.request_id": "request-1",
+        "neurwerk.token_usage_known": True,
+        "neurwerk.cost_known": False,
+        "neurwerk.provider_id": {"authorization": "must-not-escape"},
+        "neurwerk.cookies": "must-not-escape",
+        "response.body": "restored-must-not-escape",
+        "attributes.http.method": {"unexpected": "must-not-escape"},
+    }
+    row.update(metadata=metadata, totalUsage=0, totalCost=0)
+    state["result"] = httpx.Response(200, json={"data": [row]})
+    result = await client.post(
+        "/api/me/llm-activity",
+        json={
+            "type": "llm",
+            "q": "example",
+            "provider_credential_source": "caller_supplied",
+            "entry_mode": "forward_proxy",
+        },
+    )
+    assert result.status_code == 200
+    assert len(result.json()) == 1  # Search branches return the same observation, deduplicated.
+    item = result.json()[0]
+    assert item["gateway"]["billing_classification"] == "unknown"
+    assert item["gateway"]["provider_credential_source"] == "caller_supplied"
+    assert item["gateway"]["provider_id"] is None
+    assert item["accounting"]["tokens"]["complete_total"] == 0
+    assert item["accounting"]["cost_usd"]["complete_total"] is None
+    assert "must-not-escape" not in result.text
+    for call in calls:
+        conditions = json.loads(call.url.params["filter"])
+        assert conditions[0] == {
+            "type": "string",
+            "column": "userId",
+            "operator": "=",
+            "value": "self",
+        }
+        assert {part["key"] for part in conditions if part["column"] == "metadata"} == {
+            "neurwerk.entry_mode",
+            "neurwerk.provider_credential_source",
+        }
+    row["userId"] = "other"
+    state["result"] = httpx.Response(200, json={"data": [row]})
+    assert (
+        await client.post("/api/me/llm-activity", json={"entry_mode": "forward_proxy"})
+    ).status_code == 502
+    row["userId"] = "self"
+    state["result"] = httpx.Response(200, json={"data": [row]})
+    assert (
+        await client.post("/api/me/llm-activity", json={"entry_mode": "api"})
+    ).status_code == 502
+    calls.clear()
+    for extra in (
+        {"user_id": "other"},
+        {"metadata": {"userId": "other"}},
+        {"provider_id": "x" * 256},
+        {"type": "application"},
+    ):
+        assert (await client.post("/api/me/llm-activity", json=extra)).status_code == 422
+    assert calls == []
+
+
+async def test_historical_activity_does_not_turn_reported_zero_into_free(activity_api):
+    client, _, state = activity_api
+    row = observation("historical")
+    row.update(totalUsage=0, totalCost=0)
+    state["result"] = httpx.Response(200, json={"data": [row]})
+    response = await client.post("/api/me/llm-activity", json={})
+    assert response.status_code == 200
+    item = response.json()[0]
+    assert item["tokens"] == item["costUsd"] == 0
+    assert item["accounting"]["tokens"]["state"] == "unknown"
+    assert item["accounting"]["cost_usd"]["complete_total"] is None

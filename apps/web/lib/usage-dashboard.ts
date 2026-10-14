@@ -1,4 +1,28 @@
-import type { DailyModelUsage, UsageDateRange, UserDailyUsage, UsagePerson } from "@/lib/api/usage";
+import type { DailyModelUsage, UsageDateRange, UserDailyUsage, UsagePerson, UsagePeriod, UsageMetric } from "@/lib/api/usage";
+
+function emptyMetric(): UsageMetric {
+  return { state: "known", reported_sum: 0, complete_total: 0, known_records: 0, total_records: 0 };
+}
+
+function emptyUsage() {
+  return { requests: 0, total_tokens: 0, cost_usd: 0, accounting: { tokens: emptyMetric(), cost_usd: emptyMetric() } };
+}
+
+/** Roll up row evidence; older API responses never gain completeness from a numeric zero. */
+function addUsage(target: ReturnType<typeof emptyUsage>, entry: UsagePeriod) {
+  target.requests += entry.requests;
+  target.total_tokens += entry.total_tokens;
+  target.cost_usd += entry.cost_usd;
+  for (const name of ["tokens", "cost_usd"] as const) {
+    const metric = target.accounting[name];
+    const source = entry.accounting?.[name];
+    metric.reported_sum += source?.reported_sum ?? (name === "tokens" ? entry.total_tokens : entry.cost_usd);
+    metric.total_records += entry.requests;
+    metric.known_records += source?.known_records ?? 0;
+    metric.state = metric.known_records === metric.total_records ? "known" : metric.known_records > 0 ? "partial" : "unknown";
+    metric.complete_total = metric.state === "known" ? metric.reported_sum : null;
+  }
+}
 
 export type UsagePreset = "month" | "7d" | "30d" | "last_month" | "custom";
 export type PersonMetric = "total_tokens" | "cost_usd" | "requests";
@@ -25,25 +49,19 @@ export function validRange(range: UsageDateRange, today: string): boolean {
 }
 
 export function usageSummary(usage: UserDailyUsage) {
-  const totals = { requests: 0, total_tokens: 0, cost_usd: 0 };
-  const models = new Map<string | null, { model: string | null; requests: number; total_tokens: number; cost_usd: number }>();
+  const totals = emptyUsage();
+  const models = new Map<string | null, ReturnType<typeof emptyUsage> & { model: string | null }>();
   const daily = usage.days.map((day) => {
-    const row = { date: day.date, requests: 0, total_tokens: 0, cost_usd: 0 };
+    const row = { date: day.date, ...emptyUsage() };
     for (const entry of day.models) {
-      row.requests += entry.requests;
-      row.total_tokens += entry.total_tokens;
-      row.cost_usd += entry.cost_usd;
+      addUsage(row, entry);
       const model = models.get(entry.model) ?? {
-        model: entry.model, requests: 0, total_tokens: 0, cost_usd: 0,
+        model: entry.model, ...emptyUsage(),
       };
-      model.requests += entry.requests;
-      model.total_tokens += entry.total_tokens;
-      model.cost_usd += entry.cost_usd;
+      addUsage(model, entry);
       models.set(entry.model, model);
     }
-    totals.requests += row.requests;
-    totals.total_tokens += row.total_tokens;
-    totals.cost_usd += row.cost_usd;
+    addUsage(totals, row);
     return row;
   });
   return {

@@ -1,4 +1,7 @@
 import { apiPost } from "@/lib/api/client";
+import type { GatewayFilters, GatewayMetadata } from "@/lib/api/gateway-metadata";
+import { gatewayParams } from "@/lib/api/gateway-metadata";
+import type { UsageAccounting } from "@/lib/api/usage";
 
 interface ActivityBase {
   id: string;
@@ -8,6 +11,8 @@ interface ActivityBase {
   metadata: Record<string, unknown>;
   tokens: number | null;
   costUsd: number | null;
+  gateway?: GatewayMetadata;
+  accounting?: UsageAccounting;
 }
 
 export interface LlmExchange extends ActivityBase {
@@ -31,7 +36,7 @@ export interface McpCall extends ActivityBase {
 export type Activity = LlmExchange | McpCall;
 export type ActivityType = "all" | "llm" | "mcp";
 
-export interface ActivityFilters {
+export interface ActivityFilters extends GatewayFilters {
   q: string;
   type?: ActivityType;
   start?: string;
@@ -40,5 +45,6 @@ export interface ActivityFilters {
 
 /** The server derives the owner from the token and always returns at most ten. */
 export function fetchLlmActivity(filters: ActivityFilters): Promise<Activity[]> {
-  return apiPost<ActivityFilters, Activity[]>("/me/llm-activity", filters);
+  const { q, ...rest } = filters;
+  return apiPost<ActivityFilters, Activity[]>("/me/llm-activity", { q, ...gatewayParams(rest) });
 }

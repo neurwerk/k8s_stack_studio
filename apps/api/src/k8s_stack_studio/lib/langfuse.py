@@ -10,6 +10,9 @@ from typing import Any, Literal
 import httpx
 from pydantic import AwareDatetime, BaseModel, Field, StrictStr
 
+from k8s_stack_studio.models.gateway_metadata import GatewayFilters, GatewayMetadata
+from k8s_stack_studio.models.usage import UsageAccounting
+
 ActivityType = Literal["all", "llm", "mcp"]
 ObservationType = Literal["GENERATION", "TOOL"]
 
@@ -33,10 +36,10 @@ class Observation(BaseModel):
     status_message: str | None = Field(default=None, alias="statusMessage")
     input: str | None = None
     output: str | None = None
-    input_usage: int | None = Field(default=None, alias="inputUsage")
-    output_usage: int | None = Field(default=None, alias="outputUsage")
-    total_usage: int | None = Field(default=None, alias="totalUsage")
-    total_cost: float | None = Field(default=None, alias="totalCost")
+    input_usage: int | None = Field(default=None, alias="inputUsage", ge=0)
+    output_usage: int | None = Field(default=None, alias="outputUsage", ge=0)
+    total_usage: int | None = Field(default=None, alias="totalUsage", ge=0)
+    total_cost: float | None = Field(default=None, alias="totalCost", ge=0, allow_inf_nan=False)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -57,6 +60,8 @@ class Exchange(BaseModel):
     tokens: int | None = None
     cost_usd: float | None = Field(default=None, alias="costUsd")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    gateway: GatewayMetadata = Field(default_factory=GatewayMetadata)
+    accounting: UsageAccounting = Field(default_factory=UsageAccounting)
 
 
 class ToolCall(BaseModel):
@@ -76,6 +81,8 @@ class ToolCall(BaseModel):
     tokens: int | None = None
     cost_usd: float | None = Field(default=None, alias="costUsd")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    gateway: GatewayMetadata = Field(default_factory=GatewayMetadata)
+    accounting: UsageAccounting = Field(default_factory=UsageAccounting)
 
 
 Activity = Exchange | ToolCall
@@ -157,6 +164,8 @@ def _activity(row: Observation) -> Activity:
         name: _safe_metadata(value, name)
         for name, value in row.metadata.items()
         if name in _VISIBLE_METADATA
+        and isinstance(value, (str, bool, int, float))
+        and (not isinstance(value, str) or len(value) <= 255)
     }
     content_metadata = {
         name: _safe_metadata(value, name)
@@ -171,6 +180,20 @@ def _activity(row: Observation) -> Activity:
     tokens = row.total_usage
     if tokens is None and (row.input_usage is not None or row.output_usage is not None):
         tokens = (row.input_usage or 0) + (row.output_usage or 0)
+    gateway = GatewayMetadata.from_metadata(row.metadata)
+    accounting = UsageAccounting()
+    accounting.tokens.add(
+        tokens or 0,
+        1,
+        known=gateway.token_usage_known is True
+        and (
+            row.total_usage is not None
+            or (row.input_usage is not None and row.output_usage is not None)
+        ),
+    )
+    accounting.cost_usd.add(
+        row.total_cost or 0.0, 1, known=gateway.cost_known is True and row.total_cost is not None
+    )
     if row.type == "GENERATION":
         recorded = row.model_dump(by_alias=True)
         recorded["input"] = _redact_text(row.input) if row.input else row.input
@@ -180,6 +203,8 @@ def _activity(row: Observation) -> Activity:
         recorded["tokens"] = tokens
         recorded["costUsd"] = row.total_cost
         recorded["metadata"] = metadata
+        recorded["gateway"] = gateway
+        recorded["accounting"] = accounting
         response_model = row.metadata.get("attributes.gen_ai.response.model")
         if isinstance(response_model, str) and response_model:
             recorded["model"] = response_model
@@ -216,6 +241,8 @@ def _activity(row: Observation) -> Activity:
         tokens=tokens,
         costUsd=row.total_cost,
         metadata=metadata,
+        gateway=gateway,
+        accounting=accounting,
     )
 
 
@@ -238,13 +265,15 @@ class LangfuseClient:
         types: list[str],
         column: str | None,
         query: str,
+        filters: GatewayFilters,
     ) -> list[Observation]:
         """Create *all* upstream conditions on the server, including the owner."""
         params: dict[str, str | int] = {
             "fields": "core,basic,io,model,metadata,usage",
             "limit": 10,
         }
-        if column is None and len(types) == 1:
+        attributes = filters.attributes()
+        if column is None and len(types) == 1 and not attributes:
             params.update(
                 userId=user_id,
                 type=types[0],
@@ -269,6 +298,16 @@ class LangfuseClient:
                     "value": end.isoformat(),
                 },
             ]
+            conditions.extend(
+                {
+                    "type": "stringObject",
+                    "column": "metadata",
+                    "key": key,
+                    "operator": "=",
+                    "value": value,
+                }
+                for key, value in attributes.items()
+            )
             if column is not None:
                 if column == "metadata":
                     conditions.append(
@@ -301,6 +340,7 @@ class LangfuseClient:
                 or row.user_id != user_id
                 or row.type not in types
                 or not start <= row.start_time.astimezone(UTC) < end
+                or any(row.metadata.get(key) != value for key, value in attributes.items())
             ):
                 raise LangfuseReadError
         return page.data
@@ -312,13 +352,15 @@ class LangfuseClient:
         end: datetime,
         query: str | None,
         activity_type: ActivityType = "all",
+        filters: GatewayFilters | None = None,
     ) -> list[Activity]:
         """Return ten newest matching, owner-checked generations and/or MCP calls."""
         types = {"all": ["GENERATION", "TOOL"], "llm": ["GENERATION"], "mcp": ["TOOL"]}[
             activity_type
         ]
+        filters = filters or GatewayFilters()
         if not query:
-            rows = await self._page(user_id, start, end, types, None, "")
+            rows = await self._page(user_id, start, end, types, None, "", filters)
         else:
             # Langfuse combines filters with AND. Search each content field separately.
             rows = []
@@ -326,7 +368,9 @@ class LangfuseClient:
                 if column == "metadata" and activity_type == "llm":
                     continue
                 search_types = ["TOOL"] if column == "metadata" else types
-                rows.extend(await self._page(user_id, start, end, search_types, column, query))
+                rows.extend(
+                    await self._page(user_id, start, end, search_types, column, query, filters)
+                )
             rows = list({row.id: row for row in rows}.values())
         return [
             _activity(row)
