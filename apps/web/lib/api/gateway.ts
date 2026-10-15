@@ -7,7 +7,7 @@ export interface GatewayEndpoint {
   id: string;
   url: string;
   entry_mode: "api" | "forward_proxy";
-  caller_auth_modes: ("legacy" | "neurwerk_bearer" | "proxy_basic")[];
+  caller_auth_modes: ("oidc_bearer" | "neurwerk_bearer" | "proxy_basic")[];
 }
 
 export interface GatewayDestination {
