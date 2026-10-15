@@ -44,7 +44,7 @@ class GatewayEndpoint(GatewayModel):
     id: Identifier
     url: str = Field(min_length=1, max_length=2048)
     entry_mode: Literal["api", "forward_proxy"]
-    caller_auth_modes: list[Literal["legacy", "neurwerk_bearer", "proxy_basic"]] = Field(
+    caller_auth_modes: list[Literal["oidc_bearer", "neurwerk_bearer", "proxy_basic"]] = Field(
         min_length=1, max_length=3
     )
 

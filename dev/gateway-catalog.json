@@ -1,426 +1,59 @@
 {
   "schema_version": 1,
-  "catalog_revision": "studio-dev-catalog-1",
-  "policy_revision": "studio-dev-policy-1",
+  "catalog_revision": "studio-dev-catalog-2",
+  "policy_revision": "studio-dev-policy-2",
   "endpoints": [
-    {
-      "id": "api-openai-personal",
-      "url": "https://ai-api.studio.test/bindings/openai-personal/v1",
-      "entry_mode": "api",
-      "caller_auth_modes": ["neurwerk_bearer"]
-    },
-    {
-      "id": "forward-proxy",
-      "url": "https://ai-proxy.studio.test:443",
-      "entry_mode": "forward_proxy",
-      "caller_auth_modes": ["proxy_basic"]
-    },
-    {
-      "id": "legacy-api",
-      "url": "https://ai-api.studio.test/v1",
-      "entry_mode": "api",
-      "caller_auth_modes": ["legacy"]
-    },
-    {
-      "id": "mcp-brave",
-      "url": "https://ai-api.studio.test/mcp/brave",
-      "entry_mode": "api",
-      "caller_auth_modes": ["legacy"]
-    },
-    {
-      "id": "mcp-context7",
-      "url": "https://ai-api.studio.test/mcp/context7",
-      "entry_mode": "api",
-      "caller_auth_modes": ["legacy"]
-    },
-    {
-      "id": "mcp-github",
-      "url": "https://ai-api.studio.test/mcp/github",
-      "entry_mode": "api",
-      "caller_auth_modes": ["legacy"]
-    }
+    {"id": "api-openai-personal", "url": "https://ai-api.studio.test/bindings/openai-personal/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer"]},
+    {"id": "api-openrouter", "url": "https://ai-api.studio.test/bindings/openrouter/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]},
+    {"id": "forward-proxy", "url": "https://ai-proxy.studio.test:443", "entry_mode": "forward_proxy", "caller_auth_modes": ["proxy_basic"]},
+    {"id": "mcp-brave", "url": "https://ai-api.studio.test/bindings/mcp-brave/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]},
+    {"id": "mcp-context7", "url": "https://ai-api.studio.test/bindings/mcp-context7/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]},
+    {"id": "mcp-github", "url": "https://ai-api.studio.test/bindings/mcp-github/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]}
   ],
   "destinations": [
     {
-      "id": "remote/openai/gpt-5.5",
-      "kind": "model",
-      "display_name": "remote/openai/gpt-5.5",
-      "provider_id": "openai",
-      "endpoint_ids": ["api-openai-personal", "forward-proxy"],
-      "profile_ids": ["openai-responses-v1"],
+      "id": "remote/openai/gpt-5.5", "kind": "model", "display_name": "GPT-5.5", "provider_id": "openai",
+      "endpoint_ids": ["api-openai-personal", "forward-proxy"], "profile_ids": ["openai-responses-v1"],
       "required_permissions": ["llm:invoke", "model:remote/openai/gpt-5.5:invoke"],
       "credential_modes": [{"source": "caller_supplied", "required_permissions": []}]
     },
     {
-      "id": "remote/openrouter/anthropic/claude-fable-5.1",
-      "kind": "model",
-      "display_name": "remote/openrouter/anthropic/claude-fable-5.1",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/anthropic/claude-fable-5.1:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/anthropic/claude-haiku-4.5",
-      "kind": "model",
-      "display_name": "remote/openrouter/anthropic/claude-haiku-4.5",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/anthropic/claude-haiku-4.5:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/anthropic/claude-opus-5",
-      "kind": "model",
-      "display_name": "remote/openrouter/anthropic/claude-opus-5",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/anthropic/claude-opus-5:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/anthropic/claude-sonnet-5",
-      "kind": "model",
-      "display_name": "remote/openrouter/anthropic/claude-sonnet-5",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/anthropic/claude-sonnet-5:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/deepseek/deepseek-r1-0528",
-      "kind": "model",
-      "display_name": "remote/openrouter/deepseek/deepseek-r1-0528",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/deepseek/deepseek-r1-0528:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/deepseek/deepseek-v4-flash-0731",
-      "kind": "model",
-      "display_name": "remote/openrouter/deepseek/deepseek-v4-flash-0731",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
+      "id": "remote/openrouter/deepseek/deepseek-v4-flash-0731", "kind": "model", "display_name": "DeepSeek Flash", "provider_id": "openrouter",
+      "endpoint_ids": ["api-openrouter"], "profile_ids": ["openai-chat-completions-v1"],
       "required_permissions": ["llm:invoke", "model:remote/openrouter/deepseek/deepseek-v4-flash-0731:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
+      "credential_modes": [{"source": "company", "required_permissions": ["provider:openrouter:company-use"]}]
     },
     {
-      "id": "remote/openrouter/deepseek/deepseek-v4-pro-0813",
-      "kind": "model",
-      "display_name": "remote/openrouter/deepseek/deepseek-v4-pro-0813",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/deepseek/deepseek-v4-pro-0813:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/google/gemini-3.1-flash-lite",
-      "kind": "model",
-      "display_name": "remote/openrouter/google/gemini-3.1-flash-lite",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/google/gemini-3.1-flash-lite:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/google/gemini-3.1-pro-preview",
-      "kind": "model",
-      "display_name": "remote/openrouter/google/gemini-3.1-pro-preview",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/google/gemini-3.1-pro-preview:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/google/gemini-3.8-flash",
-      "kind": "model",
-      "display_name": "remote/openrouter/google/gemini-3.8-flash",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/google/gemini-3.8-flash:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/mistralai/codestral-2508",
-      "kind": "model",
-      "display_name": "remote/openrouter/mistralai/codestral-2508",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/mistralai/codestral-2508:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/mistralai/devstral-2512",
-      "kind": "model",
-      "display_name": "remote/openrouter/mistralai/devstral-2512",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/mistralai/devstral-2512:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/mistralai/mistral-large-2512",
-      "kind": "model",
-      "display_name": "remote/openrouter/mistralai/mistral-large-2512",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/mistralai/mistral-large-2512:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/mistralai/mistral-medium-3-5",
-      "kind": "model",
-      "display_name": "remote/openrouter/mistralai/mistral-medium-3-5",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/mistralai/mistral-medium-3-5:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/mistralai/mistral-small-2603",
-      "kind": "model",
-      "display_name": "remote/openrouter/mistralai/mistral-small-2603",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/mistralai/mistral-small-2603:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/moonshotai/kimi-k2.6",
-      "kind": "model",
-      "display_name": "remote/openrouter/moonshotai/kimi-k2.6",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/moonshotai/kimi-k2.6:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/moonshotai/kimi-k2.7-code",
-      "kind": "model",
-      "display_name": "remote/openrouter/moonshotai/kimi-k2.7-code",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/moonshotai/kimi-k2.7-code:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/moonshotai/kimi-k3",
-      "kind": "model",
-      "display_name": "remote/openrouter/moonshotai/kimi-k3",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/moonshotai/kimi-k3:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/openai/gpt-5.6-luna",
-      "kind": "model",
-      "display_name": "remote/openrouter/openai/gpt-5.6-luna",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/openai/gpt-5.6-luna:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/openai/gpt-5.6-sol",
-      "kind": "model",
-      "display_name": "remote/openrouter/openai/gpt-5.6-sol",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/openai/gpt-5.6-sol:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/openai/gpt-5.6-terra",
-      "kind": "model",
-      "display_name": "remote/openrouter/openai/gpt-5.6-terra",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/openai/gpt-5.6-terra:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/openai/gpt-6-astra",
-      "kind": "model",
-      "display_name": "remote/openrouter/openai/gpt-6-astra",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/openai/gpt-6-astra:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/qwen/qwen3-coder-next",
-      "kind": "model",
-      "display_name": "remote/openrouter/qwen/qwen3-coder-next",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/qwen/qwen3-coder-next:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/qwen/qwen3.7-plus",
-      "kind": "model",
-      "display_name": "remote/openrouter/qwen/qwen3.7-plus",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/qwen/qwen3.7-plus:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/qwen/qwen3.8-flash",
-      "kind": "model",
-      "display_name": "remote/openrouter/qwen/qwen3.8-flash",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/qwen/qwen3.8-flash:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/openrouter/qwen/qwen3.8-max-0902",
-      "kind": "model",
-      "display_name": "remote/openrouter/qwen/qwen3.8-max-0902",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/qwen/qwen3.8-max-0902:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "remote/deepseek/v4-pro",
-      "kind": "model",
-      "display_name": "remote/deepseek/v4-pro",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:remote/deepseek/v4-pro:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": []}]
-    },
-    {
-      "id": "local/llama3.2-3b",
-      "kind": "model",
-      "display_name": "local/llama3.2-3b",
-      "endpoint_ids": ["legacy-api"],
-      "profile_ids": ["legacy-model-api"],
-      "required_permissions": ["llm:invoke", "model:local/llama3.2-3b:invoke"],
-      "credential_modes": [{"source": "none", "required_permissions": []}]
-    },
-    {
-      "id": "brave",
-      "kind": "mcp",
-      "display_name": "Brave Search",
-      "endpoint_ids": ["mcp-brave"],
-      "profile_ids": ["legacy-mcp"],
+      "id": "brave", "kind": "mcp", "display_name": "Brave Search",
+      "endpoint_ids": ["mcp-brave"], "profile_ids": ["mcp-streamable-http-v1"],
       "required_permissions": ["llm:invoke", "mcp:brave:invoke"],
       "credential_modes": [{"source": "none", "required_permissions": []}]
     },
     {
-      "id": "context7",
-      "kind": "mcp",
-      "display_name": "Context7",
-      "endpoint_ids": ["mcp-context7"],
-      "profile_ids": ["legacy-mcp"],
+      "id": "context7", "kind": "mcp", "display_name": "Context7",
+      "endpoint_ids": ["mcp-context7"], "profile_ids": ["mcp-streamable-http-v1"],
       "required_permissions": ["llm:invoke", "mcp:context7:invoke"],
       "credential_modes": [{"source": "none", "required_permissions": []}]
     },
     {
-      "id": "github",
-      "kind": "mcp",
-      "display_name": "GitHub",
-      "endpoint_ids": ["mcp-github"],
-      "profile_ids": ["legacy-mcp"],
+      "id": "github", "kind": "mcp", "display_name": "GitHub",
+      "endpoint_ids": ["mcp-github"], "profile_ids": ["mcp-streamable-http-v1"],
       "required_permissions": ["llm:invoke", "mcp:github:invoke"],
       "credential_modes": [{"source": "none", "required_permissions": []}]
     }
   ],
   "profiles": [
     {
-      "id": "anthropic-messages-v1",
-      "revision": "1",
-      "limitations": [
-        "Production Base/controller integration qualification pending.",
-        "Only x-api-key is an approved provider credential location."
-      ],
-      "operations": [
-        {"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": ["JSON/SSE with anthropic-version 2023-06-01; beta and extended operations are not admitted."]}
-      ]
+      "id": "openai-chat-completions-v1", "revision": "1", "limitations": ["JSON/SSE only."],
+      "operations": [{"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": []}]
     },
     {
-      "id": "chatgpt-web-v1",
-      "revision": "1",
-      "limitations": ["No website route or uninspected fallback is enabled by this profile."],
-      "operations": [
-        {"id": "login", "support": "unknown", "restoration_scope": "none", "limitations": ["Browser qualification pending."]},
-        {"id": "inference", "support": "unknown", "restoration_scope": "none", "limitations": ["Website adapter qualification pending."]},
-        {"id": "upload", "support": "unknown", "restoration_scope": "none", "limitations": ["Website adapter qualification pending."]},
-        {"id": "history", "support": "unknown", "restoration_scope": "none", "limitations": ["Persistent restoration is not implemented."]},
-        {"id": "export", "support": "unknown", "restoration_scope": "none", "limitations": ["Persistent restoration is not implemented."]}
-      ]
+      "id": "openai-responses-v1", "revision": "1", "limitations": ["Opaque continuation is unsupported."],
+      "operations": [{"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": []}]
     },
     {
-      "id": "gamma-web-v1",
-      "revision": "1",
-      "limitations": ["No website route or uninspected fallback is enabled by this profile."],
-      "operations": [
-        {"id": "login", "support": "unknown", "restoration_scope": "none", "limitations": ["Browser qualification pending."]},
-        {"id": "inference", "support": "unknown", "restoration_scope": "none", "limitations": ["Website adapter qualification pending."]},
-        {"id": "upload", "support": "unknown", "restoration_scope": "none", "limitations": ["Website adapter qualification pending."]},
-        {"id": "history", "support": "unknown", "restoration_scope": "none", "limitations": ["Persistent restoration is not implemented."]},
-        {"id": "export", "support": "unknown", "restoration_scope": "none", "limitations": ["Website adapter qualification pending."]}
-      ]
-    },
-    {
-      "id": "google-generate-content-v1",
-      "revision": "1",
-      "limitations": [
-        "Production Base/controller integration qualification pending.",
-        "Inspected native /v1beta paths only; prefixed API mounts await separate acceptance.",
-        "Only x-goog-api-key is admitted; query-string credentials are rejected."
-      ],
-      "operations": [
-        {"id": "generateContent", "support": "unknown", "restoration_scope": "request", "limitations": ["Exact approved model path and JSON only."]},
-        {"id": "streamGenerateContent", "support": "unknown", "restoration_scope": "request", "limitations": ["Exact approved model path with alt=sse only."]}
-      ]
-    },
-    {
-      "id": "openai-chat-completions-v1",
-      "revision": "1",
-      "limitations": [
-        "Production v5 integration qualification pending.",
-        "Dedicated API entry accepts Neurwerk keys only; legacy OIDC remains separate.",
-        "Proxy preemptive Basic is proven locally; browser challenge coverage is being qualified.",
-        "Provider credentials do not establish ownership or subscription status."
-      ],
-      "operations": [
-        {"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": ["JSON and SSE only; WebSocket upgrades are rejected."]}
-      ]
-    },
-    {
-      "id": "openai-responses-v1",
-      "revision": "1",
-      "limitations": [
-        "Production v5 integration qualification pending.",
-        "Dedicated API entry accepts Neurwerk keys only; legacy OIDC remains separate.",
-        "Proxy preemptive Basic is proven locally; browser challenge coverage is being qualified.",
-        "Restoration mappings are request-local."
-      ],
-      "operations": [
-        {"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": ["JSON and SSE only; persistent history and WebSocket operations are unqualified."]}
-      ]
-    },
-    {
-      "id": "legacy-model-api",
-      "revision": "1",
-      "limitations": ["Existing JWT/API-key semantics remain on /v1."],
-      "operations": [
-        {"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": ["Existing company API compatibility; no new company-use grant is inferred."]}
-      ]
-    },
-    {
-      "id": "legacy-mcp",
-      "revision": "1",
-      "limitations": ["Existing stateless MCP contract."],
-      "operations": [
-        {"id": "tools", "support": "unknown", "restoration_scope": "request", "limitations": ["Each configured MCP integration requires its own qualification."]}
-      ]
+      "id": "mcp-streamable-http-v1", "revision": "1", "limitations": ["Stateless exchanges only."],
+      "operations": [{"id": "exchange", "support": "unknown", "restoration_scope": "request", "limitations": []}]
     }
   ]
 }

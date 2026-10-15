@@ -116,7 +116,7 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
               <Health state={observedHealth(view, "endpoints", endpoint.id, now)} /></div>
             <p className="mt-2 break-all font-mono text-sm">{endpoint.url}</p>
             <p className="mt-2 text-xs text-muted-foreground">Caller authentication: {endpoint.caller_auth_modes.map((mode) =>
-              ({ legacy: "Existing API authentication", neurwerk_bearer: "Neurwerk bearer", proxy_basic: "Proxy Basic" })[mode]).join(", ")}</p>
+              ({ oidc_bearer: "Keycloak sign-in", neurwerk_bearer: "Neurwerk bearer", proxy_basic: "Proxy Basic" })[mode]).join(", ")}</p>
           </div>)}
         </div>
         {!view.catalog.endpoints.length && <p className="mt-3 text-sm text-muted-foreground">No endpoints in this view.</p>}
