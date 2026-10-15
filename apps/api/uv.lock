@@ -466,7 +466,7 @@ wheels = [
 
 [[package]]
 name = "k8s-stack-studio"
-version = "0.19.1"
+version = "0.19.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -588,7 +588,7 @@ wheels = [
 
 [[package]]
 name = "neurwerk-request-segments"
-version = "0.1.1"
+version = "0.1.2"
 source = { directory = "vendor/request_segments" }
 dependencies = [
     { name = "pydantic" },
