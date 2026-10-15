@@ -112,7 +112,7 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
         </p>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {view.catalog.endpoints.map((endpoint) => <div key={endpoint.id} className="rounded-lg border border-border p-3">
-            <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{endpoint.entry_mode === "api" ? "API / MCP" : "TLS forward proxy"}</span>
+            <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{endpoint.entry_mode === "api" ? "API / MCP" : endpoint.url.toLowerCase().startsWith("https:") ? "HTTPS forward proxy" : "HTTP forward proxy"}</span>
               <Health state={observedHealth(view, "endpoints", endpoint.id, now)} /></div>
             <p className="mt-2 break-all font-mono text-sm">{endpoint.url}</p>
             <p className="mt-2 text-xs text-muted-foreground">Caller authentication: {endpoint.caller_auth_modes.map((mode) =>
