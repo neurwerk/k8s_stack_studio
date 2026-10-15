@@ -466,7 +466,7 @@ wheels = [
 
 [[package]]
 name = "k8s-stack-studio"
-version = "0.18.0"
+version = "0.18.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
