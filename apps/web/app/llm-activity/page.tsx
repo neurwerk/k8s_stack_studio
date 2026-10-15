@@ -14,6 +14,11 @@ function pretty(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
 
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+}
+
 function statusFor(item: Activity): string {
   return item.type === "TOOL" ? item.status ?? "Not recorded" : item.level ?? "Not recorded";
 }
@@ -41,21 +46,39 @@ function resultPreview(raw: string | null): string {
   } catch {
     // Plain-text results are displayed as recorded.
   }
+  const envelope = record(value);
+  if (Array.isArray(envelope?.messages)) value = envelope.messages;
   if (Array.isArray(value)) {
-    const messages = value as unknown[];
-    const response = messages.findLast((entry) =>
-      typeof entry === "object" && entry !== null && "role" in entry && entry.role === "assistant");
-    value = response ?? messages.at(-1) ?? value;
+    value = value.findLast((entry: unknown) => record(entry)?.role === "assistant") ?? value.at(-1) ?? value;
   }
-  if (typeof value === "object" && value !== null) {
-    const record = value as Record<string, unknown>;
-    value = record.content ?? record["content.0.text"] ?? value;
-  }
+  const message = record(value);
+  const content = message?.content ?? message?.["content.0.text"];
+  value = content === "" || content == null
+    ? envelope?.tool_calls ?? message?.tool_calls ?? value : content;
   const text = pretty(value).replace(/\s+/g, " ").trim();
   return text.length > 180 ? `${text.slice(0, 180)}…` : text || "No content recorded";
 }
 
-function recordedContent(raw: string | null, label: string, full: boolean): React.ReactNode {
+function payloadFields(fields: Record<string, unknown>, omit: string[] = []): React.ReactNode {
+  const labels: Record<string, string> = {
+    tools: "Available tools", tool_calls: "Tool calls requested",
+    tool_choice: "Tool selection", parallel_tool_calls: "Parallel tool calls allowed",
+    functions: "Available functions (legacy)", function_call: "Function selection (legacy)",
+    toolConfig: "Tool configuration",
+  };
+  return Object.entries(fields).filter(([key, value]) => !omit.includes(key) && value !== null).map(([key, value]) => (
+    <div key={key} className="min-w-0">
+      <h3 className="mb-2 text-xs font-semibold">{labels[key] ?? key}</h3>
+      {Array.isArray(value) && value.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{key === "tools" ? "No tools provided in this field." : key === "tool_calls" ? "No tool calls returned." : "Empty list."}</p>
+      ) : (
+        <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--code-background)] p-3 font-mono text-xs leading-relaxed text-[var(--code-foreground)]">{pretty(value)}</pre>
+      )}
+    </div>
+  ));
+}
+
+function recordedContent(raw: string | null, label: string, full: boolean, model?: "input" | "output"): React.ReactNode {
   if (raw === null || raw === "") {
     return <p className="text-sm text-muted-foreground">{label} was not recorded.</p>;
   }
@@ -68,14 +91,12 @@ function recordedContent(raw: string | null, label: string, full: boolean): Reac
   if (full) {
     return <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--code-background)] p-3 font-mono text-xs leading-relaxed text-[var(--code-foreground)]">{pretty(value)}</pre>;
   }
-  const messages = Array.isArray(value)
-    ? value
-    : typeof value === "object" && value !== null && "messages" in value &&
-        Array.isArray(value.messages)
-      ? value.messages
-      : typeof value === "object" && value !== null && "role" in value
-        ? [value]
-        : null;
+  const fields = record(value) ?? {};
+  const messages = Array.isArray(value) ? value : Array.isArray(fields.messages)
+    ? fields.messages : "role" in fields ? [fields] : null;
+  const toolKey = model === "input" ? "tools" : "tool_calls";
+  const toolContextRecorded = fields[toolKey] != null ||
+    messages?.some((message) => record(message)?.[toolKey] != null);
   return (
     <div className="space-y-3">
       {messages && messages.length > 0 && (
@@ -87,13 +108,20 @@ function recordedContent(raw: string | null, label: string, full: boolean): Reac
                 <span className={`badge badge-sm mb-2 font-medium ${roleColor(typeof item?.role === "string" ? item.role : "")}`}>
                   {typeof item?.role === "string" ? item.role : `Message ${String(index + 1)}`}
                 </span>
-                <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--code-background)] p-3 font-mono text-xs leading-relaxed text-[var(--code-foreground)]">{pretty(item?.content ?? message)}</pre>
+                {(!item || item.content != null) && (
+                  <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--code-background)] p-3 font-mono text-xs leading-relaxed text-[var(--code-foreground)]">{pretty(item ? item.content : message)}</pre>
+                )}
+                {item && <div className="mt-3 space-y-3">{payloadFields(item, ["role", "content"])}</div>}
               </li>
             );
           })}
         </ol>
       )}
-      {!(messages && messages.length > 0) && (
+      {Array.isArray(fields.messages) && payloadFields(fields, ["messages"])}
+      {model && !toolContextRecorded && (
+        <p className="text-sm text-muted-foreground">{model === "input" ? "Available tools were not recorded." : "Tool calls were not recorded."}</p>
+      )}
+      {(messages === null || (messages.length === 0 && !Array.isArray(fields.messages))) && (
         <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--code-background)] p-3 font-mono text-xs leading-relaxed text-[var(--code-foreground)]">{pretty(value)}</pre>
       )}
     </div>
@@ -361,7 +389,7 @@ function ActivityView() {
                             <section className="min-w-0 rounded-lg border border-border bg-card p-4" aria-label={item.type === "TOOL" ? "Tool parameters" : "Sent to the model"}>
                               <h2 className="mb-3 text-sm font-semibold">{item.type === "TOOL" ? "Parameters sent to tool" : "Sent to model"}</h2>
                               {recordedContent(item.type === "TOOL" ? item.parameters : item.input,
-                                item.type === "TOOL" ? "Parameters" : "Input", fullPayload)}
+                                item.type === "TOOL" ? "Parameters" : "Input", fullPayload, item.type === "TOOL" ? undefined : "input")}
                             </section>
                             <div className="flex items-center gap-3 py-2 text-primary" aria-hidden="true">
                               <span className="h-px flex-1 bg-border" />
@@ -373,7 +401,7 @@ function ActivityView() {
                             <section className="min-w-0 rounded-lg border border-border bg-card p-4" aria-label={item.type === "TOOL" ? "Tool result" : "Received from the model"}>
                               <h2 className="mb-3 text-sm font-semibold">{item.type === "TOOL" ? "Result from tool" : "Received from model"}</h2>
                               {recordedContent(item.type === "TOOL" ? item.result : item.output,
-                                item.type === "TOOL" ? "Result" : "Output", fullPayload)}
+                                item.type === "TOOL" ? "Result" : "Output", fullPayload, item.type === "TOOL" ? undefined : "output")}
                             </section>
                           </div>
                           <section aria-label="Recorded metadata" className="mt-4 min-w-0 rounded-lg border border-border bg-card p-4">
