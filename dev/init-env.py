@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import secrets
+import ssl
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -108,3 +112,49 @@ if not all((tls / name).exists() for name in required):
         key.chmod(0o600)
     ca_key.chmod(0o600)
     print("Created local CA and workload certificates in .dev-local/tls")
+
+# The local developer can view every demo destination through the real API.
+catalog = json.loads((root / "dev/gateway-catalog.json").read_text())
+permissions = set()
+for destination in catalog["destinations"]:
+    permissions.update(destination["required_permissions"])
+    for mode in destination["credential_modes"]:
+        permissions.update(mode["required_permissions"])
+(secrets_dir / "demo-users/gateway-roles.txt").write_text(
+    "\n".join(sorted(permissions)) + "\n"
+)
+
+# Public download preview only: a separate demo root, with its key discarded.
+gateway = secrets_dir / "gateway"
+gateway.mkdir(mode=0o700, exist_ok=True)
+inspection_root = gateway / "inspection-root.pem"
+if not inspection_root.exists():
+    subprocess.run(
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-noenc",
+            "-days", "3650", "-subj", "/CN=Studio demo inspection root - not for real traffic",
+            "-addext", "basicConstraints=critical,CA:TRUE,pathlen:1",
+            "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+            "-keyout", os.devnull, "-out", str(inspection_root),
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+pem = inspection_root.read_text()
+version = hashlib.sha256(pem.encode("ascii")).hexdigest()
+(gateway / "snapshots.json").write_text(json.dumps({
+    "schema_version": 1,
+    "current_version": version,
+    "versions": [{
+        "version": version,
+        "bundle_sha256": version,
+        "published_at": datetime.fromtimestamp(inspection_root.stat().st_mtime, UTC).isoformat(),
+        "certificates": [{
+            "fingerprint_sha256": hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest(),
+            "pem": pem,
+            "purpose": "inspection-root",
+            "state": "active",
+        }],
+    }],
+}, indent=2) + "\n")
