@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "k8s-stack-studio"
-version = "0.19.0"
+version = "0.19.1"
 description = "neurwerk studio FastAPI backend proxying internal services"
 authors = [{ name = "neurwerk", email = "dev@neurwerk.com" }]
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "neurwerk-request-segments==0.1.0",
+    "neurwerk-request-segments==0.1.1",
     "fastapi>=0.138.2",
     "uvicorn>=0.34.0",
     "pydantic-settings>=2.7",

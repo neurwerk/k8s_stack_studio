@@ -772,6 +772,27 @@ async def test_studio_rejects_invalid_samples_without_sending_content(client, mo
     mock_http_client.request.assert_not_called()
 
 
+async def test_long_history_accepts_configurable_engine_leaf_counts(client, mock_http_client):
+    messages = [{"role": "user", "content": "text"} for _ in range(2_099)]
+    sample = {
+        "model": "sample-model",
+        "messages": [*messages, {"role": "user", "content": "email a@example.com"}],
+    }
+    request = StudioAnalyzeRequest.model_validate({"request": sample})
+    payload = studio_response()
+    cast(dict[str, object], payload["analysis"])["text_leaf_count"] = 2_100
+    payload["segments"] = [{"id": f"s{index}", "text": "text"} for index in range(2_099)] + [
+        {"id": "s2099", "text": "email *************"}
+    ]
+    mock_http_client.request = AsyncMock(return_value=httpx.Response(200, json=payload))
+    result = await client.analyze(request)
+    assert result.analysis.text_leaf_count == 2_100
+    assert result.request.model_dump(exclude_unset=True) == {
+        **sample,
+        "messages": [*messages, {"role": "user", "content": "email *************"}],
+    }
+
+
 async def test_responses_preserves_controls_and_rejects_reordered_segments(
     client, mock_http_client
 ):
