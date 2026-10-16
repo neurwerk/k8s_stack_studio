@@ -235,3 +235,43 @@ async def test_historical_activity_does_not_turn_reported_zero_into_free(activit
     assert item["tokens"] == item["costUsd"] == 0
     assert item["accounting"]["tokens"]["state"] == "unknown"
     assert item["accounting"]["cost_usd"]["complete_total"] is None
+
+
+async def test_mcp_status_redacts_credentials_without_losing_error_context(activity_api):
+    client, _, state = activity_api
+    row = observation("tool-error")
+    row.update(
+        type="TOOL",
+        level="ERROR",
+        statusMessage=(
+            "Connection refused using Bearer synthetic-bearer "
+            "at https://synthetic-user:synthetic-password@tool.example/"
+            "?api_key=synthetic-query; retry after reconnecting"
+        ),
+    )
+    state["result"] = httpx.Response(200, json={"data": [row]})
+    response = await client.post("/api/me/llm-activity", json={"type": "mcp"})
+    assert response.status_code == 200
+    status = response.json()[0]["status"]
+    assert "Connection refused" in status
+    assert "retry after reconnecting" in status
+    assert "tool.example" in status
+    for credential in (
+        "synthetic-bearer",
+        "synthetic-user",
+        "synthetic-password",
+        "synthetic-query",
+    ):
+        assert credential not in status
+        assert credential not in response.text
+
+
+@pytest.mark.parametrize("level, expected", [("ERROR", "ERROR"), ("DEFAULT", None), (None, None)])
+async def test_mcp_status_without_message_preserves_level_fallback(activity_api, level, expected):
+    client, _, state = activity_api
+    row = observation("tool-status")
+    row.update(type="TOOL", level=level)
+    state["result"] = httpx.Response(200, json={"data": [row]})
+    response = await client.post("/api/me/llm-activity", json={"type": "mcp"})
+    assert response.status_code == 200
+    assert response.json()[0]["status"] == expected
