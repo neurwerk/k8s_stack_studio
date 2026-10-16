@@ -59,13 +59,10 @@ export default tseslint.config(
       // Legacy files — TODO(2026-08): C2+H2 will split and clean config-panel + config-generator
       "components/config-panel.tsx",
       "components/config-panel/entity-row.tsx",
-      "components/config-panel/route-target-row.tsx",
       "components/config-panel/safety-rule-row.tsx",
-      "components/config-panel/classifier-class-row.tsx",
       "components/config-panel/operator-params.tsx",
       "components/config-panel/pattern-editor.tsx",
       "components/config-panel/param-input.tsx",
-      "components/config-panel/primary-span.tsx",
       "lib/config-generator.ts",
     ],
     rules: {
