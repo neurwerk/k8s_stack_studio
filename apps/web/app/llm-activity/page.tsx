@@ -373,9 +373,10 @@ function ActivityView() {
                           </div>
                           {item.gateway && <section aria-label="Gateway context" className="mb-4 min-w-0 rounded-lg border border-border bg-card p-4">
                             <h2 className="mb-2 text-sm font-semibold">Gateway context</h2>
+                            <p className="mb-3 text-xs text-muted-foreground">Inspection describes request text. Dispatch selection does not prove an attempt; HTTP 200 does not prove final success. Provider credential source describes admission; target credential mode describes the selected target.</p>
                             <dl className="grid gap-2 text-xs sm:grid-cols-2 xl:grid-cols-3">
                               {Object.entries(item.gateway).map(([name, value]) => <div key={name} className="min-w-0">
-                                <dt className="text-muted-foreground">{name.replaceAll("_", " ")}</dt>
+                                <dt className="text-muted-foreground">{name === "provider_credential_source" ? "Admission provider credential source" : name.replaceAll("_", " ")}</dt>
                                 <dd className="break-all font-mono">{value === null ? "Unknown" : name === "billing_classification" ? billingLabels[String(value)] : String(value)}</dd>
                               </div>)}
                             </dl>

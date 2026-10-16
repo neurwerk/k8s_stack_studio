@@ -51,6 +51,14 @@ class GatewayMetadata(GatewayFilters):
     """Allowlisted trace context; absent or malformed evidence remains unknown."""
 
     billing_classification: BillingClassification = "unknown"
+    request_text_inspection: Literal[
+        "scanned", "cached_decision", "not_scanned", "disabled", "unknown"
+    ] = "unknown"
+    dispatch_binding_id: MetadataValue | None = None
+    dispatch_destination_id: MetadataValue | None = None
+    dispatch_attempted: StrictBool | None = None
+    request_outcome: Literal["http_error", "gateway_error", "unknown"] = "unknown"
+    target_credential_mode: Literal["company", "caller_supplied", "none", "unknown"] = "unknown"
     token_usage_known: StrictBool | None = None
     cost_known: StrictBool | None = None
 

@@ -152,7 +152,18 @@ async def test_personal_activity_boundary(activity_api):
     assert calls == []
 
 
-async def test_classified_activity_stays_self_only_and_allowlisted(activity_api):
+@pytest.mark.parametrize(
+    "inspection,source,target",
+    [
+        ("scanned", "caller_supplied", "caller_supplied"),
+        ("cached_decision", "company", "none"),
+        ("disabled", "company", "company"),
+        ("not_scanned", "none", "none"),
+    ],
+)
+async def test_classified_activity_stays_self_only_and_allowlisted(
+    activity_api, inspection, source, target
+):
     client, calls, state = activity_api
     state["principal"] = StudioPrincipal(
         "self", frozenset({"studio-user", "langfuse-admin", "gateway-admin"}), frozenset(), {}
@@ -162,7 +173,13 @@ async def test_classified_activity_stays_self_only_and_allowlisted(activity_api)
         "neurwerk.entry_mode": "forward_proxy",
         "neurwerk.destination_kind": "model",
         "neurwerk.destination_id": "example",
-        "neurwerk.provider_credential_source": "caller_supplied",
+        "neurwerk.provider_credential_source": source,
+        "neurwerk.target_credential_mode": target,
+        "neurwerk.request_text_inspection": inspection,
+        "neurwerk.dispatch_binding_id": "selected-binding",
+        "neurwerk.dispatch_destination_id": "selected-model",
+        "neurwerk.dispatch_attempted": True,
+        "neurwerk.request_outcome": "http_error",
         "neurwerk.request_id": "request-1",
         "neurwerk.token_usage_known": True,
         "neurwerk.cost_known": False,
@@ -178,7 +195,7 @@ async def test_classified_activity_stays_self_only_and_allowlisted(activity_api)
         json={
             "type": "llm",
             "q": "example",
-            "provider_credential_source": "caller_supplied",
+            "provider_credential_source": source,
             "entry_mode": "forward_proxy",
         },
     )
@@ -186,7 +203,13 @@ async def test_classified_activity_stays_self_only_and_allowlisted(activity_api)
     assert len(result.json()) == 1  # Search branches return the same observation, deduplicated.
     item = result.json()[0]
     assert item["gateway"]["billing_classification"] == "unknown"
-    assert item["gateway"]["provider_credential_source"] == "caller_supplied"
+    assert item["gateway"]["provider_credential_source"] == source
+    assert item["gateway"]["target_credential_mode"] == target
+    assert item["gateway"]["request_text_inspection"] == inspection
+    assert item["gateway"]["dispatch_binding_id"] == "selected-binding"
+    assert item["gateway"]["dispatch_destination_id"] == "selected-model"
+    assert item["gateway"]["dispatch_attempted"] is True
+    assert item["gateway"]["request_outcome"] == "http_error"
     assert item["gateway"]["provider_id"] is None
     assert item["accounting"]["tokens"]["complete_total"] == 0
     assert item["accounting"]["cost_usd"]["complete_total"] is None
@@ -224,9 +247,32 @@ async def test_classified_activity_stays_self_only_and_allowlisted(activity_api)
     assert calls == []
 
 
-async def test_historical_activity_does_not_turn_reported_zero_into_free(activity_api):
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {
+            "attributes.neurwerk.request_text_inspection": "scanned",
+            "attributes.neurwerk.dispatch_attempted": True,
+            "headers": {"neurwerk.request_outcome": "http_error"},
+            "neurwerk.request_context": {"target_credential_mode": "company"},
+        },
+        {
+            "neurwerk.request_text_inspection": "enabled",
+            "neurwerk.target_credential_mode": "subscription",
+            "neurwerk.request_outcome": "success",
+            "neurwerk.dispatch_attempted": "true",
+            "neurwerk.dispatch_binding_id": {"id": "untrusted"},
+            "neurwerk.dispatch_destination_id": "untrusted\nmodel",
+        },
+    ],
+)
+async def test_historical_activity_does_not_turn_reported_zero_into_free(activity_api, metadata):
     client, _, state = activity_api
     row = observation("historical")
+    original = row["metadata"]
+    assert isinstance(original, dict)
+    original.update(metadata)
     row.update(totalUsage=0, totalCost=0)
     state["result"] = httpx.Response(200, json={"data": [row]})
     response = await client.post("/api/me/llm-activity", json={})
@@ -235,6 +281,12 @@ async def test_historical_activity_does_not_turn_reported_zero_into_free(activit
     assert item["tokens"] == item["costUsd"] == 0
     assert item["accounting"]["tokens"]["state"] == "unknown"
     assert item["accounting"]["cost_usd"]["complete_total"] is None
+    assert item["gateway"]["request_text_inspection"] == "unknown"
+    assert item["gateway"]["target_credential_mode"] == "unknown"
+    assert item["gateway"]["request_outcome"] == "unknown"  # Even with recorded HTTP 200.
+    assert item["gateway"]["dispatch_attempted"] is None
+    assert item["gateway"]["dispatch_binding_id"] is None
+    assert item["gateway"]["dispatch_destination_id"] is None
 
 
 async def test_mcp_status_redacts_credentials_without_losing_error_context(activity_api):

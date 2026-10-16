@@ -27,6 +27,12 @@ export interface GatewayMetadata {
   policy_revision: string | null;
   requested_model: string | null;
   resolved_model: string | null;
+  request_text_inspection: "scanned" | "cached_decision" | "not_scanned" | "disabled" | "unknown";
+  dispatch_binding_id: string | null;
+  dispatch_destination_id: string | null;
+  dispatch_attempted: boolean | null;
+  request_outcome: "http_error" | "gateway_error" | "unknown";
+  target_credential_mode: "company" | "caller_supplied" | "none" | "unknown";
   billing_classification: "company_api" | "personal_api" | "subscription" | "unknown";
   request_id: string | null;
   token_usage_known: boolean | null;
