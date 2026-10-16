@@ -237,7 +237,7 @@ def _activity(row: Observation) -> Activity:
             content_metadata,
             "attributes.langfuse.observation.output.",
         ),
-        status=status,
+        status=_redact_text(status) if status else status,
         tokens=tokens,
         costUsd=row.total_cost,
         metadata=metadata,
