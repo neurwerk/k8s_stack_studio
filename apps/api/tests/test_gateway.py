@@ -202,6 +202,36 @@ def test_missing_and_partial_profile_evidence(projection, tmp_path):
     assert all(item.state == "unknown" for item in view.status.profiles)
 
 
+def test_unknown_revision_preserves_fresh_admin_signer_evidence(projection, tmp_path):
+    observed = status()
+    observed["applied_policy_revision"] = None
+    observed["signers"] = [
+        {
+            "pod_uid": "replica-uid",
+            "pod_name": "gateway-replica",
+            "listener": "inspect-example",
+            "state": "verified",
+            "observed_at": observed["observed_at"],
+            "fingerprint_sha256": "a" * 64,
+            "not_after": observed["valid_until"],
+        }
+    ]
+    (tmp_path / "status.json").write_text(json.dumps(observed))
+    view = gateway.gateway_view(projection, frozenset(), administrator=True)
+    assert view.status.state == "unknown"
+    assert view.status.applied_policy_revision is None
+    assert view.status.signers[0].state == "verified"
+    assert gateway.gateway_view(projection, frozenset()).status.signers == []
+    observed["observed_at"] = "2020-01-01T00:00:00Z"
+    observed["valid_until"] = "2020-01-02T00:00:00Z"
+    observed["signers"][0]["observed_at"] = observed["observed_at"]
+    (tmp_path / "status.json").write_text(json.dumps(observed))
+    assert (
+        gateway.gateway_view(projection, frozenset(), administrator=True).status.signers[0].state
+        == "unknown"
+    )
+
+
 def test_catalog_and_status_share_projected_generation(tmp_path, monkeypatch):
     for generation in ("old", "new"):
         directory = tmp_path / generation

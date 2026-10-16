@@ -164,15 +164,39 @@ class ProfileObservation(EndpointObservation):
     revision: Identifier
 
 
+class SignerObservation(GatewayModel):
+    """Public intermediate observed on one sampled listener of a serving replica."""
+
+    pod_uid: Identifier
+    pod_name: Identifier
+    listener: Identifier
+    state: Literal["verified", "unknown"]
+    observed_at: AwareDatetime
+    fingerprint_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None
+    not_after: AwareDatetime | None
+
+    @model_validator(mode="after")
+    def complete_evidence(self) -> Self:
+        """A verified observation needs both public certificate facts."""
+        if self.state == "verified" and (
+            self.fingerprint_sha256 is None
+            or self.not_after is None
+            or self.not_after <= self.observed_at
+        ):
+            raise GatewayDocumentError
+        return self
+
+
 class GatewayStatus(GatewaySchema):
     """Optional publisher observation; configuration cannot generate this data."""
 
     catalog_revision: Identifier
-    applied_policy_revision: Identifier
+    applied_policy_revision: Identifier | None
     observed_at: AwareDatetime
     valid_until: AwareDatetime
     endpoints: list[EndpointObservation] = Field(max_length=32)
     profiles: list[ProfileObservation] = Field(max_length=128)
+    signers: list[SignerObservation] = Field(default_factory=list, max_length=64)
 
     @model_validator(mode="after")
     def validate_observations(self) -> Self:
@@ -181,6 +205,10 @@ class GatewayStatus(GatewaySchema):
             self.valid_until <= self.observed_at
             or len({item.id for item in self.endpoints}) != len(self.endpoints)
             or len({item.id for item in self.profiles}) != len(self.profiles)
+            or len({item.pod_uid for item in self.signers}) != len(self.signers)
+            or any(
+                not self.observed_at <= item.observed_at < self.valid_until for item in self.signers
+            )
         ):
             raise GatewayDocumentError
         return self
@@ -203,6 +231,7 @@ class GatewayHealth(GatewayModel):
     valid_until: AwareDatetime | None = None
     endpoints: list[EndpointObservation]
     profiles: list[ProfileHealth]
+    signers: list[SignerObservation] = Field(default_factory=list)
 
 
 class GatewayView(GatewayModel):
