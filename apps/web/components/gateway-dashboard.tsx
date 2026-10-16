@@ -107,8 +107,8 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
       <section className={panel} aria-labelledby="gateway-endpoints-heading">
         <h2 id="gateway-endpoints-heading" className="text-lg font-semibold">Configured endpoints</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {observationsCurrent(view, now) ? "Current observations are shown where published."
-            : "Live health is unknown: observations are missing, expired or do not match this configuration."}
+          {observationsCurrent(view, now) ? "Current internal gateway readiness is shown where observed. Provider health is not established by these checks."
+            : "Gateway readiness is unknown: observations are missing, expired or do not match this configuration."}
         </p>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {view.catalog.endpoints.map((endpoint) => <div key={endpoint.id} className="rounded-lg border border-border p-3">
@@ -122,7 +122,7 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
         {!view.catalog.endpoints.length && <p className="mt-3 text-sm text-muted-foreground">No endpoints in this view.</p>}
       </section>
 
-      {administrator && <GatewayRevisions view={view} />}
+      {administrator && <GatewayRevisions view={view} now={now} />}
 
       <section className={panel} aria-labelledby="gateway-destinations-heading">
         <h2 id="gateway-destinations-heading" className="text-lg font-semibold">{administrator ? "Configured destinations" : "Your destinations"}</h2>
@@ -180,12 +180,12 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
   </main>;
 }
 
-function GatewayRevisions({ view }: { view: GatewayView }) {
+function GatewayRevisions({ view, now }: { view: GatewayView; now: number }) {
   return <section className={panel} aria-labelledby="gateway-revisions-heading">
     <h2 id="gateway-revisions-heading" className="text-lg font-semibold">Desired and observed revisions</h2>
     <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-      {Object.entries({ "Desired catalog": view.catalog.catalog_revision, "Observed catalog": view.status.catalog_revision,
-        "Desired policy": view.catalog.policy_revision, "Applied policy": view.status.applied_policy_revision,
+      {Object.entries({ "Desired catalog": view.catalog.catalog_revision, "Observation catalog": view.status.catalog_revision,
+        "Desired policy": view.catalog.policy_revision, "Observed loaded policy marker": view.status.applied_policy_revision,
         "Observed at": view.status.observed_at, "Valid until": view.status.valid_until }).map(([label, value]) =>
         <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="break-all font-mono text-xs">{value ?? "Unknown"}</dd></div>)}
     </dl>
@@ -194,6 +194,21 @@ function GatewayRevisions({ view }: { view: GatewayView }) {
       <tbody>{view.catalog.profiles.map((item) => <tr key={item.id}><td>{item.id}</td><td>{item.revision}</td>
         <td>{view.status.profiles.find((observed) => observed.id === item.id)?.revision ?? "Unknown"}</td></tr>)}</tbody>
     </table></div>
+    <h3 className="mt-4 font-semibold">Observed inspection signers</h3>
+    <p className="mt-1 text-xs text-muted-foreground">One configured inspection listener and serving address are sampled per replica using a fresh TLS handshake. Other listeners and existing tunnels are not verified.</p>
+    <div className="mt-3 overflow-x-auto"><table className="table table-sm">
+      <thead><tr><th>Replica / UID</th><th>Sampled listener</th><th>Chain</th><th>Signer SHA-256</th><th>Signer expiry</th><th>Observed at</th></tr></thead>
+      <tbody>{(view.status.signers ?? []).map((signer) => {
+        const current = signer.state === "verified" && view.status.valid_until !== null &&
+          Date.parse(signer.observed_at) <= now && now < Date.parse(view.status.valid_until) &&
+          signer.not_after !== null && now < Date.parse(signer.not_after);
+        return <tr key={signer.pod_uid}><td>{signer.pod_name}<p className="font-mono text-xs">{signer.pod_uid}</p></td>
+          <td>{signer.listener}</td><td>{current ? "Verified" : "Unknown"}</td>
+          <td className="max-w-xs break-all font-mono text-xs">{signer.fingerprint_sha256 ?? "Unknown"}</td>
+          <td>{signer.not_after ?? "Unknown"}</td><td>{signer.observed_at}</td></tr>;
+      })}</tbody>
+    </table></div>
+    {!view.status.signers?.length && <p className="mt-2 text-xs text-muted-foreground">No current replica signer observations published.</p>}
   </section>;
 }
 

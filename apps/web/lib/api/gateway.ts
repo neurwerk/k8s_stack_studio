@@ -54,6 +54,15 @@ export interface GatewayView {
     valid_until: string | null;
     endpoints: { id: string; state: HealthState }[];
     profiles: { id: string; revision: string | null; state: HealthState }[];
+    signers?: {
+      pod_uid: string;
+      pod_name: string;
+      listener: string;
+      state: "verified" | "unknown";
+      observed_at: string;
+      fingerprint_sha256: string | null;
+      not_after: string | null;
+    }[];
   };
 }
 

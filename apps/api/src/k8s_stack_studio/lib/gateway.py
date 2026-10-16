@@ -87,6 +87,20 @@ def _health(
             )
             for item in catalog.profiles
         ],
+        signers=[
+            item.model_copy(update={"state": "unknown"})
+            if (
+                status.catalog_revision != catalog.catalog_revision
+                or not status.observed_at <= now < status.valid_until
+                or item.observed_at > now
+                or item.not_after is None
+                or item.not_after <= now
+            )
+            else item
+            for item in status.signers
+        ]
+        if status
+        else [],
     )
 
 
@@ -114,4 +128,6 @@ def gateway_view(
             invalid = True
     if not administrator:
         catalog = _entitled(catalog, permissions)
+        if observed:
+            observed = observed.model_copy(update={"signers": []})
     return GatewayView(catalog=catalog, status=_health(catalog, observed, invalid=invalid))
