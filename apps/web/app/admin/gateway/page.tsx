@@ -1,5 +1,5 @@
-import { GatewayDashboard } from "@/components/gateway-dashboard";
+import { redirect } from "next/navigation";
 
 export default function AdminGatewayPage() {
-  return <GatewayDashboard administrator />;
+  redirect("/gateway");
 }

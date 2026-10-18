@@ -279,6 +279,7 @@ function ActivityView() {
           <colgroup>
             <col className="w-48" />
             <col className="w-24" />
+            <col className="w-32" />
             <col className="w-44" />
             <col className="w-72" />
             <col className="w-24" />
@@ -289,6 +290,7 @@ function ActivityView() {
             <tr>
               <th className="px-3 py-2">Timestamp (local time)</th>
               <th className="px-3 py-2">Type</th>
+              <th className="px-3 py-2">Billing</th>
               <th className="px-3 py-2">Session ID</th>
               <th className="px-3 py-2">Model / server</th>
               <th className="px-3 py-2 text-right">Tokens</th>
@@ -319,8 +321,10 @@ function ActivityView() {
                       <span className={`badge badge-sm font-medium ${item.type === "TOOL" ? "badge-secondary" : "badge-primary"}`}>
                         {item.type === "TOOL" ? "MCP" : "LLM"}
                       </span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs text-muted-foreground">
                       {item.gateway && item.gateway.billing_classification !== "unknown" &&
-                        <span className="mt-1 block text-muted-foreground">{billingLabels[item.gateway.billing_classification]}</span>}
+                        billingLabels[item.gateway.billing_classification]}
                     </td>
                     <td className="truncate px-3 py-1.5 align-top font-mono text-xs" title={item.sessionId ?? undefined}>
                       {item.sessionId ? (
@@ -348,7 +352,7 @@ function ActivityView() {
                   </tr>
                   {expanded && (
                     <tr className="border-b border-border bg-muted/20">
-                      <td colSpan={7} className="p-3">
+                      <td colSpan={8} className="p-3">
                         <div className="sticky left-3 w-[calc(100cqw-1.5rem)] rounded-md border border-border bg-background p-4">
                           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                             <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-3">
@@ -424,11 +428,11 @@ function ActivityView() {
               );
             })}
             {!loading && items.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
+              <tr><td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">
                 {error ? "Activity could not be loaded." : "No recorded activity matches these filters."}
               </td></tr>
             )}
-            {loading && <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">Loading activity…</td></tr>}
+            {loading && <tr><td colSpan={8} className="px-3 py-6 text-center text-muted-foreground">Loading activity…</td></tr>}
           </tbody>
         </table>
       </div>
