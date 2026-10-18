@@ -1,12 +1,22 @@
 import type { TrustManifest } from "@/lib/api/gateway";
 import { certificateValidity } from "@/lib/gateway-view";
 
-export function GatewayTrust({ manifest, loading, now }: {
+export function GatewayTrust({ manifest, loading, now, compact = false }: {
   manifest: TrustManifest | null;
   loading: boolean;
   now: number;
+  compact?: boolean;
 }) {
   const current = manifest?.versions.find((item) => item.version === manifest.current_version);
+  if (compact) return <div className="flex flex-wrap gap-2">
+    {current ? <>
+      <a className="btn btn-primary btn-sm" href={`/api/gateway/trust/bundles/${encodeURIComponent(current.version)}.pem`}>Download certificate bundle (.pem)</a>
+      {current.certificates.map((certificate) => <a key={certificate.fingerprint_sha256} className="btn btn-outline btn-sm"
+        href={`/api/gateway/trust/certificates/${encodeURIComponent(certificate.fingerprint_sha256)}.cer`}>
+        Download {certificate.state} certificate (.cer)
+      </a>)}
+    </> : <p role="status" className="text-sm text-muted-foreground">{loading ? "Loading certificates…" : "Certificates unavailable."}</p>}
+  </div>;
   return <section className="card border border-border bg-card p-4 sm:p-6" aria-labelledby="gateway-trust-heading">
     <h2 id="gateway-trust-heading" className="text-lg font-semibold">Inspection trust</h2>
     <p className="mt-1 text-sm text-muted-foreground">

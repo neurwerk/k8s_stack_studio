@@ -15,6 +15,7 @@ from k8s_stack_studio.lib.auth import StudioPrincipal
 from k8s_stack_studio.lib.contextforge import ContextForgeAccountClient, ContextForgeAccountError
 from k8s_stack_studio.lib.contextforge_oauth import ContextForgeOAuthClient
 from k8s_stack_studio.lib.dependencies import get_current_principal, get_settings, require_role
+from k8s_stack_studio.lib.gateway import GatewayUnavailableError, gateway_view
 from k8s_stack_studio.lib.mcp_credentials import McpCredentials, McpSetupError
 from k8s_stack_studio.lib.mcp_native_setup import McpNativeSetup
 from k8s_stack_studio.lib.mcp_publication import PublicationUnavailableError, publication_snapshot
@@ -70,6 +71,18 @@ async def list_setup(
         states = await mcp_store.setups(settings.notice_dsn)
     except (asyncpg.PostgresError, OSError, TimeoutError):
         raise HTTPException(status_code=503, detail="MCP setup storage is unavailable") from None
+    external_urls: dict[str, list[str]] = {}
+    try:
+        catalog = gateway_view(settings, frozenset(), administrator=True).catalog
+        for destination in catalog.destinations:
+            if destination.kind == "mcp":
+                external_urls[destination.id] = [
+                    endpoint.url
+                    for endpoint in catalog.endpoints
+                    if endpoint.id in destination.endpoint_ids and endpoint.entry_mode == "api"
+                ]
+    except GatewayUnavailableError:
+        pass
     result = []
     for item in settings.mcp_catalog:
         state = states.get(item.id, {})
@@ -78,6 +91,7 @@ async def list_setup(
                 id=item.id,
                 name=item.name,
                 url=item.upstream_url,
+                external_urls=external_urls.get(item.id, []),
                 credential=item.credential
                 or McpCredential(owner="none", required=False, method="none"),
                 revision=state.get("revision", 0),

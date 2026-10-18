@@ -16,6 +16,7 @@ export interface McpSetupStatus {
   id: string;
   name: string;
   url: string;
+  external_urls?: string[];
   credential: { owner: "none" | "shared" | "individual"; required: boolean; method: string };
   revision: number;
   selected_tools: string[];
