@@ -75,7 +75,7 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
     [item.display_name, item.id, item.provider_id, item.model].some((value) =>
       value?.toLowerCase().includes(query.toLowerCase().trim()))) ?? [];
 
-  if (administrator) return <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
+  const administration = <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
     <h1 className="text-2xl font-semibold tracking-tight">Gateway administration</h1>
     <GatewayTrust manifest={snapshot.trust} loading={loading} now={now} compact />
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
@@ -96,7 +96,7 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
     </div>
   </main>;
 
-  return <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
+  const access = <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
     <header className="flex flex-wrap items-start justify-between gap-4">
       <div><h1 className="text-2xl font-semibold tracking-tight">{administrator ? "Gateway administration" : "AI Gateway"}</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
@@ -199,6 +199,7 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
 
     <GatewayTrust manifest={snapshot.trust} loading={loading} now={now} />
   </main>;
+  return administrator ? administration : access;
 }
 
 function GatewayRevisions({ view, now }: { view: GatewayView; now: number }) {
