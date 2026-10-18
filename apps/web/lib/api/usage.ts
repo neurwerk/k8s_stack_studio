@@ -26,24 +26,6 @@ export interface UsagePeriod {
   accounting?: UsageAccounting;
 }
 
-/** Usage across all periods shown in Studio. */
-export interface UserUsage {
-  total: UsagePeriod;
-  this_month: UsagePeriod;
-  last_month: UsagePeriod;
-  last_30_days: UsagePeriod;
-  this_week: UsagePeriod;
-  last_week: UsagePeriod;
-  last_7_days: UsagePeriod;
-  today: UsagePeriod;
-  last_24_hours: UsagePeriod;
-}
-
-/** Fetch call, token, and cost usage for a user. */
-export function fetchUserUsage(userId: string): Promise<UserUsage> {
-  return apiGet<UserUsage>(`/users/${userId}/usage`);
-}
-
 export interface DailyModelUsage extends UsagePeriod {
   model: string | null;
 }
