@@ -313,11 +313,15 @@ function AdminMcpSetup() {
           <section className="card space-y-4 border border-border bg-card p-5 sm:p-6" aria-labelledby="setup-heading">
             <h3 id="setup-heading" className="text-base font-semibold">1 · Server setup</h3>
             <div className="max-w-xl space-y-1 text-sm">
-              <p className="font-medium">MCP server URL</p>
+              <p className="font-medium">Upstream MCP URL</p>
               <p className="break-all rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-xs select-text">
                 {server.url}
               </p>
             </div>
+            {server.external_urls?.map((url) => <div key={url} className="max-w-xl space-y-1 text-sm">
+              <p className="font-medium">External MCP URL</p>
+              <p className="break-all rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-xs select-text">{url}</p>
+            </div>)}
             {server.credential.owner === "shared" && <div className="space-y-2 text-sm">
               <label className="block max-w-xl space-y-1">
                 <span className="block font-medium">{keyConfigured ? "Replace API key" : "API key"}

@@ -54,6 +54,7 @@ class McpSetupStatus(BaseModel):
     id: str
     name: str
     url: str
+    external_urls: list[str] = Field(default_factory=list)
     credential: McpCredential
     revision: int = 0
     selected_tools: list[str] = Field(default_factory=list)
