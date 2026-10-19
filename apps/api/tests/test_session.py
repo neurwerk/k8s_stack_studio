@@ -10,7 +10,10 @@ from k8s_stack_studio.lib.auth import StudioPrincipal
 
 
 @pytest.mark.asyncio
-async def test_session_returns_sorted_verified_authorization_claims(monkeypatch) -> None:
+@pytest.mark.parametrize("trust_enabled", [False, True])
+async def test_session_returns_sorted_verified_authorization_claims(
+    monkeypatch, tmp_path, trust_enabled
+) -> None:
     """Expose only claims already validated by the API middleware."""
     principal = StudioPrincipal(
         subject="user-1",
@@ -21,12 +24,16 @@ async def test_session_returns_sorted_verified_authorization_claims(monkeypatch)
 
     ready = AsyncMock(return_value=True)
     monkeypatch.setattr("k8s_stack_studio.controllers.session.schema_ready", ready)
-    settings = Settings(notice_database_url="postgresql://unused")
+    settings = Settings(
+        notice_database_url="postgresql://unused",
+        gateway_trust_file=str(tmp_path / "missing-snapshots.json") if trust_enabled else "",
+    )
     assert await get_session(principal, settings) == SessionResponse(
         subject="user-1",
         realm_roles=["pii-admin", "studio-user"],
         agentgateway_roles=["llm:invoke", "model:remote/example:invoke"],
         notice_preferences_available=True,
         llm_logs_available=False,
+        gateway_trust_available=trust_enabled,
     )
     ready.assert_awaited_once_with("postgresql://unused")
