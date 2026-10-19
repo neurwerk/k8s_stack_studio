@@ -6,6 +6,7 @@ export interface VerifiedSession {
   agentgateway_roles: string[];
   notice_preferences_available: boolean;
   llm_logs_available: boolean;
+  gateway_trust_available?: boolean;
   mcp_catalog_available?: boolean;
   mcp_connections_available?: boolean;
   mcp_setup_available?: boolean;

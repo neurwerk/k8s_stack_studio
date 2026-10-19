@@ -9,10 +9,14 @@ import { useVerifiedSession } from "@/lib/auth/session-context";
 export function GatewayDashboard() {
   const session = useVerifiedSession();
   return <GatewayContent administrator={session.realm_roles.includes("gateway-admin")}
+    trustPublicationAvailable={session.gateway_trust_available !== false}
     key={JSON.stringify([session.subject, session.realm_roles, session.agentgateway_roles])} />;
 }
 
-function GatewayContent({ administrator }: { administrator: boolean }) {
+function GatewayContent({ administrator, trustPublicationAvailable }: {
+  administrator: boolean;
+  trustPublicationAvailable: boolean;
+}) {
   const [view, setView] = useState<GatewayView | null>(null);
   const [trust, setTrust] = useState<TrustManifest | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,7 +33,8 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
     const load = async () => {
       const timeout = setTimeout(() => { controller.abort(); }, 10_000);
       const [gateway, certificates] = await Promise.allSettled([
-        fetchGateway(administrator, controller.signal), fetchGatewayTrust(controller.signal),
+        fetchGateway(administrator, controller.signal),
+        trustPublicationAvailable ? fetchGatewayTrust(controller.signal) : Promise.resolve(null),
       ]);
       clearTimeout(timeout);
       if (active) {
@@ -40,11 +45,12 @@ function GatewayContent({ administrator }: { administrator: boolean }) {
     };
     void load();
     return () => { active = false; controller.abort(); };
-  }, [administrator, now]);
+  }, [administrator, trustPublicationAvailable, now]);
 
   return <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
     <h1 className="text-2xl font-semibold tracking-tight">Gateway</h1>
-    <GatewayTrust manifest={trust} loading={loading} now={now} compact />
+    {trustPublicationAvailable ? <GatewayTrust manifest={trust} loading={loading} now={now} compact />
+      : <p role="status" className="text-sm text-muted-foreground">Inspection certificate publication is disabled.</p>}
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
       <table className="table w-full text-left text-sm">
         <thead><tr className="border-b border-border text-muted-foreground">
