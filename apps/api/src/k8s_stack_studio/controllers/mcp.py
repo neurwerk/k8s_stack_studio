@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
@@ -44,6 +45,23 @@ from k8s_stack_studio.models.mcp import (
 router = APIRouter(
     prefix="/api/me/mcp", tags=["mcp"], dependencies=[Depends(require_role("studio-user"))]
 )
+_logger = logging.getLogger(__name__)
+
+_NATIVE_MESSAGES = {
+    "mcp-native-check-failed": (
+        "Native MCP connection could not be verified. "
+        "Check the connection and account status in Studio."
+    ),
+    "mcp-native-rejected": (
+        "Native MCP authentication or access was rejected. "
+        "Check the connection and account status in Studio; "
+        "contact an administrator if it continues."
+    ),
+    "mcp-native-unavailable": "Native MCP service is temporarily unavailable. Try again later.",
+    "mcp-native-configuration-error": (
+        "Native MCP configuration could not be verified. Contact an administrator."
+    ),
+}
 
 
 class PrepareAccountRequest(BaseModel):
@@ -148,10 +166,17 @@ def _native_unavailable(error: Exception | None = None) -> HTTPException:
             detail="Connection checks are temporarily rate limited",
             headers={"Cache-Control": "no-store", "Retry-After": str(error.retry_after)},
         )
+    code = error.code if isinstance(error, ContextForgeAccountError) else "mcp-native-unavailable"
+    _logger.warning(
+        "MCP native failure: category=%s stage=%s status=%s",
+        code,
+        error.stage if isinstance(error, ContextForgeAccountError) else "native-admission",
+        error.upstream_status if isinstance(error, ContextForgeAccountError) else None,
+    )
     return HTTPException(
         status_code=502,
-        detail="Native MCP connection is unavailable",
-        headers={"Cache-Control": "no-store"},
+        detail=_NATIVE_MESSAGES[code],
+        headers={"Cache-Control": "no-store", "X-MCP-Error-Code": code},
     )
 
 

@@ -6,6 +6,7 @@ export class ApiRequestError extends Error {
   constructor(
     readonly status: number,
     readonly retryAfter: number | null = null,
+    readonly errorCode: string | null = null,
   ) {
     super("Request failed. Please try again.");
     this.name = "ApiRequestError";
@@ -14,7 +15,7 @@ export class ApiRequestError extends Error {
   static fromResponse(response: Response): ApiRequestError {
     const value = response.headers.get("retry-after") ?? "";
     const seconds = /^\d+$/.test(value) ? Math.min(3600, Math.max(1, Number(value))) : null;
-    return new ApiRequestError(response.status, seconds);
+    return new ApiRequestError(response.status, seconds, response.headers.get("x-mcp-error-code"));
   }
 }
 

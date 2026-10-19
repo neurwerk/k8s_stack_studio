@@ -266,6 +266,47 @@ async def test_operator_profile_is_exact_and_read_only(tmp_path, monkeypatch, un
             await account.check_operator(email)
 
 
+def _refresh_response(request, native_status, result):
+    if native_status is None:
+        raise httpx.ConnectError("private-refresh-exception-marker", request=request)
+    return httpx.Response(native_status, json=result, headers={"retry-after": "17"})
+
+
+async def _assert_refresh_failures(client, path, refresh, result, email, caplog):
+    async def assert_failure(code, upstream_status):
+        caplog.clear()
+        response = await client.post(path, json={})
+        assert response.status_code == 502
+        assert response.headers["x-mcp-error-code"] == code
+        assert response.headers["cache-control"] == "no-store"
+        records = [
+            record for record in caplog.records if record.name == "k8s_stack_studio.controllers.mcp"
+        ]
+        assert len(records) == 1
+        assert records[0].args == (code, "native-request", upstream_status)
+        assert records[0].exc_info is None
+        for marker in (
+            "private-refresh-body-marker",
+            "private-refresh-exception-marker",
+            "caller-token",
+            email,
+        ):
+            assert marker not in response.text + caplog.text
+
+    result["error"] = "private-refresh-body-marker"
+    for upstream_status, code in (
+        (401, "mcp-native-rejected"),
+        (403, "mcp-native-rejected"),
+        (503, "mcp-native-unavailable"),
+    ):
+        refresh["status"] = upstream_status
+        await assert_failure(code, upstream_status)
+    refresh["status"] = None
+    await assert_failure("mcp-native-unavailable", None)
+    refresh["status"] = 200
+    result["error"] = None
+
+
 async def test_discovery_admission_transport_and_publication(tmp_path, monkeypatch, caplog):
     settings, data = configured_projection(tmp_path)
     email = settings.contextforge_operator_email
@@ -276,7 +317,7 @@ async def test_discovery_admission_transport_and_publication(tmp_path, monkeypat
         {"email": email, "email_verified": True},
     )
     requests = []
-    native_status = 200
+    refresh = {"status": 200}
     # Native GatewayRefreshResponse uses camelCase aliases on the wire.
     result = {
         "gatewayId": "fixed-gateway",
@@ -301,7 +342,7 @@ async def test_discovery_admission_transport_and_publication(tmp_path, monkeypat
                 "include_resources": "false",
                 "include_prompts": "false",
             }
-            return httpx.Response(native_status, json=result, headers={"retry-after": "17"})
+            return _refresh_response(request, refresh["status"], result)
         if path.startswith("/oauth/status/"):
             return httpx.Response(
                 200,
@@ -378,8 +419,11 @@ async def test_discovery_admission_transport_and_publication(tmp_path, monkeypat
                 assert (await client.get("/api/me/mcp/catalog")).json()[0]["can_discover"] is False
                 assert (await client.post(path, json={})).status_code == 404 and not requests
             (data / "studio.json").write_text(original_catalog)
+
+            await _assert_refresh_failures(client, path, refresh, result, email, caplog)
+
             for upstream_status, expected in [(409, 409), (429, 429), (200, 502)]:
-                native_status = upstream_status
+                refresh["status"] = upstream_status
                 result["success"] = False
                 assert (await client.post(path, json={})).status_code == expected
             result["success"] = True
