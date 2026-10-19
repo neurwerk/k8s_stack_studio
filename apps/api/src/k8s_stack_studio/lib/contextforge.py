@@ -34,6 +34,44 @@ DISCOVERY_GRANT_SECONDS = 120
 class ContextForgeAccountError(Exception):
     """Native account provisioning failed; upstream content must stay private."""
 
+    code = "mcp-native-check-failed"
+    stage = "native-admission"
+
+    def __init__(self, *, upstream_status: int | None = None) -> None:
+        """Retain only an HTTP status, never upstream content or identity."""
+        super().__init__()
+        self.upstream_status = upstream_status
+
+
+class ContextForgeUnavailableError(ContextForgeAccountError):
+    """The native service could not be reached or returned a server error."""
+
+    code = "mcp-native-unavailable"
+    stage = "native-request"
+
+
+class ContextForgeRejectedError(ContextForgeAccountError):
+    """Native authentication or access was rejected; the underlying cause is unknown."""
+
+    code = "mcp-native-rejected"
+    stage = "native-request"
+
+
+class ContextForgeConfigurationError(ContextForgeAccountError):
+    """A checked native team or role does not match the approved configuration."""
+
+    code = "mcp-native-configuration-error"
+    stage = "native-configuration"
+
+
+def native_response_error(status: int) -> ContextForgeAccountError:
+    """Classify only what the native HTTP response proves, without reading its body."""
+    if status in {401, 403}:
+        return ContextForgeRejectedError(upstream_status=status)
+    if status >= 500:
+        return ContextForgeUnavailableError(upstream_status=status)
+    return ContextForgeAccountError(upstream_status=status)
+
 
 class ContextForgeRateLimitError(ContextForgeAccountError):
     """Carry only a bounded retry time, never the native error body."""
@@ -41,7 +79,7 @@ class ContextForgeRateLimitError(ContextForgeAccountError):
     def __init__(self, retry_after: str) -> None:
         """Normalize the native Retry-After seconds for the UI."""
         self.retry_after = min(3600, max(1, int(retry_after))) if retry_after.isdigit() else 60
-        super().__init__("Connection checks are temporarily rate limited")
+        super().__init__(upstream_status=429)
 
 
 class ContextForgeAccountMissingError(ContextForgeAccountError):
@@ -91,11 +129,11 @@ class ContextForgeAccountClient:
         try:
             result = await self.client.send(request, auth=None, follow_redirects=False)
         except httpx.HTTPError:
-            raise ContextForgeAccountError from None
+            raise ContextForgeUnavailableError from None
         if result.status_code == 429:
             raise ContextForgeRateLimitError(result.headers.get("retry-after", "60"))
         if result.status_code not in allow and not 200 <= result.status_code < 300:
-            raise ContextForgeAccountError
+            raise native_response_error(result.status_code)
         return result
 
     @staticmethod
@@ -125,7 +163,7 @@ class ContextForgeAccountClient:
             or team.get("is_active") is not True
             or team.get("is_personal") is not False
         ):
-            raise ContextForgeAccountError
+            raise ContextForgeConfigurationError
         for role_id, scope, permissions in (
             (self.settings.contextforge_global_role_id, "global", frozenset()),
             (self.settings.contextforge_team_role_id, "team", INVOCATION_PERMISSIONS),
@@ -141,7 +179,7 @@ class ContextForgeAccountClient:
                 or not all(isinstance(item, str) for item in actual_permissions)
                 or set(actual_permissions) != permissions
             ):
-                raise ContextForgeAccountError
+                raise ContextForgeConfigurationError
 
     async def _check_service_account(self) -> None:
         # Native proxy RBAC does not itself require active/verified non-admin users.

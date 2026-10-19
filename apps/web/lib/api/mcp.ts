@@ -86,6 +86,18 @@ export function runMcpCheck(id: string, checkId: string, signal?: AbortSignal): 
 
 export function mcpError(error: unknown): string {
   if (error instanceof ApiRequestError) {
+    if (error.status === 502) {
+      switch (error.errorCode) {
+        case "mcp-native-rejected":
+          return "Native MCP authentication or access was rejected. Check the connection and account status in Studio; contact an administrator if it continues.";
+        case "mcp-native-configuration-error":
+          return "Native MCP configuration could not be verified. Contact an administrator.";
+        case "mcp-native-unavailable":
+          return "Native MCP service is temporarily unavailable. Try again later.";
+        case "mcp-native-check-failed":
+          return "Native MCP connection could not be verified. Check the connection and account status in Studio.";
+      }
+    }
     if (error.status === 429)
       return `Too many checks. Try again in ${String(error.retryAfter ?? 60)} seconds.`;
     if (error.status === 401 || error.status === 403)
