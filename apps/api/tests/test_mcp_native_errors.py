@@ -104,8 +104,10 @@ async def test_tool_admission_errors_are_safe_and_do_not_reach_gateway(
         assert not records
     else:
         assert "retry-after" not in response.headers
+        # Local configuration validation carries no upstream rejection status.
+        logged_status = None if native_status == 200 else native_status
         assert [record.getMessage() for record in records] == [
-            f"MCP native failure: category={code} stage={stage} status={native_status}"
+            f"MCP native failure: category={code} stage={stage} status={logged_status}"
         ]
         assert records[0].exc_info is None
     if native_status in {401, 403}:
