@@ -155,20 +155,20 @@ class ContextForgeAccountClient:
     async def _check_configuration(self) -> None:
         if self.settings.contextforge_service_auth_mode == "trusted-proxy":
             await self._check_service_account()
-        team = _object(
-            self._json(await self._request("GET", f"/teams/{self.settings.contextforge_team_id}"))
-        )
+        team_response = await self._request("GET", f"/teams/{self.settings.contextforge_team_id}")
+        team = _object(self._json(team_response))
         if (
             team.get("id") != self.settings.contextforge_team_id
             or team.get("is_active") is not True
             or team.get("is_personal") is not False
         ):
-            raise ContextForgeConfigurationError
+            raise ContextForgeConfigurationError(upstream_status=team_response.status_code)
         for role_id, scope, permissions in (
             (self.settings.contextforge_global_role_id, "global", frozenset()),
             (self.settings.contextforge_team_role_id, "team", INVOCATION_PERMISSIONS),
         ):
-            role = _object(self._json(await self._request("GET", f"/rbac/roles/{role_id}")))
+            role_response = await self._request("GET", f"/rbac/roles/{role_id}")
+            role = _object(self._json(role_response))
             actual_permissions = role.get("permissions")
             if (
                 role.get("id") != role_id
@@ -179,7 +179,7 @@ class ContextForgeAccountClient:
                 or not all(isinstance(item, str) for item in actual_permissions)
                 or set(actual_permissions) != permissions
             ):
-                raise ContextForgeConfigurationError
+                raise ContextForgeConfigurationError(upstream_status=role_response.status_code)
 
     async def _check_service_account(self) -> None:
         # Native proxy RBAC does not itself require active/verified non-admin users.
