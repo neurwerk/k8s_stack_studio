@@ -162,6 +162,41 @@ async def test_list_pagination_reaches_keycloak(settings):
         ]
 
 
+@pytest.mark.parametrize("user_id", ["a" * 24, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
+async def test_user_search_by_exact_id(user_id):
+    admin = AsyncMock()
+    user = {"id": user_id, "username": "alice"}
+    admin.get_user.return_value = user
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app(admin, ["studio-user", "keycloak-admin"])),
+        base_url="http://test",
+        headers={"Authorization": "Bearer delegated"},
+    ) as http:
+        response = await http.get("/api/admin/users", params={"search": user_id})
+        next_page = await http.get("/api/admin/users", params={"search": user_id, "first": 25})
+    assert response.status_code == 200
+    assert response.json() == [user]
+    assert next_page.json() == []
+    assert admin.get_user.await_count == 2
+    admin.get_user.assert_awaited_with(user_id, "delegated")
+    admin.list_users.assert_not_called()
+
+
+async def test_missing_user_id_search_falls_back_to_text_search():
+    admin = AsyncMock()
+    user_id = "a" * 24
+    admin.get_user.side_effect = KeycloakAdminRequestError(404)
+    admin.list_users.return_value = [{"id": "b", "username": user_id}]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app(admin, ["studio-user", "keycloak-admin"])),
+        base_url="http://test",
+        headers={"Authorization": "Bearer delegated"},
+    ) as http:
+        response = await http.get("/api/admin/users", params={"search": user_id, "first": 25})
+    assert response.json() == [{"id": "b", "username": user_id}]
+    admin.list_users.assert_awaited_once_with("delegated", search=user_id, first=25, max_results=25)
+
+
 async def test_missing_admin_user_returns_not_found():
     admin = AsyncMock()
     admin.get_user.side_effect = KeycloakAdminRequestError(404)

@@ -10,6 +10,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -35,6 +36,9 @@ from k8s_stack_studio.models.admin import (
 )
 
 router = APIRouter(prefix="/api", tags=["admin"])
+USER_ID_PATTERN = re.compile(
+    r"(?:[0-9a-fA-F]{24}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\Z"
+)
 
 
 # ── helper: extract bearer token from request ──────────────────────────────
@@ -104,6 +108,14 @@ async def list_users(
     Forwards the caller's bearer token to the Keycloak Admin API.
     """
     user_token = _extract_bearer_token(request)
+    if search and USER_ID_PATTERN.fullmatch(search):
+        try:
+            user = await admin.get_user(search, user_token)
+        except KeycloakAdminRequestError as exc:
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                raise
+        else:
+            return [user] if first == 0 else []
     return await admin.list_users(user_token, search=search, first=first, max_results=max_results)
 
 
