@@ -65,7 +65,7 @@ function GatewayContent({ administrator, trustPublicationAvailable }: {
           };
           return <tr key={endpoint.id} className="border-b border-border hover:bg-muted/50">
             <td className="break-all px-4 py-3 font-mono text-xs">{endpoint.url}
-              {endpoint.id === "api-local" && endpoint.entry_mode === "api" &&
+              {endpoint.id === "api-local" && endpoint.entry_mode === "api" && profiles.includes("openai-model-discovery-v1") &&
                 <div className="mt-1 text-muted-foreground">GET /models · GET /models/{"{model}"}</div>}
             </td>
             <td className="px-4 py-3">{endpoint.entry_mode === "api"
