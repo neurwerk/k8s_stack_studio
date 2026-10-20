@@ -200,7 +200,12 @@ def configure_auth(app: FastAPI, settings: Settings) -> None:
     setup_keycloak_middleware(
         app,
         keycloak_configuration=config,
-        exclude_patterns=[r"^/api/version$", r"^/oauth/callback\Z", *TRUST_PUBLIC_PATTERNS],
+        exclude_patterns=[
+            r"^/api/version$",
+            r"^/oauth/callback\Z",
+            r"^/gateway/model-discovery(?:/.*)?\Z",
+            *TRUST_PUBLIC_PATTERNS,
+        ],
         user_mapper=_map_principal,
     )
 

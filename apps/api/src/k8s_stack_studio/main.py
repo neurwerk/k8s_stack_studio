@@ -34,6 +34,7 @@ from k8s_stack_studio.controllers.llm_logs import router as llm_logs_router
 from k8s_stack_studio.controllers.logs import router as logs_router
 from k8s_stack_studio.controllers.mcp import router as mcp_router
 from k8s_stack_studio.controllers.mcp_setup import router as mcp_setup_router
+from k8s_stack_studio.controllers.model_discovery import router as model_discovery_router
 from k8s_stack_studio.controllers.notice_preferences import router as notice_router
 from k8s_stack_studio.controllers.oauth_callback import router as oauth_callback_router
 from k8s_stack_studio.controllers.policy_engine import router as policy_engine_router
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router)
     app.include_router(api_keys_router)
     app.include_router(gateway_router)
+    app.include_router(model_discovery_router)
     app.include_router(logs_router)
     app.include_router(llm_logs_router)
     app.include_router(usage_router)
