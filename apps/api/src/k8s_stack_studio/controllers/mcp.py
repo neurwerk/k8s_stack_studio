@@ -347,7 +347,7 @@ async def list_tools(
     item = _tool_admission(integration_id, principal, settings, request)
     authorization = await _prepare_tool_caller(request, principal, settings)
     try:
-        async with gateway_client(settings.mcp_gateway_url, item, authorization) as client:
+        async with gateway_client(settings, item, authorization) as client:
             return await available_tools(client, item)
     except McpGatewayError as exc:
         raise _gateway_error(exc) from None
@@ -370,7 +370,7 @@ async def check_tool(
         raise HTTPException(status_code=404, detail="MCP check is not configured")
     authorization = await _prepare_tool_caller(request, principal, settings)
     try:
-        async with gateway_client(settings.mcp_gateway_url, item, authorization) as client:
+        async with gateway_client(settings, item, authorization) as client:
             return await run_check(client, item, item.checks[check_id])
     except McpGatewayError as exc:
         raise _gateway_error(exc) from None
