@@ -88,7 +88,7 @@ export default function UsersPage() {
         <input
           type="text"
           aria-label="Search users"
-          placeholder="Search users…"
+          placeholder="Search users or user ID…"
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
