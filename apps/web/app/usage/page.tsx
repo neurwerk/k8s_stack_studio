@@ -1,15 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BarChart3, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Rectangle, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
 import { fetchUser } from "@/lib/api/admin";
 import { AccountingValue } from "@/components/accounting-value";
-import { GatewayClassificationFilters } from "@/components/gateway-filters";
-import type { GatewayFilters } from "@/lib/api/gateway-metadata";
 import { fetchAllDailyUsage, fetchUsagePeople, fetchUserDailyUsage } from "@/lib/api/usage";
 import type { UsageDateRange, UsagePeople, UserDailyUsage } from "@/lib/api/usage";
 import { useCurrentUserId, useHasRole, useIsKeycloakAdmin } from "@/lib/auth/roles";
@@ -66,9 +64,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateError, setDateError] = useState<string | null>(null);
-  const [filters, setFilters] = useState<GatewayFilters>({});
-  const [draftFilters, setDraftFilters] = useState<GatewayFilters>({});
-  const key = JSON.stringify([selected, range?.start, range?.end, filters, refresh]);
+  const key = JSON.stringify([selected, range?.start, range?.end, refresh]);
   const shown = result?.key === key ? result : undefined;
 
   useEffect(() => {
@@ -78,14 +74,14 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
       setError(null);
       try {
         const getDaily = (bounds?: UsageDateRange) => selected === "all"
-          ? fetchAllDailyUsage(bounds, controller.signal, filters)
-          : fetchUserDailyUsage(selected, bounds, controller.signal, filters);
+          ? fetchAllDailyUsage(bounds, controller.signal)
+          : fetchUserDailyUsage(selected, bounds, controller.signal);
         let usage = await getDaily(range);
         const bounds = range ?? presetRange(usage.today, "month");
         if (usage.start_date !== bounds.start || usage.end_date !== bounds.end) {
           usage = await getDaily(bounds);
         }
-        const people = isAdmin ? await fetchUsagePeople(bounds, controller.signal, filters) : null;
+        const people = isAdmin ? await fetchUsagePeople(bounds, controller.signal) : null;
         if (controller.signal.aborted) return;
         setResult({ key, range: bounds, usage, people });
         setDraftStart(bounds.start);
@@ -98,7 +94,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     };
     void load();
     return () => { controller.abort(); };
-  }, [selected, range, isAdmin, filters, key]);
+  }, [selected, range, isAdmin, key]);
 
   useEffect(() => {
     if (!canReadNames || !shown?.people) return;
@@ -214,12 +210,6 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
             {shown ? shown.usage.timezone : "Up to 90 days"}
           </span>
           {dateError && <p role="alert" className="w-full text-sm text-destructive">{dateError}</p>}
-        </form>
-        <form className="mt-5 space-y-3 border-t border-border pt-4" onSubmit={(event) => {
-          event.preventDefault(); setFilters({ ...draftFilters });
-        }}>
-          <GatewayClassificationFilters value={draftFilters} onChange={setDraftFilters} />
-          <button type="submit" className="btn btn-primary btn-sm">Apply classification</button>
         </form>
       </section>
 
@@ -385,9 +375,6 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           </section>
         </>
       )}
-      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-        <BarChart3 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> Native LLM records only: not a count of all gateway traffic or upstream attempts. Generic application accounting is unavailable. Complete totals cover selected records, not a complete retry ledger or provider invoice.
-      </p>
     </main>
   );
 }

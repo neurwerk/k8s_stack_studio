@@ -28,9 +28,15 @@ def usage_summary(payload: dict) -> dict:
         raise ValueError("unsupported filters")
     selected_user = attributes.get("agentgateway.user")
     dimensions = payload.get("groupBy")
-    by_model = dimensions == [{"field": "requestModel"}]
-    by_user = dimensions == [{"field": "attributes", "key": "agentgateway.user"}]
-    if dimensions != [] and not by_model and not by_user:
+    completeness = [
+        {"field": "attributes", "key": "neurwerk.token_usage_known"},
+        {"field": "attributes", "key": "neurwerk.cost_known"},
+    ]
+    with_completeness = isinstance(dimensions, list) and dimensions[-2:] == completeness
+    primary = dimensions[:-2] if with_completeness else dimensions
+    by_model = primary == [{"field": "requestModel"}]
+    by_user = primary == [{"field": "attributes", "key": "agentgateway.user"}]
+    if primary != [] and not by_model and not by_user:
         raise ValueError("unsupported grouping")
     seconds = min(
         int(payload.get("bucketSeconds", 86400)),
@@ -58,6 +64,12 @@ def usage_summary(payload: dict) -> dict:
                 if by_model
                 else {}
             )
+            if with_completeness:
+                group = {
+                    **group,
+                    "neurwerk.token_usage_known": True,
+                    "neurwerk.cost_known": True,
+                }
             tokens = 120 + day * 4 + person * 40
             row = groups.setdefault(
                 group_key,
@@ -355,17 +367,31 @@ def langfuse_observations(params: dict[str, list[str]]) -> dict:
             "deepseek/deepseek-v4-flash-0731",
             15,
             [
-                {"role": "system", "content": "Demo policy: reversible_replace email addresses."},
-                {"role": "user", "content": "Draft an invitation for <REV_EMAIL_ADDRESS_abcdef0123456789_0123456789abcdef>."},
+                {
+                    "role": "system",
+                    "content": "Demo policy: reversible_replace email addresses.",
+                },
+                {
+                    "role": "user",
+                    "content": "Draft an invitation for <REV_EMAIL_ADDRESS_abcdef0123456789_0123456789abcdef>.",
+                },
             ],
-            [{"role": "assistant", "content": "Hello <REV_EMAIL_ADDRESS_abcdef0123456789_0123456789abcdef>, you are invited!"}],
+            [
+                {
+                    "role": "assistant",
+                    "content": "Hello <REV_EMAIL_ADDRESS_abcdef0123456789_0123456789abcdef>, you are invited!",
+                }
+            ],
         ),
         (
             developer,
             "deepseek/deepseek-v4-flash-0731",
             35,
             [
-                {"role": "system", "content": "Provide a short title for the conversation."},
+                {
+                    "role": "system",
+                    "content": "Provide a short title for the conversation.",
+                },
                 {
                     "role": "user",
                     "content": (
@@ -383,19 +409,38 @@ def langfuse_observations(params: dict[str, list[str]]) -> dict:
             80,
             [
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": "Summarize the sample deployment checklist in two sentences."},
+                {
+                    "role": "user",
+                    "content": "Summarize the sample deployment checklist in two sentences.",
+                },
             ],
-            [{"role": "assistant", "content": "Check configuration and health. Then verify the demo UI."}],
+            [
+                {
+                    "role": "assistant",
+                    "content": "Check configuration and health. Then verify the demo UI.",
+                }
+            ],
         ),
         (
             viewer,
             "google/gemini-3.1-flash-lite",
             180,
             [
-                {"role": "system", "content": "Demo policy: reversible_replace email addresses."},
-                {"role": "user", "content": "Send a reminder to <REV_EMAIL_ADDRESS_1234567890abcdef_fedcba9876543210>."},
+                {
+                    "role": "system",
+                    "content": "Demo policy: reversible_replace email addresses.",
+                },
+                {
+                    "role": "user",
+                    "content": "Send a reminder to <REV_EMAIL_ADDRESS_1234567890abcdef_fedcba9876543210>.",
+                },
             ],
-            [{"role": "assistant", "content": "Reminder prepared for <REV_EMAIL_ADDRESS_1234567890abcdef_fedcba9876543210>."}],
+            [
+                {
+                    "role": "assistant",
+                    "content": "Reminder prepared for <REV_EMAIL_ADDRESS_1234567890abcdef_fedcba9876543210>.",
+                }
+            ],
         ),
     )
     filters = json.loads(params["filter"][0]) if "filter" in params else []
@@ -406,13 +451,20 @@ def langfuse_observations(params: dict[str, list[str]]) -> dict:
         owner = conditions["userId"]["value"]
         types = conditions["type"]["value"]
         bounds = [entry for entry in filters if entry["column"] == "startTime"]
-        start = datetime.fromisoformat(next(entry["value"] for entry in bounds if entry["operator"] == ">="))
-        end = datetime.fromisoformat(next(entry["value"] for entry in bounds if entry["operator"] == "<"))
+        start = datetime.fromisoformat(
+            next(entry["value"] for entry in bounds if entry["operator"] == ">=")
+        )
+        end = datetime.fromisoformat(
+            next(entry["value"] for entry in bounds if entry["operator"] == "<")
+        )
         match = filters[-1] if len(filters) > 4 else None
         if match and (
             match["column"] not in ("input", "output", "metadata")
             or match["operator"] != "matches"
-            or (match["column"] == "metadata" and match.get("key") != "attributes.langfuse.observation.input.query")
+            or (
+                match["column"] == "metadata"
+                and match.get("key") != "attributes.langfuse.observation.input.query"
+            )
         ):
             raise ValueError("unsupported search")
     else:
@@ -431,15 +483,24 @@ def langfuse_observations(params: dict[str, list[str]]) -> dict:
         input_text = json.dumps(sent)
         output_text = json.dumps(received)
         session_id = (
-            "demo-developer-conversation-a" if index < 2
-            else "demo-developer-conversation-b" if user_id == developer
+            "demo-developer-conversation-a"
+            if index < 2
+            else "demo-developer-conversation-b"
+            if user_id == developer
             else "demo-viewer-conversation-a"
         )
         if user_id != owner or not start <= at < end:
             continue
         if "GENERATION" not in types or (
-            match and match["value"].lower() not in
-            (input_text if match["column"] == "input" else output_text if match["column"] == "output" else "").lower()
+            match
+            and match["value"].lower()
+            not in (
+                input_text
+                if match["column"] == "input"
+                else output_text
+                if match["column"] == "output"
+                else ""
+            ).lower()
         ):
             continue
         rows.append(
@@ -472,32 +533,49 @@ def langfuse_observations(params: dict[str, list[str]]) -> dict:
             }
         )
     tools = (
-        (developer, 25, {
-            "mcp.server": "brave", "mcp.tool": "brave_web_search",
-            "attributes.langfuse.observation.input.query": "example weather in Berlin",
-            "attributes.langfuse.observation.input.result_filter.0": "news",
-            "attributes.langfuse.observation.output.content.0.type": "text",
-            "attributes.langfuse.observation.output.content.0.text": "Sample result: sunny weather in Berlin.",
-            "attributes.langfuse.observation.output.isError": "false",
-        }),
+        (
+            developer,
+            25,
+            {
+                "mcp.server": "brave",
+                "mcp.tool": "brave_web_search",
+                "attributes.langfuse.observation.input.query": "example weather in Berlin",
+                "attributes.langfuse.observation.input.result_filter.0": "news",
+                "attributes.langfuse.observation.output.content.0.type": "text",
+                "attributes.langfuse.observation.output.content.0.text": "Sample result: sunny weather in Berlin.",
+                "attributes.langfuse.observation.output.isError": "false",
+            },
+        ),
         (viewer, 95, {"mcp.server": "brave", "mcp.tool": "brave_web_search"}),
     )
     for index, (user_id, age_minutes, metadata) in enumerate(tools):
         at = now - timedelta(minutes=age_minutes)
         if "TOOL" not in types or user_id != owner or not start <= at < end:
             continue
-        content = "" if match is None else (
-            str(metadata.get(match["key"], "")) if match["column"] == "metadata"
-            else ""
+        content = (
+            ""
+            if match is None
+            else (
+                str(metadata.get(match["key"], ""))
+                if match["column"] == "metadata"
+                else ""
+            )
         )
         if match and match["value"].lower() not in content.lower():
             continue
-        rows.append({
-            "id": f"synthetic-tool-{index + 1}", "userId": user_id,
-            "type": "TOOL", "startTime": at.isoformat(), "name": "brave_web_search",
-            "endTime": (at + timedelta(milliseconds=840 + index * 200)).isoformat(),
-            "sessionId": None,
-            "input": None, "output": None, "metadata": metadata,
-        })
+        rows.append(
+            {
+                "id": f"synthetic-tool-{index + 1}",
+                "userId": user_id,
+                "type": "TOOL",
+                "startTime": at.isoformat(),
+                "name": "brave_web_search",
+                "endTime": (at + timedelta(milliseconds=840 + index * 200)).isoformat(),
+                "sessionId": None,
+                "input": None,
+                "output": None,
+                "metadata": metadata,
+            }
+        )
     rows.sort(key=lambda row: row["startTime"], reverse=True)
     return {"data": rows[: min(int(params["limit"][0]), 10)]}

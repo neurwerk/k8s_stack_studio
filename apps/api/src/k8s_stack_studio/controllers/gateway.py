@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
@@ -135,10 +136,24 @@ def get_trust_certificate(
     request: Request, fingerprint: str, publication: TrustPublication = Depends(_publication)
 ) -> Response:
     """Download exactly one DER certificate, never a PEM bundle disguised as .cer."""
+    info = next(
+        (
+            item
+            for version in publication.manifest.versions
+            for item in version.certificates
+            if item.fingerprint_sha256 == fingerprint
+        ),
+        None,
+    )
+    filename = (
+        f"neurwerk-root-{info.not_before.astimezone(UTC):%Y%m%d}-{fingerprint[:8]}.cer"
+        if info
+        else None
+    )
     return _asset(
         request,
         publication.certificates.get(fingerprint),
         "application/pkix-cert",
-        filename=f"{fingerprint}.cer",
+        filename=filename,
         immutable=True,
     )

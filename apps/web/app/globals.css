@@ -152,3 +152,16 @@
     color: var(--color-accent-content);
   }
 }
+
+.endpoint-swagger .swagger-ui .information-container {
+  display: none;
+}
+
+.endpoint-swagger .swagger-ui .scheme-container,
+.endpoint-swagger .swagger-ui .authorization__btn {
+  display: none;
+}
+
+.endpoint-swagger .swagger-ui .response-col_links {
+  display: none;
+}

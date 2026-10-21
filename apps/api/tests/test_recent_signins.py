@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
+from k8s_stack_studio.controllers import admin as admin_controller
 from k8s_stack_studio.controllers.admin import _principal_to_user_dict, router
 from k8s_stack_studio.lib.auth import StudioAdmissionMiddleware, StudioPrincipal
 from k8s_stack_studio.lib.dependencies import get_keycloak_admin
@@ -195,6 +197,119 @@ async def test_missing_user_id_search_falls_back_to_text_search():
         response = await http.get("/api/admin/users", params={"search": user_id, "first": 25})
     assert response.json() == [{"id": "b", "username": user_id}]
     admin.list_users.assert_awaited_once_with("delegated", search=user_id, first=25, max_results=25)
+
+
+async def test_sorted_users_sorts_all_before_pagination_and_caches_by_token(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(admin_controller, "_user_cache", {})
+    monkeypatch.setattr(admin_controller, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    users = [{"id": str(i), "username": f"user-{100 - i:03d}", "email": ""} for i in range(101)]
+    admin = AsyncMock()
+    admin.list_users.side_effect = lambda token, search, first, max_results: users[
+        first : first + max_results
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app(admin, ["studio-user", "keycloak-admin"])),
+        base_url="http://test",
+    ) as http:
+
+        async def request(token, **params):
+            return await http.get(
+                "/api/admin/users/sorted",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+
+        first = await request("one", sort="username", direction="asc", first=0, max=2)
+        assert first.status_code == 200
+        assert [user["id"] for user in first.json()["items"]] == ["100", "99"]
+        assert first.json()["total"] == 101
+        second = await request("one", sort="username", direction="desc", first=1, max=2)
+        assert [user["id"] for user in second.json()["items"]] == ["1", "2"]
+        assert admin.list_users.await_count == 2
+        await request("two", sort="username")
+        assert admin.list_users.await_count == 4
+        await request("one", sort="username", search="alice")
+        assert admin.list_users.await_count == 6
+        clock[0] = 601
+        await request("one", sort="username")
+        assert admin.list_users.await_count == 8
+        admin.recent_signin.assert_not_called()
+
+
+async def test_slow_user_sort_does_not_block_other_admins(monkeypatch):
+    monkeypatch.setattr(admin_controller, "_user_cache", {})
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def list_users(token, search, first, max_results):
+        if token == "one":
+            started.set()
+            await release.wait()
+        return [{"id": token, "username": token}] if first == 0 else []
+
+    admin = AsyncMock()
+    admin.list_users.side_effect = list_users
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app(admin, ["studio-user", "keycloak-admin"])),
+        base_url="http://test",
+    ) as http:
+        first = asyncio.create_task(
+            http.get(
+                "/api/admin/users/sorted?sort=username", headers={"Authorization": "Bearer one"}
+            )
+        )
+        try:
+            await started.wait()
+            second = await asyncio.wait_for(
+                http.get(
+                    "/api/admin/users/sorted?sort=username", headers={"Authorization": "Bearer two"}
+                ),
+                timeout=1,
+            )
+            assert second.status_code == 200
+            assert [user["id"] for user in second.json()["items"]] == ["two"]
+        finally:
+            release.set()
+            await first
+
+
+async def test_sorted_signins_considers_every_user_and_returns_only_page_activity(monkeypatch):
+    monkeypatch.setattr(admin_controller, "_user_cache", {})
+    users = [{"id": str(i), "username": f"user-{i}"} for i in range(30)]
+    active = peak = 0
+
+    async def lookup(user_id, token, start, end):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.001)
+        active -= 1
+        return {
+            "status": "recorded" if user_id in {"0", "29"} else "no_record",
+            "timestamp": (end - timedelta(minutes=int(user_id))).isoformat()
+            if user_id in {"0", "29"}
+            else None,
+        }
+
+    admin = AsyncMock()
+    admin.list_users.side_effect = lambda token, search, first, max_results: users[
+        first : first + max_results
+    ]
+    admin.recent_signin.side_effect = lookup
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=admin_app(admin, ["studio-user", "keycloak-admin"])),
+        base_url="http://test",
+        headers={"Authorization": "Bearer delegated"},
+    ) as http:
+        newest = await http.get("/api/admin/users/sorted?sort=recentSignin&direction=desc&max=1")
+        assert newest.status_code == 200
+        assert [user["id"] for user in newest.json()["items"]] == ["0"]
+        oldest = await http.get("/api/admin/users/sorted?sort=recentSignin&direction=asc&max=1")
+        assert [user["id"] for user in oldest.json()["items"]] == ["29"]
+        assert list(oldest.json()["activity"]["users"]) == ["29"]
+        assert admin.recent_signin.await_count == 30
+        assert peak == 4
 
 
 async def test_missing_admin_user_returns_not_found():

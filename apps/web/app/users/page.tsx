@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { UserTable } from "@/components/user-table";
-import { fetchRecentSignins, fetchUsers } from "@/lib/api/admin";
+import { fetchRecentSignins, fetchSortedUsers, fetchUsers } from "@/lib/api/admin";
 import { useIsKeycloakAdmin } from "@/lib/auth/roles";
-import type { KeycloakUser, RecentSignins } from "@/lib/api/admin";
+import type { KeycloakUser, RecentSignins, UserSortKey } from "@/lib/api/admin";
 
 export default function UsersPage() {
   const isAdmin = useIsKeycloakAdmin();
@@ -13,6 +13,8 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [first, setFirst] = useState(0);
+  const [sort, setSort] = useState<{ key: UserSortKey; direction: "asc" | "desc" } | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   const [activity, setActivity] = useState<RecentSignins | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
 
@@ -31,16 +33,20 @@ export default function UsersPage() {
     setActivityLoading(false);
     const timer = setTimeout(
       () => {
-        void fetchUsers(search || undefined, first, signal)
+        void (sort
+          ? fetchSortedUsers(sort.key, sort.direction, search, first, signal)
+          : fetchUsers(search || undefined, first, signal).then((items) => ({ items, total: null, activity: null })))
           .then(async (data) => {
             if (signal.aborted) return;
-            setUsers(data);
+            setUsers(data.items);
+            setTotal(data.total);
+            setActivity(data.activity);
             setLoading(false);
-            if (!data.length) return;
+            if (!data.items.length || data.activity) return;
             setActivityLoading(true);
             try {
               const result = await fetchRecentSignins(
-                data.map((user) => user.id),
+                data.items.map((user) => user.id),
                 signal,
               );
               if (!signal.aborted) setActivity(result);
@@ -65,7 +71,7 @@ export default function UsersPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [isAdmin, search, first]);
+  }, [isAdmin, search, first, sort]);
 
   if (!isAdmin) {
     return (
@@ -109,6 +115,11 @@ export default function UsersPage() {
         error={error}
         activity={activity}
         activityLoading={activityLoading}
+        sort={sort}
+        onSort={(key) => {
+          setFirst(0);
+          setSort((previous) => ({ key, direction: previous?.key === key && previous.direction === "asc" ? "desc" : "asc" }));
+        }}
       />
       <div className="mt-4 flex items-center gap-4 text-sm">
         <button
@@ -123,7 +134,7 @@ export default function UsersPage() {
         <span>Page {first / 25 + 1}</span>
         <button
           className="btn btn-outline btn-sm"
-          disabled={loading || !!error || users.length < 25}
+          disabled={loading || !!error || (total === null ? users.length < 25 : first + 25 >= total)}
           onClick={() => {
             setFirst(first + 25);
           }}

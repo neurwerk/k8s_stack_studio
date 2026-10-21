@@ -187,6 +187,20 @@ export function fetchUsers(
   return apiGet<KeycloakUser[]>("/admin/users", params, signal);
 }
 
+export type UserSortKey = "username" | "email" | "firstName" | "lastName" | "status" | "recentSignin";
+
+export function fetchSortedUsers(
+  sort: UserSortKey,
+  direction: "asc" | "desc",
+  search: string,
+  first: number,
+  signal?: AbortSignal,
+): Promise<{ items: KeycloakUser[]; total: number; activity: RecentSignins | null }> {
+  return apiGet("/admin/users/sorted", {
+    sort, direction, first: String(first), max: "25", ...(search ? { search } : {}),
+  }, signal);
+}
+
 export interface RecentSignin {
   status: "recorded" | "no_record" | "unavailable";
   timestamp: string | null;
