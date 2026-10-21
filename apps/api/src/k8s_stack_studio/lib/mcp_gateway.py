@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from urllib.parse import unquote_to_bytes, urlsplit
 
 import httpx2
 from mcp import Client
@@ -40,8 +42,25 @@ class McpGatewayError(Exception):
         self.retry_after = retry_after
 
 
+def _catalog_path(public_url: str) -> str:
+    """Reject path reinterpretation before any HTTP URL normalization or decoding."""
+    if any(ord(char) < 32 or ord(char) == 127 or char in "\\?#" for char in public_url):
+        raise McpGatewayError(_ENDPOINT_UNAVAILABLE, status=503)
+    path = urlsplit(public_url).path
+    if not path.startswith("/") or path.startswith("//") or re.search(r"%(?![0-9a-fA-F]{2})", path):
+        raise McpGatewayError(_ENDPOINT_UNAVAILABLE, status=503)
+    for segment in path.split("/"):
+        decoded = unquote_to_bytes(segment)
+        # Encoded percent signs could hide separators or traversal on a later decode.
+        if decoded in {b".", b".."} or any(
+            byte < 32 or byte == 127 or byte in b"/\\%?#" for byte in decoded
+        ):
+            raise McpGatewayError(_ENDPOINT_UNAVAILABLE, status=503)
+    return path
+
+
 def _gateway_url(settings: Settings, item: McpRegistration) -> httpx2.URL:
-    """Resolve an owned catalog endpoint; never infer a path or trust another origin."""
+    """Use only an owned catalog path on the chart's fixed internal transport origin."""
     try:
         catalog = gateway_catalog(settings)
     except GatewayUnavailableError:
@@ -60,12 +79,9 @@ def _gateway_url(settings: Settings, item: McpRegistration) -> httpx2.URL:
         or "oidc_bearer" not in routes[0].caller_auth_modes
     ):
         raise McpGatewayError(_ENDPOINT_UNAVAILABLE, status=503)
-    # HTTP clients normalize default ports before request hooks run.
-    url = httpx2.URL(routes[0].url)
-    origin = httpx2.URL(settings.mcp_gateway_url)
-    if (url.scheme, url.host, url.port) != (origin.scheme, origin.host, origin.port):
-        raise McpGatewayError(_ENDPOINT_UNAVAILABLE, status=503)
-    return url
+    path = _catalog_path(routes[0].url)
+    # Never urljoin: the public catalog must not select the transport authority.
+    return httpx2.URL(settings.mcp_gateway_url + path)
 
 
 @asynccontextmanager

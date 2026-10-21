@@ -1,7 +1,8 @@
-"""MCP caller credentials may reach only one chart-published, same-origin endpoint."""
+"""Catalog paths select MCP routes, never the fixed internal transport authority."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 from copy import deepcopy
 
@@ -50,7 +51,7 @@ def endpoint(tmp_path):
     path = tmp_path / "catalog.json"
     path.write_text(json.dumps(catalog))
     settings = Settings(
-        gateway_catalog_file=str(path), mcp_gateway_url="https://gateway.example.test"
+        gateway_catalog_file=str(path), mcp_gateway_url="http://gateway.internal.test:8082"
     )
     item = McpRegistration(
         id=destination["id"],
@@ -61,35 +62,57 @@ def endpoint(tmp_path):
     return settings, item, path, catalog
 
 
-async def test_custom_catalog_url_drives_sdk_and_exact_caller_scope(endpoint, monkeypatch):
-    settings, item, _, _ = endpoint
+def mcp_response(request):
+    body = json.loads(request.content)
+    if "id" not in body:
+        return httpx2.Response(202)
+    result = (
+        {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "configured-server", "version": "1"},
+        }
+        if body["method"] == "initialize"
+        else {"tools": []}
+    )
+    return httpx2.Response(
+        200,
+        json={"jsonrpc": "2.0", "id": body["id"], "result": result},
+        headers={"set-cookie": "upstream=private; Path=/"},
+    )
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://gateway.example.test:443/operator/selected-endpoint",
+        "https://another-public.example.test:8443/operator/selected-endpoint",
+    ],
+)
+async def test_custom_catalog_path_drives_internal_sdk_and_exact_caller_scope(
+    endpoint, monkeypatch, public_url
+):
+    settings, item, path, catalog = endpoint
+    catalog["mcp-servers"][0]["routes"][0]["url"] = public_url
+    path.write_text(json.dumps(catalog))
+    assert mcp_gateway.gateway_catalog(settings).mcp_servers[0].routes[0].url == public_url
     sent = []
     clients = []
     real_client = httpx2.AsyncClient
 
     def upstream(request):
-        assert str(request.url) == "https://gateway.example.test/operator/selected-endpoint"
+        assert str(request.url) == settings.mcp_gateway_url + "/operator/selected-endpoint"
         assert request.method == "POST"
         assert request.headers["authorization"] == "Bearer caller-token"
         assert "cookie" not in request.headers
         sent.append(request)
-        body = json.loads(request.content)
-        if "id" not in body:
-            return httpx2.Response(202)
-        result = (
-            {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "configured-server", "version": "1"},
-            }
-            if body["method"] == "initialize"
-            else {"tools": []}
-        )
-        return httpx2.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": result})
+        return mcp_response(request)
 
     def client_factory(**kwargs):
         assert kwargs["follow_redirects"] is False and kwargs["trust_env"] is False
-        client = real_client(transport=httpx2.MockTransport(upstream), **kwargs)
+        client = real_client(
+            transport=httpx2.MockTransport(upstream), cookies={"local": "private"}, **kwargs
+        )
         clients.append(client)
         return client
 
@@ -111,6 +134,8 @@ async def test_custom_catalog_url_drives_sdk_and_exact_caller_scope(endpoint, mo
                 await clients[0].request(
                     method, settings.mcp_gateway_url + "/operator/selected-endpoint"
                 )
+        with pytest.raises(mcp_gateway.McpGatewayError):
+            await clients[0].post(public_url)
         assert len(sent) == count
     assert {json.loads(request.content)["method"] for request in sent} >= {
         "initialize",
@@ -129,9 +154,6 @@ async def test_custom_catalog_url_drives_sdk_and_exact_caller_scope(endpoint, mo
         "proxy-only",
         "no-oidc",
         "ambiguous",
-        "cross-host",
-        "cross-scheme",
-        "cross-port",
     ],
 )
 async def test_unavailable_or_out_of_scope_endpoint_never_creates_transport(
@@ -158,22 +180,18 @@ async def test_unavailable_or_out_of_scope_endpoint_never_creates_transport(
             extra["entry_mode"] = "forward_proxy"
             entry["routes"].append(extra)
             destination["endpoint_ids"] = [extra["id"]]
-        elif invalid in {"proxy-only", "no-oidc", "cross-host", "cross-port"}:
+        elif invalid in {"proxy-only", "no-oidc"}:
             route.update(
                 {
                     "proxy-only": {"entry_mode": "forward_proxy"},
                     "no-oidc": {"caller_auth_modes": ["neurwerk_bearer"]},
-                    "cross-host": {"url": "https://another.example.test/selected-endpoint"},
-                    "cross-port": {"url": "https://gateway.example.test:8443/selected-endpoint"},
                 }[invalid]
             )
         elif invalid == "ambiguous":
             extra = deepcopy(route)
-            extra.update(id="second-endpoint", url=settings.mcp_gateway_url + "/second")
+            extra.update(id="second-endpoint", url="https://gateway.example.test/second")
             entry["routes"].append(extra)
             destination["endpoint_ids"].append(extra["id"])
-        elif invalid == "cross-scheme":
-            settings.mcp_gateway_url = "http://gateway.example.test"
         path.write_text(json.dumps(catalog))
 
     def unexpected_transport(**kwargs):
@@ -185,3 +203,91 @@ async def test_unavailable_or_out_of_scope_endpoint_never_creates_transport(
             pytest.fail("Untrusted or missing endpoint must not yield a client")
     assert denied.value.status == 503
     assert str(denied.value) == "MCP gateway endpoint is unavailable."
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        "",
+        "//another.example.test/mcp",
+        "/safe/../another",
+        "/safe/./another",
+        "/safe/%2e%2E/another",
+        "/safe/.%2e/another",
+        "/safe/%252e%252e/another",
+        "/safe%2fanother",
+        "/safe%2Fanother",
+        "/safe%5canother",
+        "/safe%255canother",
+        "/safe\\another",
+        "/safe\x00another",
+        "/safe\x7fanother",
+        "/safe\nanother",
+        "/safe%00another",
+        "/safe%0danother",
+        "/safe%7fanother",
+        "/safe?query=value",
+        "/safe#fragment",
+        "/safe?",
+        "/safe#",
+        "/safe%3fquery=value",
+        "/safe%23fragment",
+        "/safe%",
+        "/safe%2",
+        "/safe%zz",
+    ],
+)
+async def test_unsafe_catalog_path_is_rejected_before_http_normalization(
+    endpoint, monkeypatch, unsafe_path
+):
+    settings, item, path, catalog = endpoint
+    catalog["mcp-servers"][0]["routes"][0]["url"] = "https://public.example.test" + unsafe_path
+    path.write_text(json.dumps(catalog))
+
+    def unexpected_url(*args, **kwargs):
+        pytest.fail(
+            "Unsafe catalog path must fail before HTTP URL normalization or client creation"
+        )
+
+    monkeypatch.setattr(mcp_gateway.httpx2, "URL", unexpected_url)
+    monkeypatch.setattr(mcp_gateway.httpx2, "AsyncClient", unexpected_url)
+    with pytest.raises(mcp_gateway.McpGatewayError) as denied:
+        async with mcp_gateway.gateway_client(settings, item, "Bearer caller-token"):
+            pytest.fail("Unsafe path must not yield a client")
+    assert denied.value.status == 503
+
+
+async def test_concurrent_callers_keep_credentials_and_cookies_isolated(endpoint, monkeypatch):
+    settings, item, _, _ = endpoint
+    real_client = httpx2.AsyncClient
+    clients = []
+    seen = {}
+
+    def client_factory(**kwargs):
+        authorization = kwargs["headers"]["Authorization"]
+        seen[authorization] = []
+
+        async def upstream(request):
+            await asyncio.sleep(0)
+            assert request.headers["authorization"] == authorization
+            assert "cookie" not in request.headers
+            assert str(request.url) == settings.mcp_gateway_url + "/operator/selected-endpoint"
+            seen[authorization].append(json.loads(request.content)["method"])
+            return mcp_response(request)
+
+        client = real_client(
+            transport=httpx2.MockTransport(upstream), cookies={"caller": authorization}, **kwargs
+        )
+        clients.append(client)
+        return client
+
+    async def discover(authorization):
+        async with mcp_gateway.gateway_client(settings, item, authorization) as client:
+            assert (await client.list_tools()).tools == []
+
+    monkeypatch.setattr(mcp_gateway.httpx2, "AsyncClient", client_factory)
+    await asyncio.gather(discover("Bearer caller-one"), discover("Bearer caller-two"))
+    assert len(clients) == 2 and clients[0] is not clients[1]
+    assert all(client.is_closed for client in clients)
+    assert set(seen) == {"Bearer caller-one", "Bearer caller-two"}
+    assert all("initialize" in methods and "tools/list" in methods for methods in seen.values())
