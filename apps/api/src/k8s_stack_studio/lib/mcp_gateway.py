@@ -14,10 +14,14 @@ from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp_types import CallToolResult, TextContent, Tool
 
+from k8s_stack_studio.config.settings import Settings
+from k8s_stack_studio.lib.gateway import gateway_catalog
+from k8s_stack_studio.lib.gateway_files import GatewayUnavailableError
 from k8s_stack_studio.models.mcp import McpCheck, McpCheckResult, McpRegistration, McpTool
 
 _in_flight = asyncio.Semaphore(4)
 _logger = logging.getLogger(__name__)
+_ENDPOINT_UNAVAILABLE = "MCP gateway endpoint is unavailable."
 
 
 class McpGatewayError(Exception):
@@ -36,13 +40,40 @@ class McpGatewayError(Exception):
         self.retry_after = retry_after
 
 
+def _gateway_url(settings: Settings, item: McpRegistration) -> httpx2.URL:
+    """Resolve an owned catalog endpoint; never infer a path or trust another origin."""
+    try:
+        catalog = gateway_catalog(settings)
+    except GatewayUnavailableError:
+        raise McpGatewayError(_ENDPOINT_UNAVAILABLE, status=503) from None
+    routes = [
+        route
+        for entry in catalog.mcp_servers
+        for destination in entry.destinations
+        if destination.kind == "mcp" and destination.id == item.id
+        for route in entry.routes
+        if route.id in destination.endpoint_ids and route.entry_mode == "api"
+    ]
+    if (
+        len(routes) != 1
+        or not settings.mcp_gateway_url
+        or "oidc_bearer" not in routes[0].caller_auth_modes
+    ):
+        raise McpGatewayError(_ENDPOINT_UNAVAILABLE, status=503)
+    # HTTP clients normalize default ports before request hooks run.
+    url = httpx2.URL(routes[0].url)
+    origin = httpx2.URL(settings.mcp_gateway_url)
+    if (url.scheme, url.host, url.port) != (origin.scheme, origin.host, origin.port):
+        raise McpGatewayError(_ENDPOINT_UNAVAILABLE, status=503)
+    return url
+
+
 @asynccontextmanager
 async def gateway_client(
-    origin: str, item: McpRegistration, authorization: str
+    settings: Settings, item: McpRegistration, authorization: str
 ) -> AsyncIterator[Client]:
     """Create a fresh transport per caller; never share credentials, cookies or SDK caches."""
-    # HTTP clients normalize default ports before request hooks run.
-    url = httpx2.URL(f"{origin}/mcp/{item.id}")
+    url = _gateway_url(settings, item)
     rejection: McpGatewayError | None = None
     stage = "initialize"
 

@@ -130,17 +130,28 @@ def _health(
     )
 
 
+def gateway_catalog(
+    settings: Settings, *, generations: dict[Path, Path] | None = None
+) -> GatewayCatalog:
+    """Read and validate the chart-owned catalog without depending on runtime health."""
+    try:
+        return GatewayCatalog.model_validate_json(
+            read_document(
+                projected_path(
+                    settings.gateway_catalog_file, {} if generations is None else generations
+                )
+            )
+        )
+    except (OSError, ValueError, GatewayUnavailableError):
+        raise GatewayUnavailableError from None
+
+
 def gateway_view(
     settings: Settings, permissions: frozenset[str], *, administrator: bool = False
 ) -> GatewayView:
     """Read current configuration; missing health never hides usable configuration."""
     generations: dict[Path, Path] = {}
-    try:
-        catalog = GatewayCatalog.model_validate_json(
-            read_document(projected_path(settings.gateway_catalog_file, generations))
-        )
-    except (OSError, ValueError, GatewayUnavailableError):
-        raise GatewayUnavailableError from None
+    catalog = gateway_catalog(settings, generations=generations)
     observed = None
     invalid = False
     if settings.gateway_status_file:
