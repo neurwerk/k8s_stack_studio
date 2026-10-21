@@ -36,13 +36,23 @@ export interface GatewayProfile {
   }[];
 }
 
+export interface GatewayEntry {
+  id: string;
+  provider_id: string | null;
+  display_name: string;
+  routes: GatewayEndpoint[];
+  destinations: GatewayDestination[];
+}
+
 export interface GatewayView {
   catalog: {
-    schema_version: 1;
+    schema_version: 2;
     catalog_revision: string;
     policy_revision: string;
-    endpoints: GatewayEndpoint[];
-    destinations: GatewayDestination[];
+    "self-hosted-api-providers": GatewayEntry[];
+    "external-api-providers": GatewayEntry[];
+    "external-subscription-providers": GatewayEntry[];
+    "mcp-servers": GatewayEntry[];
     profiles: GatewayProfile[];
   };
   status: {

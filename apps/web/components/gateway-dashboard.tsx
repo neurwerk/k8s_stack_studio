@@ -51,35 +51,28 @@ function GatewayContent({ administrator, trustPublicationAvailable }: {
     <h1 className="text-2xl font-semibold tracking-tight">Gateway</h1>
     {trustPublicationAvailable ? <GatewayTrust manifest={trust} loading={loading} now={now} compact />
       : <p role="status" className="text-sm text-muted-foreground">Inspection certificate publication is disabled.</p>}
-    <div className="overflow-x-auto rounded-lg border border-border bg-card">
-      <table className="table w-full text-left text-sm">
-        <thead><tr className="border-b border-border text-muted-foreground">
-          <th className="px-4 py-3 font-medium">URL</th><th className="px-4 py-3 font-medium">Type</th>
-        </tr></thead>
-        <tbody>{view?.catalog.endpoints.map((endpoint) => {
-          const destinations = view.catalog.destinations.filter((item) => item.endpoint_ids.includes(endpoint.id));
-          const profiles = [...new Set(destinations.flatMap((item) => item.profile_ids))];
-          const profileLabels: Record<string, string> = {
-            "openai-codex-responses-v1": "OpenAI Codex",
-            "openai-responses-v1": "OpenAI Responses",
-          };
-          return <tr key={endpoint.id} className="border-b border-border hover:bg-muted/50">
-            <td className="break-all px-4 py-3 font-mono text-xs">{endpoint.url}
-              {endpoint.id === "api-local" && endpoint.entry_mode === "api" && profiles.includes("openai-model-discovery-v1") &&
-                <div className="mt-1 text-muted-foreground">GET /models · GET /models/{"{model}"}</div>}
-            </td>
-            <td className="px-4 py-3">{endpoint.entry_mode === "api"
-              ? destinations.some((item) => item.kind === "mcp") ? "MCP" : "API"
-              : endpoint.url.startsWith("https:") ? "HTTPS forward proxy" : "HTTP forward proxy"}
-              {endpoint.entry_mode === "forward_proxy" && profiles.length > 0 &&
-                <p className="mt-1 text-xs text-muted-foreground">Configured routes: {profiles.map((id) => profileLabels[id] ?? id).join(", ")}</p>}
-            </td>
-          </tr>;
-        })}
-        {!view?.catalog.endpoints.length && <tr><td colSpan={2} className="px-4 py-3 text-muted-foreground">
-          {loading ? "Loading endpoints…" : view ? "No endpoints available." : "Gateway information unavailable."}
-        </td></tr>}</tbody>
-      </table>
-    </div>
+    {([
+      ["self-hosted-api-providers", "Self-hosted API providers"],
+      ["external-api-providers", "External API providers"],
+      ["external-subscription-providers", "External subscription providers"],
+      ["mcp-servers", "MCP servers"],
+    ] as const).map(([group, label]) => <section key={group} className="space-y-3">
+      <h2 className="text-lg font-semibold">{label}</h2>
+      {view?.catalog[group].map((entry) => <article key={entry.id} className="space-y-3 rounded-lg border border-border bg-card p-4 text-sm">
+        <h3 className="font-medium">{entry.display_name}</h3>
+        {entry.provider_id && <p className="text-muted-foreground">Provider: {entry.provider_id}</p>}
+        <ul className="space-y-2">{entry.routes.map((route) => <li key={route.id}>
+          <div className="break-all font-mono text-xs">{route.url}</div>
+          <div className="text-muted-foreground">{route.entry_mode === "api" ? "API" : "Forward proxy"} · Caller authentication: {route.caller_auth_modes.join(", ")}</div>
+        </li>)}</ul>
+        <ul className="space-y-2">{entry.destinations.map((destination) => <li key={`${destination.kind}:${destination.id}`}>
+          <div>{destination.display_name} <span className="font-mono text-xs">{destination.id}</span></div>
+          <div className="text-muted-foreground">Credential modes: {destination.credential_modes.map((mode) => ({company: "Company", caller_supplied: "Caller supplied", none: "None"})[mode.source]).join(", ") || "Not available"}</div>
+          <div className="text-muted-foreground">Routes: {destination.endpoint_ids.join(", ")}</div>
+          {!!destination.profile_ids.length && <div className="text-muted-foreground">Profiles: {destination.profile_ids.join(", ")}</div>}
+        </li>)}</ul>
+      </article>)}
+      {!view?.catalog[group].length && <p role="status" className="text-sm text-muted-foreground">{loading ? "Loading…" : view ? "No entries available." : "Gateway information unavailable."}</p>}
+    </section>)}
   </main>;
 }
