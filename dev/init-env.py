@@ -116,10 +116,17 @@ if not all((tls / name).exists() for name in required):
 # The local developer can view every demo destination through the real API.
 catalog = json.loads((root / "dev/gateway-catalog.json").read_text())
 permissions = set()
-for destination in catalog["destinations"]:
-    permissions.update(destination["required_permissions"])
-    for mode in destination["credential_modes"]:
-        permissions.update(mode["required_permissions"])
+for group in (
+    "self-hosted-api-providers",
+    "external-api-providers",
+    "external-subscription-providers",
+    "mcp-servers",
+):
+    for entry in catalog[group]:
+        for destination in entry["destinations"]:
+            permissions.update(destination["required_permissions"])
+            for mode in destination["credential_modes"]:
+                permissions.update(mode["required_permissions"])
 (secrets_dir / "demo-users/gateway-roles.txt").write_text(
     "\n".join(sorted(permissions)) + "\n"
 )
