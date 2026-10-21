@@ -42,7 +42,7 @@ async def gateway_client(
 ) -> AsyncIterator[Client]:
     """Create a fresh transport per caller; never share credentials, cookies or SDK caches."""
     # HTTP clients normalize default ports before request hooks run.
-    url = httpx2.URL(f"{origin}/bindings/mcp-{item.id}/mcp")
+    url = httpx2.URL(f"{origin}/mcp/{item.id}")
     rejection: McpGatewayError | None = None
     stage = "initialize"
 
