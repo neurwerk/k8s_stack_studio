@@ -1,8 +1,8 @@
 "use client";
 
-import { UserIcon } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, UserIcon } from "lucide-react";
 import Link from "next/link";
-import type { KeycloakUser, RecentSignins } from "@/lib/api/admin";
+import type { KeycloakUser, RecentSignins, UserSortKey } from "@/lib/api/admin";
 import { UserStatus } from "@/components/user-status";
 
 interface UserTableProps {
@@ -11,9 +11,32 @@ interface UserTableProps {
   error: string | null;
   activity?: RecentSignins | null;
   activityLoading?: boolean;
+  sort: { key: UserSortKey; direction: "asc" | "desc" } | null;
+  onSort: (key: UserSortKey) => void;
 }
 
-export function UserTable({ users, loading, error, activity, activityLoading }: UserTableProps) {
+function SortHeader({ label, column, sort, onSort }: {
+  label: string;
+  column: UserSortKey;
+  sort: UserTableProps["sort"];
+  onSort: (column: UserSortKey) => void;
+}) {
+  const active = sort?.key === column;
+  const direction = active ? sort.direction : null;
+  return <th scope="col" aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}
+    className="px-3 py-2">
+    <button type="button" onClick={() => { onSort(column); }}
+      aria-label={`Sort all users by ${label} ${direction === "asc" ? "descending" : "ascending"}`}
+      className="flex w-full items-center gap-1 rounded text-left hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary">
+      <span>{label}</span>
+      {direction === "asc" ? <ArrowUp className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        : direction === "desc" ? <ArrowDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          : <ArrowUpDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+    </button>
+  </th>;
+}
+
+export function UserTable({ users, loading, error, activity, activityLoading, sort, onSort }: UserTableProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -42,23 +65,23 @@ export function UserTable({ users, loading, error, activity, activityLoading }: 
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card">
       <table className="table w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-border text-muted-foreground">
-            <th className="px-4 py-3 font-medium">Username</th>
-            <th className="px-4 py-3 font-medium">Email</th>
-            <th className="px-4 py-3 font-medium">First Name</th>
-            <th className="px-4 py-3 font-medium">Last Name</th>
-            <th className="px-4 py-3 font-medium">Status</th>
-            <th className="px-4 py-3 font-medium">Recent sign-in</th>
+        <thead className="border-b border-border bg-muted/50 text-xs uppercase text-muted-foreground">
+          <tr>
+            <SortHeader label="Username" column="username" sort={sort} onSort={onSort} />
+            <SortHeader label="Email" column="email" sort={sort} onSort={onSort} />
+            <SortHeader label="First Name" column="firstName" sort={sort} onSort={onSort} />
+            <SortHeader label="Last Name" column="lastName" sort={sort} onSort={onSort} />
+            <SortHeader label="Status" column="status" sort={sort} onSort={onSort} />
+            <SortHeader label="Recent sign-in" column="recentSignin" sort={sort} onSort={onSort} />
           </tr>
         </thead>
-        <tbody>
+        <tbody className="text-xs">
           {users.map((user) => (
             <tr
               key={user.id}
               className="border-b border-border transition-colors hover:bg-muted/50"
             >
-              <td className="px-4 py-3">
+              <td className="px-3 py-1.5 align-top">
                 <Link
                   href={`/users/${user.id}`}
                   className="font-medium text-primary hover:underline"
@@ -66,13 +89,13 @@ export function UserTable({ users, loading, error, activity, activityLoading }: 
                   {user.username}
                 </Link>
               </td>
-              <td className="px-4 py-3 text-muted-foreground">{user.email || "—"}</td>
-              <td className="px-4 py-3 text-muted-foreground">{user.firstName || "—"}</td>
-              <td className="px-4 py-3 text-muted-foreground">{user.lastName || "—"}</td>
-              <td className="px-4 py-3">
+              <td className="px-3 py-1.5 align-top text-muted-foreground">{user.email || "—"}</td>
+              <td className="px-3 py-1.5 align-top text-muted-foreground">{user.firstName || "—"}</td>
+              <td className="px-3 py-1.5 align-top text-muted-foreground">{user.lastName || "—"}</td>
+              <td className="px-3 py-1.5 align-top">
                 <UserStatus user={user} />
               </td>
-              <td className="px-4 py-3 text-muted-foreground">
+              <td className="px-3 py-1.5 align-top text-muted-foreground">
                 {activityLoading ? (
                   "Loading sign-in..."
                 ) : (

@@ -10,9 +10,11 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
+import time
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import Field
@@ -39,6 +41,18 @@ router = APIRouter(prefix="/api", tags=["admin"])
 USER_ID_PATTERN = re.compile(
     r"(?:[0-9a-fA-F]{24}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\Z"
 )
+USER_SORT_FIELDS = Literal["username", "email", "firstName", "lastName", "status", "recentSignin"]
+_USER_CACHE_TTL = 600
+
+
+class _SigninActivity(TypedDict):
+    window_start: datetime
+    window_end: datetime
+    users: dict[str, dict[str, str | None]]
+
+
+_user_cache: dict[tuple[str, str], tuple[float, list[dict[str, Any]], _SigninActivity | None]] = {}
+_user_cache_lock = asyncio.Lock()
 
 
 # ── helper: extract bearer token from request ──────────────────────────────
@@ -117,6 +131,118 @@ async def list_users(
         else:
             return [user] if first == 0 else []
     return await admin.list_users(user_token, search=search, first=first, max_results=max_results)
+
+
+async def _all_keycloak_users(
+    admin: KeycloakAdminClient, token: str, search: str | None
+) -> list[dict[str, Any]]:
+    users: list[dict[str, Any]] = []
+    if search and USER_ID_PATTERN.fullmatch(search):
+        try:
+            return [await admin.get_user(search, token)]
+        except KeycloakAdminRequestError as exc:
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                raise
+    while True:
+        batch = await admin.list_users(token, search=search, first=len(users), max_results=100)
+        users.extend(batch)
+        if len(batch) < 100:
+            return users
+
+
+async def _all_recent_signins(
+    admin: KeycloakAdminClient, token: str, users: list[dict[str, Any]]
+) -> _SigninActivity:
+    end = datetime.now(UTC)
+    start = end - timedelta(days=7)
+    semaphore = asyncio.Semaphore(4)
+
+    async def lookup(user: dict[str, Any]) -> tuple[str, dict[str, str | None]]:
+        async with semaphore:
+            user_id = str(user["id"])
+            return user_id, await admin.recent_signin(user_id, token, start, end)
+
+    records = await asyncio.gather(*(lookup(user) for user in users))
+    return {"window_start": start, "window_end": end, "users": dict(records)}
+
+
+async def _sorted_user_snapshot(
+    admin: KeycloakAdminClient, token: str, search: str | None, with_signins: bool
+) -> tuple[list[dict[str, Any]], _SigninActivity | None]:
+    cache_key = (hashlib.sha256(token.encode()).hexdigest(), search or "")
+    async with _user_cache_lock:
+        cached = _user_cache.get(cache_key)
+        if cached is not None and time.monotonic() >= cached[0]:
+            cached = None
+    if cached is None:
+        users = await _all_keycloak_users(admin, token, search)
+        async with _user_cache_lock:
+            cached = _user_cache.get(cache_key)
+            if cached is None or time.monotonic() >= cached[0]:
+                cached = (time.monotonic() + _USER_CACHE_TTL, users, None)
+                _user_cache[cache_key] = cached
+            # Keep only a few delegated, short-lived snapshots in process memory.
+            for key, entry in list(_user_cache.items()):
+                if time.monotonic() >= entry[0]:
+                    del _user_cache[key]
+            while len(_user_cache) > 8:
+                del _user_cache[next(iter(_user_cache))]
+    expires, users, activity = cached
+    if with_signins and activity is None:
+        activity = await _all_recent_signins(admin, token, users)
+        async with _user_cache_lock:
+            current = _user_cache.get(cache_key)
+            if current is not None and current[1] is users:
+                if current[2] is None:
+                    _user_cache[cache_key] = (expires, users, activity)
+                else:
+                    activity = current[2]
+    return users, activity
+
+
+def _user_sort_value(
+    user: dict[str, Any], sort: USER_SORT_FIELDS, activity: _SigninActivity | None
+) -> tuple[bool, str | float]:
+    if sort == "recentSignin":
+        record = activity["users"].get(user["id"]) if activity else None
+        stamp = record.get("timestamp") if record and record["status"] == "recorded" else None
+        return (not bool(stamp), datetime.fromisoformat(stamp).timestamp() if stamp else 0.0)
+    if sort == "status":
+        value = f"{user.get('enabled')} {user.get('emailVerified')}"
+    else:
+        value = user.get(sort) or ""
+    return (not bool(value), str(value).casefold())
+
+
+@router.get("/admin/users/sorted")
+async def sorted_users(
+    request: Request,
+    sort: USER_SORT_FIELDS,
+    direction: Literal["asc", "desc"] = "asc",
+    search: str | None = None,
+    first: int = Query(0, ge=0),
+    max_results: int = Query(25, alias="max", ge=1, le=25),
+    _: None = Depends(require_role("keycloak-admin")),
+    admin: KeycloakAdminClient = Depends(get_keycloak_admin),
+) -> dict[str, Any]:
+    """Sort all matching users before slicing a page; event lookup is only needed for sign-ins."""
+    token = _extract_bearer_token(request)
+    users, activity = await _sorted_user_snapshot(admin, token, search, sort == "recentSignin")
+
+    def sort_value(user: dict[str, Any]) -> tuple[bool, str | float]:
+        return _user_sort_value(user, sort, activity)
+
+    # Missing values always trail recorded values, regardless of direction.
+    present = [user for user in users if not sort_value(user)[0]]
+    missing = [user for user in users if sort_value(user)[0]]
+    ordered = sorted(present, key=sort_value, reverse=direction == "desc") + missing
+    page = ordered[first : first + max_results]
+    page_activity = (
+        {**activity, "users": {user["id"]: activity["users"][user["id"]] for user in page}}
+        if activity
+        else None
+    )
+    return {"items": page, "total": len(ordered), "activity": page_activity}
 
 
 @router.get("/admin/recent-signins")
