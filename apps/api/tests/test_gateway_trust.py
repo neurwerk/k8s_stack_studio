@@ -22,7 +22,9 @@ from k8s_stack_studio.lib.gateway_files import MAX_DOCUMENT_BYTES, GatewayUnavai
 from k8s_stack_studio.lib.gateway_trust import trust_publication
 
 
-def certificate(name, *, ca=True, intermediate=False, wrong_signature=False, expired=False):
+def certificate(
+    name, *, ca=True, intermediate=False, wrong_signature=False, expired=False, valid_from=None
+):
     key = ec.generate_private_key(ec.SECP256R1())
     subject = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, name)])
     issuer = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "issuer")])
@@ -33,7 +35,7 @@ def certificate(name, *, ca=True, intermediate=False, wrong_signature=False, exp
         .issuer_name(issuer if intermediate else subject)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(days=2))
+        .not_valid_before(valid_from or now - timedelta(days=2))
         .not_valid_after(now + timedelta(days=-1 if expired else 90))
         .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
         .sign(ec.generate_private_key(ec.SECP256R1()) if wrong_signature else key, hashes.SHA256())
@@ -129,6 +131,37 @@ async def test_public_get_head_and_authentication_boundaries(publication, monkey
             assert (await client.get(path)).status_code == 401
         missing = await client.get(f"{prefix}/bundles/{'0' * 64}.pem")
         assert missing.status_code == 404 and missing.headers["cache-control"] == "no-store"
+
+
+async def test_root_download_names_use_validity_start_without_collisions(publication):
+    settings, path, _, root = publication
+    replacement = certificate("Next root", valid_from=root.not_valid_before_utc)
+    version = snapshot(root, replacement)
+    path.write_text(
+        json.dumps(
+            {"schema_version": 1, "current_version": version["version"], "versions": [version]}
+        )
+    )
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_settings] = lambda: settings
+    names = []
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="https://test"
+    ) as client:
+        for item in (root, replacement):
+            fingerprint = item.fingerprint(hashes.SHA256()).hex()
+            path = f"/api/gateway/trust/certificates/{fingerprint}.cer"
+            expected = (
+                f'attachment; filename="neurwerk-root-{root.not_valid_before_utc:%Y%m%d}'
+                f'-{fingerprint[:8]}.cer"'
+            )
+            response = await client.get(path)
+            head = await client.head(path)
+            assert response.headers["content-disposition"] == expected
+            assert head.headers["content-disposition"] == expected
+            names.append(expected)
+    assert len(set(names)) == 2
 
 
 def test_rotation_retains_assets_and_never_serves_cached_good_after_bad(publication):

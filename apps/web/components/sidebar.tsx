@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Code2,
   FileSearch,
   KeyRound,
   LogOut,
@@ -14,6 +15,7 @@ import {
   ScrollText,
   Settings,
   Shield,
+  ShieldCheck,
   User,
   Users,
 } from "lucide-react";
@@ -24,6 +26,7 @@ import { useEffect, useState } from "react";
 import type { VersionInfo } from "@/lib/api/version";
 import { useVerifiedSession } from "@/lib/auth/session-context";
 import { fetchVersion } from "@/lib/api/version";
+import { fetchGatewayTrust } from "@/lib/api/gateway";
 import {
   useCurrentUserId,
   useIsKeycloakAdmin,
@@ -45,25 +48,32 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
   const currentUserId = useCurrentUserId();
   const session = useVerifiedSession();
   const llmLogsAvailable = session.llm_logs_available;
+  const [certificateAvailable, setCertificateAvailable] = useState(false);
+  useEffect(() => {
+    if (session.gateway_trust_available === false) {
+      setCertificateAvailable(false);
+      return;
+    }
+    const controller = new AbortController();
+    fetchGatewayTrust(controller.signal)
+      .then((manifest) => {
+        const current = manifest.versions.find((item) => item.version === manifest.current_version);
+        setCertificateAvailable(!!current?.certificates.length);
+      })
+      .catch(() => { if (!controller.signal.aborted) setCertificateAvailable(false); });
+    return () => { controller.abort(); };
+  }, [session.gateway_trust_available]);
   const isMcpAdmin = session.realm_roles.includes("mcp-admin") &&
     (session.mcp_setup_available || (session.mcp_catalog_available && process.env.NEXT_PUBLIC_STUDIO_MCP_PREVIEW === "true"));
   const configurationActive = ["/policy-engine", "/notices", "/api-keys", "/mcp"].includes(pathname);
   const [configurationOpen, setConfigurationOpen] = useState(configurationActive);
+  const documentationActive = pathname.startsWith("/documentation/");
+  const [developersOpen, setDevelopersOpen] = useState(documentationActive);
 
   return (
     <>
       {/* Main navigation */}
       <nav aria-label="Main" className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
-        <Link href="/gateway" aria-label="Gateway"
-          aria-current={pathname === "/gateway" ? "page" : undefined}
-          className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
-            pathname === "/gateway"
-              ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-              : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-          }`}>
-          <Network className="h-5 w-5 shrink-0" />
-          {!collapsed && <span className="hidden sm:inline">Gateway</span>}
-        </Link>
         <Link
           href="/usage"
           aria-label="Usage"
@@ -92,6 +102,54 @@ function NavItems({ collapsed, onExpand }: NavItemsProps) {
             {!collapsed && <span className="hidden sm:inline">LLM &amp; MCP logs</span>}
           </Link>
         )}
+        {certificateAvailable && (
+          <Link href="/forward-proxy" aria-label="Forward-Proxy"
+            aria-current={pathname === "/forward-proxy" ? "page" : undefined}
+            className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              pathname === "/forward-proxy"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            }`}>
+            <ShieldCheck className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">Forward-Proxy</span>}
+          </Link>
+        )}
+        <div role="separator" aria-label="Documentation" className="mx-3 my-3 flex items-center gap-2">
+          <span className="h-px flex-1 bg-sidebar-border" aria-hidden />
+          {!collapsed && <span className="hidden text-[10px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 sm:inline">Documentation</span>}
+          {!collapsed && <span className="hidden h-px flex-1 bg-sidebar-border sm:block" aria-hidden />}
+        </div>
+        <button type="button" aria-label="Developers" aria-expanded={developersOpen}
+          aria-controls="sidebar-developers"
+          onClick={() => {
+            if (collapsed) {
+              onExpand();
+              setDevelopersOpen(true);
+            } else {
+              setDevelopersOpen(!developersOpen);
+            }
+          }}
+          className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+            documentationActive
+              ? "text-sidebar-accent-foreground font-medium"
+              : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+          }`}>
+          <Code2 className="h-5 w-5 shrink-0" />
+          {!collapsed && <span className="hidden flex-1 text-left sm:inline">Developers</span>}
+          {!collapsed && (developersOpen ? <ChevronDown className="hidden h-4 w-4 sm:block" /> : <ChevronRight className="hidden h-4 w-4 sm:block" />)}
+        </button>
+        <div id="sidebar-developers" hidden={!developersOpen} className={collapsed ? "" : "sm:pl-5"}>
+          <Link href="/documentation/developers/endpoints" aria-label="Endpoints"
+            aria-current={pathname === "/documentation/developers/endpoints" ? "page" : undefined}
+            className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              pathname === "/documentation/developers/endpoints"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+            }`}>
+            <Network className="h-5 w-5 shrink-0" />
+            {!collapsed && <span className="hidden sm:inline">Endpoints</span>}
+          </Link>
+        </div>
         {(isAdmin || isOpensearchAdmin || isMcpAdmin) && (
           <div role="separator" aria-label="Admin" className="mx-3 my-3 flex items-center gap-2">
             <span className="h-px flex-1 bg-sidebar-border" aria-hidden />
