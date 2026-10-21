@@ -22,25 +22,51 @@ from k8s_stack_studio.models.gateway import (
 
 
 def _entitled(catalog: GatewayCatalog, permissions: frozenset[str]) -> GatewayCatalog:
-    destinations = [
-        item.model_copy(
-            update={
-                "credential_modes": [
-                    mode
-                    for mode in item.credential_modes
-                    if set(mode.required_permissions) <= permissions
-                ]
-            }
-        )
-        for item in catalog.destinations
-        if set(item.required_permissions) <= permissions
-    ]
-    endpoints = {identity for item in destinations for identity in item.endpoint_ids}
-    profiles = {identity for item in destinations for identity in item.profile_ids}
+    groups = {}
+    for name, entries in catalog.groups().items():
+        filtered = []
+        for entry in entries:
+            destinations = [
+                item.model_copy(
+                    update={
+                        "credential_modes": [
+                            mode
+                            for mode in item.credential_modes
+                            if set(mode.required_permissions) <= permissions
+                            and (
+                                mode.source != "company"
+                                or (
+                                    item.provider_id is not None
+                                    and f"provider:{item.provider_id}:company-use" in permissions
+                                )
+                            )
+                        ]
+                    }
+                )
+                for item in entry.destinations
+                if set(item.required_permissions) <= permissions
+            ]
+            endpoints = {identity for item in destinations for identity in item.endpoint_ids}
+            if destinations:
+                filtered.append(
+                    entry.model_copy(
+                        update={
+                            "destinations": destinations,
+                            "routes": [route for route in entry.routes if route.id in endpoints],
+                        }
+                    )
+                )
+        groups[name] = filtered
+    profiles = {
+        identity
+        for entries in groups.values()
+        for entry in entries
+        for item in entry.destinations
+        for identity in item.profile_ids
+    }
     return catalog.model_copy(
         update={
-            "destinations": destinations,
-            "endpoints": [item for item in catalog.endpoints if item.id in endpoints],
+            **groups,
             "profiles": [item for item in catalog.profiles if item.id in profiles],
         }
     )

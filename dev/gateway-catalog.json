@@ -1,59 +1,54 @@
 {
-  "schema_version": 1,
-  "catalog_revision": "studio-dev-catalog-2",
+  "schema_version": 2,
+  "catalog_revision": "studio-dev-catalog-3",
   "policy_revision": "studio-dev-policy-2",
-  "endpoints": [
-    {"id": "api-openai-personal", "url": "https://ai-api.studio.test/bindings/openai-personal/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer"]},
-    {"id": "api-openrouter", "url": "https://ai-api.studio.test/bindings/openrouter/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]},
-    {"id": "forward-proxy", "url": "https://ai-proxy.studio.test:443", "entry_mode": "forward_proxy", "caller_auth_modes": ["proxy_basic"]},
-    {"id": "mcp-brave", "url": "https://ai-api.studio.test/bindings/mcp-brave/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]},
-    {"id": "mcp-context7", "url": "https://ai-api.studio.test/bindings/mcp-context7/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]},
-    {"id": "mcp-github", "url": "https://ai-api.studio.test/bindings/mcp-github/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]}
+  "self-hosted-api-providers": [],
+  "external-api-providers": [
+    {
+      "id": "openai-personal", "provider_id": "openai", "display_name": "OpenAI",
+      "routes": [
+        {"id": "api-openai-personal", "url": "https://ai-api.studio.test/bindings/openai-personal/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer"]},
+        {"id": "forward-proxy", "url": "https://ai-proxy.studio.test:443", "entry_mode": "forward_proxy", "caller_auth_modes": ["proxy_basic"]}
+      ],
+      "destinations": [{
+        "id": "remote/openai/gpt-5.5", "kind": "model", "display_name": "GPT-5.5", "provider_id": "openai",
+        "endpoint_ids": ["api-openai-personal", "forward-proxy"], "profile_ids": ["openai-responses-v1"],
+        "required_permissions": ["llm:invoke", "model:remote/openai/gpt-5.5:invoke"],
+        "credential_modes": [{"source": "caller_supplied", "required_permissions": []}]
+      }]
+    },
+    {
+      "id": "openrouter", "provider_id": "openrouter", "display_name": "OpenRouter",
+      "routes": [{"id": "api-openrouter", "url": "https://ai-api.studio.test/bindings/openrouter/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]}],
+      "destinations": [{
+        "id": "remote/openrouter/deepseek/deepseek-v4-flash-0731", "kind": "model", "display_name": "DeepSeek Flash", "provider_id": "openrouter",
+        "endpoint_ids": ["api-openrouter"], "profile_ids": ["openai-chat-completions-v1"],
+        "required_permissions": ["llm:invoke", "model:remote/openrouter/deepseek/deepseek-v4-flash-0731:invoke"],
+        "credential_modes": [{"source": "company", "required_permissions": ["provider:openrouter:company-use"]}]
+      }]
+    }
   ],
-  "destinations": [
+  "external-subscription-providers": [],
+  "mcp-servers": [
     {
-      "id": "remote/openai/gpt-5.5", "kind": "model", "display_name": "GPT-5.5", "provider_id": "openai",
-      "endpoint_ids": ["api-openai-personal", "forward-proxy"], "profile_ids": ["openai-responses-v1"],
-      "required_permissions": ["llm:invoke", "model:remote/openai/gpt-5.5:invoke"],
-      "credential_modes": [{"source": "caller_supplied", "required_permissions": []}]
+      "id": "mcp-brave", "provider_id": null, "display_name": "Brave Search",
+      "routes": [{"id": "mcp-brave", "url": "https://ai-api.studio.test/bindings/mcp-brave/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]}],
+      "destinations": [{"id": "brave", "kind": "mcp", "display_name": "Brave Search", "endpoint_ids": ["mcp-brave"], "profile_ids": ["mcp-streamable-http-v1"], "required_permissions": ["llm:invoke", "mcp:brave:invoke"], "credential_modes": [{"source": "none", "required_permissions": []}]}]
     },
     {
-      "id": "remote/openrouter/deepseek/deepseek-v4-flash-0731", "kind": "model", "display_name": "DeepSeek Flash", "provider_id": "openrouter",
-      "endpoint_ids": ["api-openrouter"], "profile_ids": ["openai-chat-completions-v1"],
-      "required_permissions": ["llm:invoke", "model:remote/openrouter/deepseek/deepseek-v4-flash-0731:invoke"],
-      "credential_modes": [{"source": "company", "required_permissions": ["provider:openrouter:company-use"]}]
+      "id": "mcp-context7", "provider_id": null, "display_name": "Context7",
+      "routes": [{"id": "mcp-context7", "url": "https://ai-api.studio.test/bindings/mcp-context7/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]}],
+      "destinations": [{"id": "context7", "kind": "mcp", "display_name": "Context7", "endpoint_ids": ["mcp-context7"], "profile_ids": ["mcp-streamable-http-v1"], "required_permissions": ["llm:invoke", "mcp:context7:invoke"], "credential_modes": [{"source": "none", "required_permissions": []}]}]
     },
     {
-      "id": "brave", "kind": "mcp", "display_name": "Brave Search",
-      "endpoint_ids": ["mcp-brave"], "profile_ids": ["mcp-streamable-http-v1"],
-      "required_permissions": ["llm:invoke", "mcp:brave:invoke"],
-      "credential_modes": [{"source": "none", "required_permissions": []}]
-    },
-    {
-      "id": "context7", "kind": "mcp", "display_name": "Context7",
-      "endpoint_ids": ["mcp-context7"], "profile_ids": ["mcp-streamable-http-v1"],
-      "required_permissions": ["llm:invoke", "mcp:context7:invoke"],
-      "credential_modes": [{"source": "none", "required_permissions": []}]
-    },
-    {
-      "id": "github", "kind": "mcp", "display_name": "GitHub",
-      "endpoint_ids": ["mcp-github"], "profile_ids": ["mcp-streamable-http-v1"],
-      "required_permissions": ["llm:invoke", "mcp:github:invoke"],
-      "credential_modes": [{"source": "none", "required_permissions": []}]
+      "id": "mcp-github", "provider_id": null, "display_name": "GitHub",
+      "routes": [{"id": "mcp-github", "url": "https://ai-api.studio.test/bindings/mcp-github/mcp", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer", "oidc_bearer"]}],
+      "destinations": [{"id": "github", "kind": "mcp", "display_name": "GitHub", "endpoint_ids": ["mcp-github"], "profile_ids": ["mcp-streamable-http-v1"], "required_permissions": ["llm:invoke", "mcp:github:invoke"], "credential_modes": [{"source": "none", "required_permissions": []}]}]
     }
   ],
   "profiles": [
-    {
-      "id": "openai-chat-completions-v1", "revision": "1", "limitations": ["JSON/SSE only."],
-      "operations": [{"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": []}]
-    },
-    {
-      "id": "openai-responses-v1", "revision": "1", "limitations": ["Opaque continuation is unsupported."],
-      "operations": [{"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": []}]
-    },
-    {
-      "id": "mcp-streamable-http-v1", "revision": "1", "limitations": ["Stateless exchanges only."],
-      "operations": [{"id": "exchange", "support": "unknown", "restoration_scope": "request", "limitations": []}]
-    }
+    {"id": "openai-chat-completions-v1", "revision": "1", "limitations": ["JSON/SSE only."], "operations": [{"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": []}]},
+    {"id": "openai-responses-v1", "revision": "1", "limitations": ["Opaque continuation is unsupported."], "operations": [{"id": "create", "support": "unknown", "restoration_scope": "request", "limitations": []}]},
+    {"id": "mcp-streamable-http-v1", "revision": "1", "limitations": ["Stateless exchanges only."], "operations": [{"id": "exchange", "support": "unknown", "restoration_scope": "request", "limitations": []}]}
   ]
 }

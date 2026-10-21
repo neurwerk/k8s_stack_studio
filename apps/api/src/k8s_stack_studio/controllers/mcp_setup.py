@@ -74,13 +74,14 @@ async def list_setup(
     external_urls: dict[str, list[str]] = {}
     try:
         catalog = gateway_view(settings, frozenset(), administrator=True).catalog
-        for destination in catalog.destinations:
-            if destination.kind == "mcp":
-                external_urls[destination.id] = [
-                    endpoint.url
-                    for endpoint in catalog.endpoints
-                    if endpoint.id in destination.endpoint_ids and endpoint.entry_mode == "api"
-                ]
+        for entry in catalog.mcp_servers:
+            for destination in entry.destinations:
+                if destination.kind == "mcp":
+                    external_urls[destination.id] = [
+                        endpoint.url
+                        for endpoint in entry.routes
+                        if endpoint.id in destination.endpoint_ids and endpoint.entry_mode == "api"
+                    ]
     except GatewayUnavailableError:
         pass
     result = []

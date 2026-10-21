@@ -48,6 +48,14 @@ class GatewayEndpoint(GatewayModel):
         min_length=1, max_length=3
     )
 
+    @field_validator("caller_auth_modes")
+    @classmethod
+    def unique_auth(cls, value: list[str]) -> list[str]:
+        """Reject repeated authentication choices."""
+        if len(set(value)) != len(value):
+            raise GatewayDocumentError
+        return value
+
     @field_validator("url")
     @classmethod
     def validate_url(cls, value: str) -> str:
@@ -74,6 +82,14 @@ class GatewayCredentialMode(GatewayModel):
     source: CredentialSource
     required_permissions: Permissions
 
+    @field_validator("required_permissions")
+    @classmethod
+    def unique_permissions(cls, value: list[str]) -> list[str]:
+        """Keep each all-of permission rule unambiguous."""
+        if len(set(value)) != len(value):
+            raise GatewayDocumentError
+        return value
+
 
 class GatewayDestination(GatewayModel):
     """One canonical configured model, MCP integration or application."""
@@ -81,7 +97,7 @@ class GatewayDestination(GatewayModel):
     id: Identifier
     kind: Literal["model", "mcp", "application"]
     display_name: Identifier
-    endpoint_ids: list[Identifier] = Field(min_length=1, max_length=32)
+    endpoint_ids: list[Identifier] = Field(min_length=1, max_length=256)
     profile_ids: list[Identifier] = Field(max_length=128)
     required_permissions: Permissions = Field(min_length=1)
     credential_modes: list[GatewayCredentialMode] = Field(max_length=3)
@@ -93,6 +109,9 @@ class GatewayDestination(GatewayModel):
         """A provider source has exactly one all-of permission rule."""
         if len({mode.source for mode in self.credential_modes}) != len(self.credential_modes):
             raise GatewayDocumentError
+        for values in (self.endpoint_ids, self.profile_ids, self.required_permissions):
+            if len(set(values)) != len(values):
+                raise GatewayDocumentError
         return self
 
 
@@ -123,29 +142,116 @@ class GatewayProfile(GatewayModel):
         return self
 
 
-class GatewayCatalog(GatewaySchema):
+class GatewayEntry(GatewayModel):
+    """One trusted binding and the destinations owned by that binding."""
+
+    id: Identifier
+    provider_id: Identifier | None
+    display_name: Identifier
+    routes: list[GatewayEndpoint] = Field(max_length=256)
+    destinations: list[GatewayDestination] = Field(max_length=500)
+
+
+class GatewayCatalog(GatewayModel):
     """One effective catalog, with validated references and stable identities."""
 
+    schema_version: Literal[2]
     catalog_revision: Identifier
     policy_revision: Identifier
-    endpoints: list[GatewayEndpoint] = Field(max_length=32)
-    destinations: list[GatewayDestination] = Field(max_length=500)
     profiles: list[GatewayProfile] = Field(max_length=128)
+    self_hosted_api_providers: list[GatewayEntry] = Field(
+        alias="self-hosted-api-providers", max_length=256
+    )
+    external_api_providers: list[GatewayEntry] = Field(
+        alias="external-api-providers", max_length=256
+    )
+    external_subscription_providers: list[GatewayEntry] = Field(
+        alias="external-subscription-providers", max_length=256
+    )
+    mcp_servers: list[GatewayEntry] = Field(alias="mcp-servers", max_length=200)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def validate_schema(cls, value: object) -> int:
+        """Accept only the exact grouped catalog version."""
+        if type(value) is not int or value != 2:
+            raise GatewayDocumentError
+        return value
+
+    def groups(self) -> dict[str, list[GatewayEntry]]:
+        """Enumerate all four independently presented groups."""
+        return {
+            name: getattr(self, name)
+            for name in (
+                "self_hosted_api_providers",
+                "external_api_providers",
+                "external_subscription_providers",
+                "mcp_servers",
+            )
+        }
+
+    @property
+    def endpoints(self) -> list[GatewayEndpoint]:
+        """Unique physical listeners, not repeated grouped route references."""
+        return list(
+            {
+                route.id: route
+                for entries in self.groups().values()
+                for entry in entries
+                for route in entry.routes
+            }.values()
+        )
+
+    @property
+    def destinations(self) -> list[GatewayDestination]:
+        """Collect owned destinations for bounded cross-catalog consumers."""
+        return [
+            item
+            for entries in self.groups().values()
+            for entry in entries
+            for item in entry.destinations
+        ]
 
     @model_validator(mode="after")
     def validate_references(self) -> Self:
         """Require unambiguous entries and references within this catalog."""
-        endpoints = {item.id for item in self.endpoints}
+        entries = [entry for group in self.groups().values() for entry in group]
+        providers = (
+            self.self_hosted_api_providers
+            + self.external_api_providers
+            + self.external_subscription_providers
+        )
+        if len(providers) > 256 or len({entry.id for entry in entries}) != len(entries):
+            raise GatewayDocumentError
+        routes: dict[str, GatewayEndpoint] = {}
+        for entry in entries:
+            owned = {route.id for route in entry.routes}
+            if len(owned) != len(entry.routes):
+                raise GatewayDocumentError
+            for route in entry.routes:
+                previous = routes.get(route.id)
+                if previous is not None and (
+                    route.entry_mode != "forward_proxy" or previous != route
+                ):
+                    raise GatewayDocumentError
+                routes[route.id] = route
+            if sum(item.kind == "model" for item in entry.destinations) > 32:
+                raise GatewayDocumentError
+            if any(
+                not set(item.endpoint_ids) <= owned or item.provider_id != entry.provider_id
+                for item in entry.destinations
+            ):
+                raise GatewayDocumentError
         profiles = {item.id for item in self.profiles}
         destinations = {(item.kind, item.id) for item in self.destinations}
         if (
-            len(endpoints) != len(self.endpoints)
+            len(routes) > 256
+            or len(self.destinations) > 500
+            or sum(item.kind == "model" for item in self.destinations) > 256
+            or sum(item.kind == "mcp" for item in self.destinations) > 200
             or len(profiles) != len(self.profiles)
             or len(destinations) != len(self.destinations)
-            or any(
-                not set(item.endpoint_ids) <= endpoints or not set(item.profile_ids) <= profiles
-                for item in self.destinations
-            )
+            or any(not set(item.profile_ids) <= profiles for item in self.destinations)
         ):
             raise GatewayDocumentError
         return self
@@ -194,7 +300,7 @@ class GatewayStatus(GatewaySchema):
     applied_policy_revision: Identifier | None
     observed_at: AwareDatetime
     valid_until: AwareDatetime
-    endpoints: list[EndpointObservation] = Field(max_length=32)
+    endpoints: list[EndpointObservation] = Field(max_length=256)
     profiles: list[ProfileObservation] = Field(max_length=128)
     signers: list[SignerObservation] = Field(default_factory=list, max_length=64)
 
