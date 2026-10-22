@@ -150,6 +150,8 @@ class GatewayEntry(GatewayModel):
     display_name: Identifier
     routes: list[GatewayEndpoint] = Field(max_length=256)
     destinations: list[GatewayDestination] = Field(max_length=500)
+    # Published configuration only, never runtime credential or billing evidence.
+    company_credential_status: Literal["disabled", "missing", "configured"] | None = None
 
 
 class GatewayCatalog(GatewayModel):

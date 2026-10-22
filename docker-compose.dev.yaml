@@ -136,7 +136,7 @@ services:
       context: .
       dockerfile: dev/Dockerfile.api
     # Development-only entry point: the release image still uses the real MCP controllers.
-    command: [uv, run, --no-sync, uvicorn, "mcp_preview:create_app", --factory, --host, 0.0.0.0, --port, "4010", --reload, --reload-dir, /workspace/apps/api/src, --reload-dir, /workspace/apps/api/mcp_preview.py]
+    command: [uv, run, --no-sync, uvicorn, "mcp_preview:create_app", --factory, --host, 0.0.0.0, --port, "4010", --no-access-log, --reload, --reload-dir, /workspace/apps/api/src, --reload-dir, /workspace/apps/api/mcp_preview.py, --reload-dir, /workspace/apps/api/gateway_preview.py]
     environment:
       K8S_STUDIO_KEYCLOAK_SERVER_URL: http://keycloak:8080
       K8S_STUDIO_KEYCLOAK_REALM: studio-dev
@@ -161,6 +161,7 @@ services:
     volumes:
       - ./apps/api/src:/workspace/apps/api/src:ro
       - ./dev/mcp_preview.py:/workspace/apps/api/mcp_preview.py:ro
+      - ./dev/gateway_preview.py:/workspace/apps/api/gateway_preview.py:ro
       # Synthetic catalog and a locally generated public root; no live gateway connection.
       - ./dev/gateway-catalog.json:/gateway/catalog.json:ro
       - ./.dev-local/gateway:/gateway/trust:ro

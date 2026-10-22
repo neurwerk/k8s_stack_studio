@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -423,3 +425,333 @@ def test_credential_modes_require_provision_and_company_permission(modes, grants
     permissions = frozenset(destination["required_permissions"] + grants)
     filtered = gateway._entitled(GatewayCatalog.model_validate(data), permissions)
     assert [mode.source for mode in filtered.destinations[0].credential_modes] == expected
+
+
+@pytest.fixture
+def simulator(tmp_path, monkeypatch):
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "dev"))
+    preview = import_module("gateway_preview")
+    data = json.loads((root / "dev/gateway-catalog.json").read_text())
+    path = tmp_path / "simulator.json"
+    path.write_text(json.dumps(data))
+    settings = Settings(gateway_catalog_file=str(path))
+    permissions = frozenset(
+        permission
+        for destination in gateway.gateway_catalog(settings).destinations
+        for permission in destination.required_permissions
+    )
+    app = FastAPI()
+    app.state.simulator_permissions = permissions
+    app.dependency_overrides[get_settings] = lambda: settings
+
+    @app.middleware("http")
+    async def verified_fixture(request, call_next):
+        # Only the adapted platform header may reach the identity verifier.
+        if request.headers.get("authorization") == "Bearer synthetic-session":
+            request.scope["user"] = StudioPrincipal(
+                "sample", frozenset({"studio-user"}), app.state.simulator_permissions, {}
+            )
+        return await call_next(request)
+
+    preview.install(app)
+    return app, data, path
+
+
+async def test_simulator_discovery_needs_eligible_mode_not_provider_credentials(simulator):
+    app, data, catalog_path = simulator
+    entry = next(item for item in data["external-api-providers"] if item["id"] == "openrouter")
+    destination = entry["destinations"][0]
+    headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
+    base = "/openrouter/api/v1"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://localhost:4010"
+    ) as client:
+        for path in (f"{base}/models", f"{base}/models/{destination['model']}"):
+            assert (await client.get(path, headers=headers)).status_code == 200
+            for provider in (
+                "Bearer dummy-provider",
+                "Bearer studio-demo-provider-key",
+                "Basic dummy-provider",
+                "",
+            ):
+                response = await client.get(path, headers={**headers, "Authorization": provider})
+                assert response.status_code == 400
+                assert response.headers["cache-control"] == "no-store"
+        body = {"model": destination["model"], "messages": [{"role": "user", "content": "Hello"}]}
+        assert (
+            await client.post(f"{base}/chat/completions", headers=headers, json=body)
+        ).status_code == 403
+        response = await client.post(
+            f"{base}/chat/completions",
+            headers={**headers, "Authorization": "Bearer studio-demo-provider-key"},
+            json=body,
+        )
+        assert response.status_code == 200
+        company, personal = destination["credential_modes"]
+        destination["credential_modes"] = [personal]
+        catalog_path.write_text(json.dumps(data))
+        assert (await client.get(f"{base}/models", headers=headers)).status_code == 200
+        destination["required_permissions"] = ["llm:invoke", "model:not-granted:invoke"]
+        catalog_path.write_text(json.dumps(data))
+        assert (await client.get(f"{base}/models", headers=headers)).status_code == 403
+        destination["required_permissions"] = ["llm:invoke", f"model:{destination['id']}:invoke"]
+        for modes in ([company], []):
+            destination["credential_modes"] = modes
+            catalog_path.write_text(json.dumps(data))
+            assert (await client.get(f"{base}/models", headers=headers)).status_code == 403
+
+
+async def test_simulator_personal_credentials_never_fall_back_to_company(simulator):
+    app, data, _ = simulator
+    app.state.simulator_permissions |= {"provider:openrouter:company-use"}
+    entry = next(item for item in data["external-api-providers"] if item["id"] == "openrouter")
+    headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
+    chat = {
+        "model": entry["destinations"][0]["model"],
+        "messages": [{"role": "user", "content": "Hi"}],
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://localhost:4010"
+    ) as client:
+        path = "/openrouter/api/v1/chat/completions"
+        assert (await client.post(path, headers=headers, json=chat)).status_code == 200
+        for credential in (
+            "Bearer not-a-key",
+            "Bearer studio-demo-codex-session",
+            "Basic invalid",
+            "",
+        ):
+            response = await client.post(
+                path, headers={**headers, "Authorization": credential}, json=chat
+            )
+            assert response.status_code == 401
+            if credential:
+                assert credential not in response.text
+            assert response.headers["cache-control"] == "no-store"
+        response = await client.post(
+            path, headers={**headers, "Authorization": "Bearer studio-demo-provider-key"}, json=chat
+        )
+        assert response.status_code == 200
+        for credential, expected in (
+            ("studio-demo-provider-key", 401),
+            ("not-a-session", 401),
+            ("studio-demo-codex-session", 200),
+        ):
+            response = await client.post(
+                "/openai/codex/v1/responses",
+                headers={**headers, "Authorization": f"Bearer {credential}"},
+                json={"model": "demo-codex", "input": "Hi", "store": False},
+            )
+            assert response.status_code == expected
+
+
+async def test_simulator_mcp_schema_envelope_arguments_and_local_cors(simulator, monkeypatch):
+    app, _, _ = simulator
+    preview = import_module("mcp_preview")
+    state = preview.PreviewState()
+    state.connected.add("sample")
+    monkeypatch.setattr(preview, "state", state)
+    headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://localhost:4010"
+    ) as client:
+        for integration in ("brave", "context7", "github"):
+            response = await client.post(
+                f"/mcp/{integration}",
+                headers=headers,
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            )
+            assert response.status_code == 200
+            for tool in response.json()["result"]["tools"]:
+                schema = tool["inputSchema"]
+                assert schema["type"] == "object"
+                assert set(schema["required"]) <= schema["properties"].keys()
+                assert schema["additionalProperties"] is False
+        envelope = {"jsonrpc": "2.0", "id": 2, "method": "tools/call"}
+        for change in (
+            {"jsonrpc": None},
+            {"jsonrpc": 2},
+            {"id": True},
+            {"method": None},
+            {"params": []},
+        ):
+            response = await client.post("/mcp/brave", headers=headers, json={**envelope, **change})
+            assert response.status_code == 400
+        for arguments in (
+            None,
+            {},
+            {"query": 1},
+            {"query": " "},
+            {"query": "Hello", "count": True},
+            {"query": "Hello", "unknown": "value"},
+        ):
+            response = await client.post(
+                "/mcp/brave",
+                headers=headers,
+                json={**envelope, "params": {"name": "brave_web_search", "arguments": arguments}},
+            )
+            assert response.status_code == 400
+        response = await client.post(
+            "/mcp/brave",
+            headers=headers,
+            json={
+                **envelope,
+                "params": {
+                    "name": "brave_web_search",
+                    "arguments": {"query": "do-not-echo", "count": 1},
+                },
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["result"]["isError"] is False
+        assert "do-not-echo" not in response.text
+        assert "mcp-session-id" not in response.headers
+        for origin, expected in (
+            ("http://localhost:3001", 200),
+            ("https://external.example.test", 400),
+        ):
+            response = await client.options(
+                "/mcp/brave",
+                headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "Content-Type,X-Neurwerk-Authorization",
+                },
+            )
+            assert response.status_code == expected
+            if expected == 200:
+                assert response.headers["access-control-allow-origin"] == origin
+            else:
+                assert "access-control-allow-origin" not in response.headers
+
+
+async def test_simulator_requires_nonempty_user_text_and_codex_input(simulator):
+    app, _, _ = simulator
+    headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app), base_url="http://localhost:4010"
+    ) as client:
+        invalid_messages = (
+            None,
+            [],
+            [{}],
+            [{"role": "assistant", "content": "Hello"}],
+            [{"role": "user", "content": "  "}],
+            [{"role": "user", "content": []}],
+        )
+        for messages in invalid_messages:
+            response = await client.post(
+                "/local/api/v1/chat/completions",
+                headers=headers,
+                json={"model": "demo-model", "messages": messages},
+            )
+            assert response.status_code == 400
+        response = await client.post(
+            "/local/api/v1/chat/completions",
+            headers=headers,
+            json={"model": "demo-model", "messages": [{"role": "user", "content": "do-not-echo"}]},
+        )
+        assert response.status_code == 200
+        assert "do-not-echo" not in response.text
+        headers["Authorization"] = "Bearer studio-demo-codex-session"
+        for prompt in (
+            None,
+            "",
+            "  ",
+            {},
+            [],
+            [{}],
+            [{"role": "assistant", "content": [{"type": "input_text", "text": "Hello"}]}],
+            [{"role": "user", "content": []}],
+            [{"role": "user", "content": "Hello"}],
+            [{"role": "user", "content": [{"type": "input_text", "text": "  "}]}],
+            [{"role": "user", "content": [{"type": "output_text", "text": "Hello"}]}],
+            [{"role": "user", "content": [{"type": "input_text", "text": None}]}],
+        ):
+            response = await client.post(
+                "/openai/codex/v1/responses",
+                headers=headers,
+                json={"model": "demo-codex", "input": prompt},
+            )
+            assert response.status_code == 400
+        response = await client.post(
+            "/openai/codex/v1/responses",
+            headers=headers,
+            json={"model": "demo-codex", "input": "do-not-echo", "stream": True, "store": False},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert "response.completed" in response.text
+        assert "do-not-echo" not in response.text
+        for stream in (False, True):
+            response = await client.post(
+                "/openai/codex/v1/responses",
+                headers=headers,
+                json={
+                    "model": "demo-codex",
+                    "input": [
+                        {"role": "user", "content": [{"type": "input_text", "text": "do-not-echo"}]}
+                    ],
+                    "instructions": "also-do-not-echo",
+                    "stream": stream,
+                    "store": False,
+                },
+            )
+            assert response.status_code == 200
+            assert "do-not-echo" not in response.text
+            if stream:
+                assert "response.completed" in response.text
+            else:
+                result = response.json()
+                assert result["status"] == "completed"
+                assert result["output"][0]["content"][0]["type"] == "output_text"
+
+
+@pytest.mark.parametrize("published", [None, "disabled", "missing", "configured"])
+def test_company_configuration_is_optional_and_not_health(projection, tmp_path, published):
+    data = catalog()
+    entry = data["external-subscription-providers"][0]
+    if published is not None:
+        entry["company_credential_status"] = published
+    (tmp_path / "catalog.json").write_text(json.dumps(data))
+    (tmp_path / "status.json").unlink()
+    view = gateway.gateway_view(projection, frozenset(), administrator=True)
+    assert view.catalog.external_subscription_providers[0].company_credential_status == published
+    assert view.status.reason == "missing"
+    assert all(item.state == "unknown" for item in view.status.endpoints)
+    assert gateway.gateway_view(projection, frozenset()).catalog.destinations == []
+
+
+@pytest.mark.parametrize("invalid", [True, 1, [], {}, "unknown", "available", "CONFIGURED"])
+def test_invalid_company_configuration_fails_closed(projection, tmp_path, invalid):
+    data = catalog()
+    data["external-subscription-providers"][0]["company_credential_status"] = invalid
+    (tmp_path / "catalog.json").write_text(json.dumps(data))
+    with pytest.raises(GatewayUnavailableError):
+        gateway.gateway_view(projection, frozenset(), administrator=True)
+
+
+@pytest.mark.parametrize("published", ["disabled", "missing", "configured"])
+@pytest.mark.parametrize("destination_access", [False, True])
+@pytest.mark.parametrize("company_access", [False, True])
+def test_company_configuration_requires_both_grants(published, destination_access, company_access):
+    data = catalog()
+    entry = data["external-subscription-providers"][0]
+    entry.update(provider_id="example", company_credential_status=published)
+    destination = entry["destinations"][0]
+    destination["provider_id"] = "example"
+    permissions = set(destination["required_permissions"]) if destination_access else set()
+    if company_access:
+        permissions.add("provider:example:company-use")
+    filtered = gateway._entitled(GatewayCatalog.model_validate(data), frozenset(permissions))
+    if not destination_access:
+        assert filtered.destinations == []
+        assert filtered.external_subscription_providers == []
+    else:
+        assert filtered.external_subscription_providers[0].company_credential_status == (
+            published if company_access else None
+        )
+        assert {mode.source for mode in filtered.destinations[0].credential_modes} == (
+            {"caller_supplied", "company"} if company_access else {"caller_supplied"}
+        )

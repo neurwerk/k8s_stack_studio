@@ -53,6 +53,12 @@ def _entitled(catalog: GatewayCatalog, permissions: frozenset[str]) -> GatewayCa
                         update={
                             "destinations": destinations,
                             "routes": [route for route in entry.routes if route.id in endpoints],
+                            "company_credential_status": entry.company_credential_status
+                            if (
+                                entry.provider_id is not None
+                                and f"provider:{entry.provider_id}:company-use" in permissions
+                            )
+                            else None,
                         }
                     )
                 )
