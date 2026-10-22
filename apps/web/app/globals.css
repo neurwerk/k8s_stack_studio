@@ -153,15 +153,19 @@
   }
 }
 
-.endpoint-swagger .swagger-ui .information-container {
-  display: none;
+.endpoint-rapidoc {
+  min-height: 1px;
 }
 
-.endpoint-swagger .swagger-ui .scheme-container,
-.endpoint-swagger .swagger-ui .authorization__btn {
-  display: none;
-}
-
-.endpoint-swagger .swagger-ui .response-col_links {
-  display: none;
+.endpoint-rapidoc rapi-doc {
+  display: block;
+  --background: var(--color-base-100);
+  --foreground: var(--color-base-content);
+  --card: var(--color-base-200);
+  --card-foreground: var(--color-base-content);
+  --muted: var(--color-base-200);
+  --muted-foreground: #5f5f6b;
+  --border: var(--color-base-300);
+  --font-sans: var(--font-inter), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
 }

@@ -344,6 +344,8 @@ def callback(ticket: str) -> HTMLResponse:
 
 def create_app() -> FastAPI:
     """Replace MCP routes only in the explicitly selected dev server entry point."""
+    from gateway_preview import install
+
     app = production_app()
     settings = Settings().model_copy(
         update={
@@ -359,4 +361,5 @@ def create_app() -> FastAPI:
     routes.include_router(popup)
     # Earlier routes take priority; neither release image contains this entry point.
     app.router.routes[:0] = routes.routes
+    install(app)
     return app

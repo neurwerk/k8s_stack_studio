@@ -40,6 +40,8 @@ export interface GatewayEntry {
   id: string;
   provider_id: string | null;
   display_name: string;
+  /** Absent means unknown; only the server can disclose credential readiness. */
+  company_credential_status?: "disabled" | "missing" | "configured" | null;
   routes: GatewayEndpoint[];
   destinations: GatewayDestination[];
 }
