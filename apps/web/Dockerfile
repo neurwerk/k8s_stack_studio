@@ -24,6 +24,7 @@ COPY apps/web/package.json apps/web/tsconfig.json apps/web/next.config.ts apps/w
 COPY apps/web/app/ ./apps/web/app/
 COPY apps/web/components/ ./apps/web/components/
 COPY apps/web/lib/ ./apps/web/lib/
+COPY apps/web/types/ ./apps/web/types/
 
 # Install dependencies (frozen lockfile for reproducibility)
 RUN pnpm install --frozen-lockfile
