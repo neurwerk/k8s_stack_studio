@@ -4,9 +4,18 @@ from fastapi import HTTPException
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.auth import StudioPrincipal
-from k8s_stack_studio.lib.mcp_publication import PublicationUnavailableError, publication_snapshot
 from k8s_stack_studio.models.gateway import GatewayView
 from k8s_stack_studio.models.mcp import McpRegistration
+
+
+def admission_requirements(
+    configured: list[McpRegistration], live: list[McpRegistration]
+) -> dict[str, set[str]]:
+    """Union trusted policies without losing configured requirements or omitted identities."""
+    requirements: dict[str, set[str]] = {}
+    for item in (*configured, *live):
+        requirements.setdefault(item.id, set()).update(item.required_roles)
+    return requirements
 
 
 def admitted(item: McpRegistration, principal: StudioPrincipal) -> bool:
@@ -24,9 +33,16 @@ def filter_gateway(
     view: GatewayView, settings: Settings, principal: StudioPrincipal
 ) -> GatewayView:
     """Remove restricted destinations and their unreferenced metadata from presentation only."""
-    policies = {item.id: set(item.required_roles) for item in settings.mcp_catalog}
+    policies = admission_requirements(settings.mcp_catalog, [])
     managed = bool(settings.contextforge_publication_status_path)
     if managed:
+        # Publication reconstruction shares the pure helper above; import the
+        # snapshot reader here to keep that dependency free of an import cycle.
+        from k8s_stack_studio.lib.mcp_publication import (
+            PublicationUnavailableError,
+            publication_snapshot,
+        )
+
         try:
             live = publication_snapshot(settings)[0]
         except PublicationUnavailableError:
@@ -36,8 +52,7 @@ def filter_gateway(
         # Registration readiness may omit an errored integration, and independent
         # projections can update in either order. Neither can remove configured
         # admission requirements; combine trusted policies conservatively.
-        for item in live.mcp_catalog:
-            policies.setdefault(item.id, set()).update(item.required_roles)
+        policies = admission_requirements(settings.mcp_catalog, live.mcp_catalog)
     denied = {
         item.id
         for entry in view.catalog.mcp_servers

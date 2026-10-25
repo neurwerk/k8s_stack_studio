@@ -129,6 +129,84 @@ def test_publication_reconstruction_keeps_trusted_admission(restricted):
 
 
 @pytest.mark.parametrize(
+    ("live_roles", "caller_roles"),
+    [
+        ([], {"glitchtip-admin"}),
+        (["glitchtip-admin"], {"glitchtip-admin"}),
+        (["new-live-restriction"], {"glitchtip-admin", "security-reviewer"}),
+    ],
+    ids=["empty-live-policy", "weaker-live-policy", "additional-live-requirement"],
+)
+async def test_valid_publication_cannot_weaken_personal_or_setup_admission(
+    restricted, live_roles, caller_roles, monkeypatch
+):
+    projection = Path(restricted.contextforge_publication_status_path).parent
+    catalog = [
+        item.model_dump() | {"required_roles": live_roles}
+        if item.id == "github"
+        else item.model_dump()
+        for item in restricted.mcp_catalog
+    ]
+    (projection / "studio.json").write_text(json.dumps(catalog))
+    caller = principal(roles={"studio-user", "mcp-admin", "gateway-admin"} | caller_roles)
+    begin = AsyncMock(side_effect=AssertionError("Denied caller must not mutate setup storage"))
+    monkeypatch.setattr(mcp_store, "begin", begin)
+    monkeypatch.setattr(mcp_store, "setups", AsyncMock(return_value={}))
+    app = FastAPI()
+    app.include_router(mcp.router)
+    app.include_router(mcp_setup.router)
+    app.add_middleware(StudioAdmissionMiddleware)
+    # Use the real reconstruction dependencies: neither _live_settings nor
+    # _configuration may be replaced by a pre-authorized test settings object.
+    app.dependency_overrides[get_settings] = lambda: restricted
+
+    @app.middleware("http")
+    async def identity(request, call_next):
+        request.scope["user"] = caller
+        return await call_next(request)
+
+    calls = []
+
+    def native(request):
+        calls.append(request)
+        return httpx.Response(503)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(native)) as transport:
+        app.state.contextforge_admin_client = transport
+        app.state.contextforge_oauth_client = transport
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app),
+            base_url="http://test",
+            headers={"origin": restricted.contextforge_oauth_studio_origin},
+        ) as client:
+            for path in ("/api/me/mcp/catalog", "/api/admin/mcp"):
+                response = await client.get(path)
+                assert response.status_code == 200
+                assert {item["id"] for item in response.json()} == {"context7", "brave"}
+            assert (await client.get("/api/me/mcp/connections")).json() == {}
+            for path in (
+                "/api/me/mcp/github/status",
+                "/api/me/mcp/github/publication",
+                "/api/admin/mcp/github/tools",
+            ):
+                assert (await client.get(path)).status_code == 404, path
+            body = {"revision": 0, "operation_id": str(uuid4())}
+            for path, payload in (
+                ("/api/me/mcp/github/connect", {}),
+                ("/api/me/mcp/github/tools", {}),
+                ("/api/me/mcp/github/checks/0", {}),
+                ("/api/admin/mcp/github/publish", body | {"selected_tools": []}),
+                ("/api/admin/mcp/github/disable", body),
+                ("/api/admin/mcp/github/refresh", body),
+            ):
+                assert (await client.post(path, json=payload)).status_code == 404, path
+            restricted.mcp_setup_enabled = False
+            assert (await client.post("/api/me/mcp/github/discover", json={})).status_code == 404
+    assert calls == []
+    begin.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
     (
         "configured_roles",
         "live_roles",
