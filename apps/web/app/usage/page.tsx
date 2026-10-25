@@ -42,10 +42,10 @@ interface UsageResult {
   sources: UsageSources;
 }
 
-const appLabels: Record<string, string> = {
-  "open-webui": "Open WebUI", openwebui: "Open WebUI", librechat: "LibreChat",
-  studio: "Studio", agentgateway: "AgentGateway",
-};
+const appLabels = new Map<string, string>([
+  ["open-webui", "Open WebUI"], ["openwebui", "Open WebUI"], ["librechat", "LibreChat"],
+  ["studio", "Studio"], ["agentgateway", "AgentGateway"],
+]);
 
 function SourceTable({ title, rows, credential, onSelect }: {
   title: string; rows: UsageSource[]; credential?: boolean; onSelect: (source: UsageSource) => void;
@@ -64,8 +64,8 @@ function SourceTable({ title, rows, credential, onSelect }: {
           <td className="max-w-sm break-all py-3 pr-3">{row.id === null
             ? (credential ? "No recorded platform key" : "Unknown / no recorded app")
             : <button type="button" className="text-left text-primary underline" onClick={() => { onSelect(row); }}>
-              {credential ? `${row.kind === "personal" ? "Personal key" : row.kind === "managed" ? "Managed key" : "Unknown key kind"} · ${row.id}` : appLabels[row.id] ?? row.id}
-              {!credential && appLabels[row.id] && <span className="ml-2 text-xs text-muted-foreground">({row.id})</span>}
+              {credential ? `${row.kind === "personal" ? "Personal key" : row.kind === "managed" ? "Managed key" : "Unknown key kind"} · ${row.id}` : appLabels.get(row.id) ?? row.id}
+              {!credential && appLabels.has(row.id) && <span className="ml-2 text-xs text-muted-foreground">({row.id})</span>}
             </button>}</td>
           <td className="px-3 text-right"><AccountingValue metric={row.accounting?.tokens} reported={row.total_tokens} /></td>
           <td className="px-3 text-right"><AccountingValue metric={row.accounting?.cost_usd} reported={row.cost_usd} currency /></td>
@@ -286,7 +286,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           <SourceTable title="Usage by originating app" rows={shown.sources.apps}
             onSelect={(source) => { if (source.id !== null) setFilters({ ...filters, app_id: source.id }); }} />
           <SourceTable title="Usage by platform API key" rows={shown.sources.credentials} credential
-            onSelect={(source) => { if (source.id !== null) setFilters({ ...filters, credential_id: source.id, credential_kind: source.kind ?? "" }); }} />
+            onSelect={(source) => { if (source.id !== null) setFilters({ ...filters, credential_id: source.id, credential_kind: source.kind === "personal" || source.kind === "managed" ? source.kind : "" }); }} />
           <section className={panel} aria-label="Usage by model">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-semibold">Models</h2>
