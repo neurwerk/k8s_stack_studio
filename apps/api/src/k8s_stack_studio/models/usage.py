@@ -221,3 +221,44 @@ class AgentGatewayUserSummary(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
 
     groups: list[AgentGatewayUserGroup] = Field(max_length=45_000)
+
+
+class UsageSource(UsagePeriod):
+    """Recorded origin or non-secret platform credential identifier."""
+
+    id: str | None
+    kind: str | None = None
+
+
+class UsageSourcesResponse(BaseModel):
+    """Independent breakdowns of the same scoped native records."""
+
+    timezone: str
+    start_date: date
+    end_date: date
+    apps: list[UsageSource]
+    credentials: list[UsageSource]
+
+
+class AgentGatewaySourceKey(AgentGatewayAccountingKey):
+    """Only trusted normalized origin and credential attributes."""
+
+    app_id: str | None = Field(default=None, alias="neurwerk.app_id", max_length=255)
+    credential_id: str | None = Field(default=None, alias="neurwerk.credential_id", max_length=255)
+    credential_kind: str | None = Field(
+        default=None, alias="neurwerk.credential_kind", max_length=255
+    )
+
+
+class AgentGatewaySourceGroup(AgentGatewaySummaryGroup):
+    """Native accounting evidence retained across origin/key groups."""
+
+    group: AgentGatewaySourceKey
+
+
+class AgentGatewaySourceSummary(BaseModel):
+    """Ignore global filter options; never expose unscoped identifiers."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    groups: list[AgentGatewaySourceGroup] = Field(max_length=100_000)

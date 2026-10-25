@@ -14,6 +14,7 @@ from k8s_stack_studio.models.gateway_metadata import GatewayFilters
 from k8s_stack_studio.models.usage import (
     AgentGatewayDailySummary,
     AgentGatewayModelKey,
+    AgentGatewaySourceSummary,
     AgentGatewaySummary,
     AgentGatewayUserSummary,
     DailyUsage,
@@ -22,6 +23,8 @@ from k8s_stack_studio.models.usage import (
     UsagePeopleResponse,
     UsagePeriod,
     UsageResponse,
+    UsageSource,
+    UsageSourcesResponse,
     UserUsageTotal,
 )
 
@@ -171,6 +174,53 @@ class AgentGatewayClient:
         users.sort(key=lambda item: (-item.total_tokens, item.user_id))
         return UsagePeopleResponse(
             timezone=self._timezone.key, start_date=start, end_date=end, users=users
+        )
+
+    async def fetch_source_breakdown(
+        self,
+        user_id: str | None,
+        start: date | None = None,
+        end: date | None = None,
+        filters: GatewayFilters | None = None,
+    ) -> UsageSourcesResponse:
+        """Aggregate scoped origins and key IDs, retaining unknown historical records."""
+        now = _utc_now()
+        start, end, midnights = self._calendar_window(start, end, now)
+        until = min(midnights[-1], now)
+        apps: dict[str | None, UsageSource] = {}
+        credentials: dict[tuple[str | None, str | None], UsageSource] = {}
+        if until > midnights[0]:
+            payload = self._summary_payload(user_id, midnights[0], until, filters)
+            payload["groupBy"] = [
+                {"field": "attributes", "key": f"neurwerk.{name}"}
+                for name in ("app_id", "credential_id", "credential_kind")
+            ] + _COMPLETENESS_GROUPS
+            try:
+                response = await self._client.post(
+                    f"{self._base}/api/logs/analytics/summary", json=payload
+                )
+                response.raise_for_status()
+                summary = AgentGatewaySourceSummary.model_validate_json(response.content)
+            except (httpx.HTTPError, ValidationError, ValueError) as error:
+                raise AgentGatewayUsageError from error
+            if len({item.group for item in summary.groups}) != len(summary.groups):
+                raise AgentGatewayUsageError
+            for item in summary.groups:
+                group = item.group
+                apps.setdefault(group.app_id, UsageSource(id=group.app_id)).add(item)
+                key = (group.credential_id, group.credential_kind)
+                credentials.setdefault(
+                    key, UsageSource(id=group.credential_id, kind=group.credential_kind)
+                ).add(item)
+        return UsageSourcesResponse(
+            timezone=self._timezone.key,
+            start_date=start,
+            end_date=end,
+            apps=sorted(apps.values(), key=lambda item: (-item.total_tokens, item.id or "")),
+            credentials=sorted(
+                credentials.values(),
+                key=lambda item: (-item.total_tokens, item.id or "", item.kind or ""),
+            ),
         )
 
     async def _fetch_daily_run(

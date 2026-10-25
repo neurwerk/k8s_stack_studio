@@ -1,5 +1,8 @@
 /** Exact normalized metadata filters; the server always supplies the principal. */
 export interface GatewayFilters {
+  app_id?: string;
+  credential_id?: string;
+  credential_kind?: string;
   entry_mode?: string;
   destination_kind?: string;
   destination_id?: string;
