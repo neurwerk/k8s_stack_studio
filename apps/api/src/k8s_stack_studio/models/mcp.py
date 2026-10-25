@@ -92,6 +92,8 @@ class McpRegistration(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     authentication_model: AuthenticationModel
     credential: McpCredential | None = None
+    # Additional Studio roles, all required even for integration administrators.
+    required_roles: list[str] = Field(default_factory=list, max_length=20)
     upstream_url: str = ""
     native_url: str = ""
     gateway_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
@@ -101,6 +103,16 @@ class McpRegistration(BaseModel):
     # Setup resolves original approved names to their exact gateway-visible names.
     tool_names: dict[str, str] = Field(default_factory=dict, max_length=500)
     checks: list[McpCheck] = Field(default_factory=list, max_length=10)
+
+    @field_validator("required_roles")
+    @classmethod
+    def validate_required_roles(cls, value: list[str]) -> list[str]:
+        """Reject ambiguous or empty role requirements at the configuration boundary."""
+        if len(value) != len(set(value)) or any(
+            not role or len(role) > 100 or role.strip() != role for role in value
+        ):
+            raise ValueError("MCP required roles must be unique nonempty role names")  # noqa: TRY003
+        return value
 
     @model_validator(mode="after")
     def validate_checks(self) -> Self:
