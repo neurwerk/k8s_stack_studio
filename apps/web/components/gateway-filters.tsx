@@ -2,6 +2,7 @@ import type { GatewayFilters } from "@/lib/api/gateway-metadata";
 import { billingLabels } from "@/lib/api/gateway-metadata";
 
 const selectors = [
+  ["credential_kind", "Platform key kind", { personal: "Personal API key", managed: "Managed API key" }],
   ["billing_classification", "Billing", billingLabels],
   ["provider_credential_source", "Provider credential", { company: "Company credential", caller_supplied: "Personal credential", none: "No provider credential" }],
   ["entry_mode", "Entry mode", { api: "API", forward_proxy: "Forward proxy" }],
@@ -9,6 +10,7 @@ const selectors = [
 ] as const;
 
 const identifiers = [
+  ["app_id", "Originating OIDC app ID"], ["credential_id", "Platform key ID"],
   ["destination_id", "Destination ID"], ["provider_id", "Provider ID"], ["binding_id", "Binding ID"],
   ["protocol_profile", "Protocol profile"], ["operation_id", "Operation ID"], ["policy_revision", "Policy revision"],
   ["requested_model", "Requested model"], ["resolved_model", "Resolved model"], ["request_id", "Request ID"],

@@ -18,7 +18,12 @@ from k8s_stack_studio.lib.dependencies import (
     require_role,
 )
 from k8s_stack_studio.models.gateway_metadata import GatewayFilters, UsageQuery
-from k8s_stack_studio.models.usage import DailyUsageResponse, UsagePeopleResponse, UsageResponse
+from k8s_stack_studio.models.usage import (
+    DailyUsageResponse,
+    UsagePeopleResponse,
+    UsageResponse,
+    UsageSourcesResponse,
+)
 
 
 def _no_store(response: Response) -> None:
@@ -106,6 +111,39 @@ async def get_usage_people(
     start_date, end_date = _parse_dates(filters.start, filters.end)
     try:
         return await agentgateway.fetch_user_breakdown(start_date, end_date, filters)
+    except InvalidUsageRangeError as error:
+        raise _invalid_range(error) from error
+    except AgentGatewayUsageError as error:
+        raise _usage_unavailable(error) from error
+
+
+@router.get("/{user_id}/usage/sources", response_model=UsageSourcesResponse)
+async def get_user_usage_sources(
+    user_id: str,
+    filters: Annotated[UsageQuery, Query()],
+    _: None = Depends(_require_self_or_usage_admin),
+    agentgateway: AgentGatewayClient = Depends(get_agentgateway),
+) -> UsageSourcesResponse:
+    """Return a user's originating apps and platform key totals, never key secrets."""
+    return await _source_breakdown(agentgateway, user_id, filters)
+
+
+@aggregate_router.get("/sources", response_model=UsageSourcesResponse)
+async def get_all_usage_sources(
+    filters: Annotated[UsageQuery, Query()],
+    _: None = Depends(require_role("langfuse-admin")),
+    agentgateway: AgentGatewayClient = Depends(get_agentgateway),
+) -> UsageSourcesResponse:
+    """Only usage admins may aggregate origins and keys across principals."""
+    return await _source_breakdown(agentgateway, None, filters)
+
+
+async def _source_breakdown(
+    agentgateway: AgentGatewayClient, user_id: str | None, filters: UsageQuery
+) -> UsageSourcesResponse:
+    start, end = _parse_dates(filters.start, filters.end)
+    try:
+        return await agentgateway.fetch_source_breakdown(user_id, start, end, filters)
     except InvalidUsageRangeError as error:
         raise _invalid_range(error) from error
     except AgentGatewayUsageError as error:
