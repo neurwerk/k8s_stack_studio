@@ -24,14 +24,27 @@ def filter_gateway(
     view: GatewayView, settings: Settings, principal: StudioPrincipal
 ) -> GatewayView:
     """Remove restricted destinations and their unreferenced metadata from presentation only."""
-    if settings.contextforge_publication_status_path:
+    policies = {item.id: set(item.required_roles) for item in settings.mcp_catalog}
+    managed = bool(settings.contextforge_publication_status_path)
+    if managed:
         try:
-            settings = publication_snapshot(settings)[0]
+            live = publication_snapshot(settings)[0]
         except PublicationUnavailableError:
             raise HTTPException(
                 status_code=503, detail="MCP admission policy is unavailable"
             ) from None
-    denied = {item.id for item in settings.mcp_catalog if not admitted(item, principal)}
+        # Registration readiness may omit an errored integration, and independent
+        # projections can update in either order. Neither can remove configured
+        # admission requirements; combine trusted policies conservatively.
+        for item in live.mcp_catalog:
+            policies.setdefault(item.id, set()).update(item.required_roles)
+    denied = {
+        item.id
+        for entry in view.catalog.mcp_servers
+        for item in entry.destinations
+        if (managed and item.id not in policies)
+        or not policies.get(item.id, set()) <= principal.roles
+    }
     if not denied:
         return view
     entries = []

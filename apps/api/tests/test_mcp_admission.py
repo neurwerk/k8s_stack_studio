@@ -128,7 +128,81 @@ def test_publication_reconstruction_keeps_trusted_admission(restricted):
     assert live.mcp_catalog[-1].required_roles == ["glitchtip-admin", "security-reviewer"]
 
 
-async def test_gateway_admin_cannot_discover_restricted_routes_or_health(restricted, tmp_path):
+@pytest.mark.parametrize(
+    (
+        "configured_roles",
+        "live_roles",
+        "omitted_error",
+        "generic_visible",
+        "member_visible",
+        "caller_roles",
+    ),
+    [
+        (
+            ["glitchtip-admin", "security-reviewer"],
+            ["glitchtip-admin"],
+            False,
+            False,
+            True,
+            {"glitchtip-admin"},
+        ),
+        (["glitchtip-admin"], None, True, False, True, set()),
+        (["glitchtip-admin"], [], False, False, True, set()),
+        ([], ["glitchtip-admin"], False, False, True, set()),
+        (None, ["glitchtip-admin"], False, False, True, set()),
+        (None, None, False, False, False, set()),
+        (None, None, True, False, False, set()),
+        ([], [], False, True, True, set()),
+        ([], None, True, True, True, set()),
+    ],
+    ids=[
+        "combined-policy",
+        "failed-registration-omitted",
+        "live-policy-cannot-weaken-configured",
+        "live-policy-adds-restriction",
+        "publication-before-configured-policy",
+        "gateway-before-policy",
+        "unknown-error-policy",
+        "intentionally-unrestricted",
+        "unrestricted-registration-omitted",
+    ],
+)
+async def test_gateway_admin_cannot_discover_restricted_routes_or_health(
+    restricted,
+    tmp_path,
+    configured_roles,
+    live_roles,
+    omitted_error,
+    generic_visible,
+    member_visible,
+    caller_roles,
+):
+    projection = Path(restricted.contextforge_publication_status_path).parent
+    configured_catalog = [
+        item.model_copy(update={"required_roles": configured_roles})
+        if item.id == "github"
+        else item
+        for item in restricted.mcp_catalog
+        if item.id != "github" or configured_roles is not None
+    ]
+    live_catalog = [
+        item.model_dump() | {"required_roles": live_roles}
+        if item.id == "github"
+        else item.model_dump()
+        for item in restricted.mcp_catalog
+        if item.id != "github" or live_roles is not None
+    ]
+    (projection / "studio.json").write_text(json.dumps(live_catalog))
+    publication_path = projection / "publication.json"
+    publication = json.loads(publication_path.read_text())
+    if live_roles is None:
+        if omitted_error:
+            publication["integrations"][-1].update(state="error", error_code="verification-failed")
+        else:
+            publication["integrations"] = [
+                item for item in publication["integrations"] if item["id"] != "github"
+            ]
+    publication_path.write_text(json.dumps(publication))
     tmp_path = tmp_path / "gateway"
     tmp_path.mkdir()
     data = catalog()
@@ -136,22 +210,27 @@ async def test_gateway_admin_cannot_discover_restricted_routes_or_health(restric
     data["external-subscription-providers"] = []
     data["mcp-servers"] = entries
     for entry, identity in zip(entries, ("context7", "github"), strict=True):
-        entry["destinations"][0].update(id=identity, kind="mcp")
+        entry["destinations"][0].update(
+            id=identity, kind="mcp", required_permissions=["llm:invoke", f"mcp:{identity}:invoke"]
+        )
     (tmp_path / "gateway-catalog.json").write_text(json.dumps(data))
     (tmp_path / "gateway-status.json").write_text(json.dumps(status()))
-    # Use the original settings catalog here; the reconstruction path is separately tested.
     settings = restricted.model_copy(
         update={
             "gateway_catalog_file": str(tmp_path / "gateway-catalog.json"),
             "gateway_status_file": str(tmp_path / "gateway-status.json"),
-            "contextforge_publication_status_path": "",
+            "mcp_catalog": configured_catalog,
         }
     )
+    # These are valid snapshots, including errors with no runtime registration.
+    assert {item.id for item in publication_snapshot(settings)[0].mcp_catalog} == {
+        item["id"] for item in live_catalog
+    }
     app = FastAPI()
     app.include_router(gateway.router)
     app.add_middleware(StudioAdmissionMiddleware)
     app.dependency_overrides[get_settings] = lambda: settings
-    caller = principal(roles={"studio-user", "gateway-admin"})
+    caller = principal(roles={"studio-user", "gateway-admin"} | caller_roles)
 
     @app.middleware("http")
     async def identity(request, call_next):
@@ -161,15 +240,18 @@ async def test_gateway_admin_cannot_discover_restricted_routes_or_health(restric
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://test"
     ) as client:
-        denied = await client.get("/api/admin/gateway")
-        assert denied.status_code == 200
-        assert "hidden" not in denied.text
-        assert "context7" in denied.text
+        for path in ("/api/admin/gateway", "/api/gateway"):
+            response = await client.get(path)
+            assert response.status_code == 200
+            assert ("hidden" in response.text) == generic_visible
+            assert "context7" in response.text
         caller = principal(
             roles={"studio-user", "gateway-admin", "glitchtip-admin", "security-reviewer"}
         )
-        allowed = await client.get("/api/admin/gateway")
-        assert allowed.status_code == 200
-        assert "hidden" in allowed.text and "github" in allowed.text
+        for path in ("/api/admin/gateway", "/api/gateway"):
+            response = await client.get(path)
+            assert response.status_code == 200
+            assert ("hidden" in response.text) == member_visible
+            assert ("github" in response.text) == member_visible
         # Filtering never rewrites the effective operator-owned routing document.
         assert json.loads((tmp_path / "gateway-catalog.json").read_text()) == data
