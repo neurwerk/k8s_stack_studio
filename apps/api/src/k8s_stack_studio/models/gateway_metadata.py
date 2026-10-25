@@ -30,6 +30,9 @@ class GatewayFilters(BaseModel):
     resolved_model: MetadataValue | None = None
     billing_classification: BillingClassification | None = None
     request_id: MetadataValue | None = None
+    app_id: MetadataValue | None = None
+    credential_id: MetadataValue | None = None
+    credential_kind: Literal["personal", "managed"] | None = None
 
     def attributes(self) -> dict[str, str]:
         """Map only declared fields, including when a route extends this model."""

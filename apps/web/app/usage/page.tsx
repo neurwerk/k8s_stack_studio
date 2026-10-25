@@ -8,8 +8,10 @@ import {
 
 import { fetchUser } from "@/lib/api/admin";
 import { AccountingValue } from "@/components/accounting-value";
-import { fetchAllDailyUsage, fetchUsagePeople, fetchUserDailyUsage } from "@/lib/api/usage";
-import type { UsageDateRange, UsagePeople, UserDailyUsage } from "@/lib/api/usage";
+import { GatewayClassificationFilters } from "@/components/gateway-filters";
+import type { GatewayFilters } from "@/lib/api/gateway-metadata";
+import { fetchAllDailyUsage, fetchUsagePeople, fetchUsageSources, fetchUserDailyUsage } from "@/lib/api/usage";
+import type { UsageDateRange, UsagePeople, UsageSources, UsageSource, UserDailyUsage } from "@/lib/api/usage";
 import { useCurrentUserId, useHasRole, useIsKeycloakAdmin } from "@/lib/auth/roles";
 import { modelColors, modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
 import type { PersonMetric, UsagePreset } from "@/lib/usage-dashboard";
@@ -37,6 +39,41 @@ interface UsageResult {
   range: UsageDateRange;
   usage: UserDailyUsage;
   people: UsagePeople | null;
+  sources: UsageSources;
+}
+
+const appLabels = new Map<string, string>([
+  ["open-webui", "Open WebUI"], ["openwebui", "Open WebUI"], ["librechat", "LibreChat"],
+  ["studio", "Studio"], ["agentgateway", "AgentGateway"],
+]);
+
+function SourceTable({ title, rows, credential, onSelect }: {
+  title: string; rows: UsageSource[]; credential?: boolean; onSelect: (source: UsageSource) => void;
+}) {
+  return <section className={panel} aria-label={title}>
+    <h2 className="text-xl font-semibold">{title}</h2>
+    <p className="mt-2 text-xs text-muted-foreground">{credential
+      ? "Platform key identifiers only, never secrets. Missing IDs include OIDC and older records."
+      : "Verified OIDC client IDs, not caller headers. API keys and older records have no recorded app."} Select an identifier to filter usage.</p>
+    <div className="mt-4 overflow-x-auto">
+      <table className="table w-full min-w-[560px] text-left text-sm">
+        <thead><tr><th className="py-3">{credential ? "Platform API key" : "Originating app"}</th>
+          <th className="px-3 text-right">Tokens</th><th className="px-3 text-right">Cost (USD)</th>
+          <th className="pl-3 text-right">Native LLM records</th></tr></thead>
+        <tbody>{rows.map((row) => <tr key={JSON.stringify([row.id, row.kind])} className="border-t border-border">
+          <td className="max-w-sm break-all py-3 pr-3">{row.id === null
+            ? (credential ? "No recorded platform key" : "Unknown / no recorded app")
+            : <button type="button" className="text-left text-primary underline" onClick={() => { onSelect(row); }}>
+              {credential ? `${row.kind === "personal" ? "Personal key" : row.kind === "managed" ? "Managed key" : "Unknown key kind"} · ${row.id}` : appLabels.get(row.id) ?? row.id}
+              {!credential && appLabels.has(row.id) && <span className="ml-2 text-xs text-muted-foreground">({row.id})</span>}
+            </button>}</td>
+          <td className="px-3 text-right"><AccountingValue metric={row.accounting?.tokens} reported={row.total_tokens} /></td>
+          <td className="px-3 text-right"><AccountingValue metric={row.accounting?.cost_usd} reported={row.cost_usd} currency /></td>
+          <td className="pl-3 text-right">{count(row.requests)}</td>
+        </tr>)}{rows.length === 0 && <tr><td colSpan={4} className="py-6 text-muted-foreground">No usage in this range.</td></tr>}</tbody>
+      </table>
+    </div>
+  </section>;
 }
 
 export default function UsagePage() {
@@ -64,7 +101,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateError, setDateError] = useState<string | null>(null);
-  const key = JSON.stringify([selected, range?.start, range?.end, refresh]);
+  const [filters, setFilters] = useState<GatewayFilters>({});
+  const key = JSON.stringify([selected, range?.start, range?.end, filters, refresh]);
   const shown = result?.key === key ? result : undefined;
 
   useEffect(() => {
@@ -74,16 +112,19 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
       setError(null);
       try {
         const getDaily = (bounds?: UsageDateRange) => selected === "all"
-          ? fetchAllDailyUsage(bounds, controller.signal)
-          : fetchUserDailyUsage(selected, bounds, controller.signal);
+          ? fetchAllDailyUsage(bounds, controller.signal, filters)
+          : fetchUserDailyUsage(selected, bounds, controller.signal, filters);
         let usage = await getDaily(range);
         const bounds = range ?? presetRange(usage.today, "month");
         if (usage.start_date !== bounds.start || usage.end_date !== bounds.end) {
           usage = await getDaily(bounds);
         }
-        const people = isAdmin ? await fetchUsagePeople(bounds, controller.signal) : null;
+        const [people, sources] = await Promise.all([
+          isAdmin ? fetchUsagePeople(bounds, controller.signal, filters) : Promise.resolve(null),
+          fetchUsageSources(selected === "all" ? null : selected, bounds, controller.signal, filters),
+        ]);
         if (controller.signal.aborted) return;
-        setResult({ key, range: bounds, usage, people });
+        setResult({ key, range: bounds, usage, people, sources });
         setDraftStart(bounds.start);
         setDraftEnd(bounds.end);
       } catch {
@@ -94,7 +135,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     };
     void load();
     return () => { controller.abort(); };
-  }, [selected, range, isAdmin, key]);
+  }, [selected, range, isAdmin, key, filters]);
 
   useEffect(() => {
     if (!canReadNames || !shown?.people) return;
@@ -211,6 +252,11 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           </span>
           {dateError && <p role="alert" className="w-full text-sm text-destructive">{dateError}</p>}
         </form>
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm">App, platform key and gateway filters</summary>
+          <div className="mt-3"><GatewayClassificationFilters value={filters} onChange={setFilters} /></div>
+        </details>
+        {Object.values(filters).some(Boolean) && <button type="button" className="btn btn-outline mt-3" onClick={() => { setFilters({}); }}>Clear usage filters</button>}
       </section>
 
       {!shown && (
@@ -237,6 +283,10 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               </div>
             ))}
           </section>
+          <SourceTable title="Usage by originating app" rows={shown.sources.apps}
+            onSelect={(source) => { if (source.id !== null) setFilters({ ...filters, app_id: source.id }); }} />
+          <SourceTable title="Usage by platform API key" rows={shown.sources.credentials} credential
+            onSelect={(source) => { if (source.id !== null) setFilters({ ...filters, credential_id: source.id, credential_kind: source.kind === "personal" || source.kind === "managed" ? source.kind : "" }); }} />
           <section className={panel} aria-label="Usage by model">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-semibold">Models</h2>

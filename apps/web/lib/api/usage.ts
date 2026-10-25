@@ -54,6 +54,25 @@ export interface UsagePeople {
   users: UsagePerson[];
 }
 
+export interface UsageSource extends UsagePeriod {
+  id: string | null;
+  kind: string | null;
+}
+
+export interface UsageSources {
+  timezone: string;
+  start_date: string;
+  end_date: string;
+  apps: UsageSource[];
+  credentials: UsageSource[];
+}
+
+/** Self-or-admin scope is enforced by the API, including identifier discovery. */
+export function fetchUsageSources(userId: string | null, range: UsageDateRange, signal?: AbortSignal, filters: GatewayFilters = {}): Promise<UsageSources> {
+  const path = userId === null ? "/usage/sources" : `/users/${encodeURIComponent(userId)}/usage/sources`;
+  return apiGet<UsageSources>(path, { ...range, ...gatewayParams(filters) }, signal);
+}
+
 /** Omit the range to use the server's last 30 calendar days, including today. */
 export function fetchUserDailyUsage(
   userId: string,
