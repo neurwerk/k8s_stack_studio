@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from k8s_stack_studio import mcp_store
 from k8s_stack_studio.config.settings import Settings
-from k8s_stack_studio.lib.mcp_admission import admission_requirements
 from k8s_stack_studio.models.mcp import McpPublicationStatus, McpRegistration
 
 
@@ -108,11 +107,6 @@ def _snapshot(
     ):
         raise PublicationUnavailableError
     catalog = TypeAdapter(list[McpRegistration]).validate_json(_read(directory, "studio.json"))
-    requirements = admission_requirements(settings.mcp_catalog, catalog)
-    catalog = [
-        item.model_copy(update={"required_roles": sorted(requirements[item.id])})
-        for item in catalog
-    ]
     ids = {item.id for item in catalog}
     if (
         len(catalog) > 200

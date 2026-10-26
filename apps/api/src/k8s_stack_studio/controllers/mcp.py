@@ -24,7 +24,6 @@ from k8s_stack_studio.lib.contextforge_oauth import (
     ContextForgeOAuthClient,
 )
 from k8s_stack_studio.lib.dependencies import get_current_principal, get_settings, require_role
-from k8s_stack_studio.lib.mcp_admission import admitted, require_admission
 from k8s_stack_studio.lib.mcp_gateway import (
     McpGatewayError,
     available_tools,
@@ -155,7 +154,6 @@ def _connection_admission(
     item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
     if item is None or item.authentication_model != "individual-authentication":
         raise HTTPException(status_code=404, detail="Personal MCP connection is not available")
-    require_admission(item, principal)
     if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     return item, _verified_email(principal)
@@ -247,7 +245,6 @@ async def connection_statuses(
         item
         for item in settings.mcp_catalog
         if item.authentication_model == "individual-authentication"
-        and admitted(item, principal)
         and {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles
     ]
     if not items:
@@ -299,7 +296,6 @@ def _tool_admission(
     item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
     if item is None:
         raise HTTPException(status_code=404, detail="MCP integration is not available")
-    require_admission(item, principal)
     if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     # The chart's live publication snapshot is an access boundary, not just a
@@ -394,7 +390,6 @@ async def prepare_account(
     if not any(
         {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles
         for item in settings.mcp_catalog
-        if admitted(item, principal)
     ):
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     email = _verified_email(principal)
@@ -442,7 +437,6 @@ async def get_catalog(
             ),
         )
         for item in settings.mcp_catalog
-        if admitted(item, principal)
     ]
 
 
@@ -457,18 +451,10 @@ async def publication_status(
     response.headers["Cache-Control"] = "no-store"
     if not settings.mcp_catalog_enabled or not settings.contextforge_publication_status_path:
         raise HTTPException(status_code=404, detail="MCP publication status is not enabled")
-    item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
-    if item is None:
-        raise HTTPException(status_code=404, detail="MCP integration is not available")
-    require_admission(item, principal)
     if not {"llm:invoke", f"mcp:{integration_id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     try:
-        live, statuses = await personal_snapshot(settings)
-        current = next((item for item in live.mcp_catalog if item.id == integration_id), None)
-        if current is None:
-            raise HTTPException(status_code=404, detail="MCP integration is not available")
-        require_admission(current, principal)
+        _, statuses = await personal_snapshot(settings)
         if integration_id not in statuses:
             raise HTTPException(status_code=404, detail="MCP integration is not available")
         return statuses[integration_id]
@@ -487,10 +473,6 @@ async def discover(
 ) -> McpDiscoverResponse:
     """Explicit administrator discovery using only the verified caller's own connection."""
     response.headers["Cache-Control"] = "no-store"
-    item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
-    if item is None or item.authentication_model != "individual-authentication":
-        raise HTTPException(status_code=404, detail="MCP OAuth discovery is not available")
-    require_admission(item, principal)
     if settings.mcp_setup_enabled:
         raise HTTPException(status_code=404, detail="Refresh tools from MCP Setup")
     if not (
@@ -504,6 +486,9 @@ async def discover(
         )
     if request.headers.get("origin") != settings.contextforge_oauth_studio_origin:
         raise HTTPException(status_code=403, detail="Approved Studio origin is required")
+    item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
+    if item is None or item.authentication_model != "individual-authentication":
+        raise HTTPException(status_code=404, detail="MCP OAuth discovery is not available")
     if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     email = _verified_email(principal)
