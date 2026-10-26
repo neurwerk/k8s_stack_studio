@@ -57,6 +57,14 @@ export interface UsagePeople {
 export interface UsageSource extends UsagePeriod {
   id: string | null;
   kind: string | null;
+  name?: string | null;
+}
+
+export interface UsagePersonSources {
+  user_id: string | null;
+  total: UsagePeriod;
+  apps: UsageSource[];
+  credentials: UsageSource[];
 }
 
 export interface UsageSources {
@@ -65,6 +73,7 @@ export interface UsageSources {
   end_date: string;
   apps: UsageSource[];
   credentials: UsageSource[];
+  people: UsagePersonSources[];
 }
 
 /** Self-or-admin scope is enforced by the API, including identifier discovery. */

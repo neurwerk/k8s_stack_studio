@@ -14,6 +14,7 @@ export interface KeycloakUser {
   enabled?: boolean | null;
   emailVerified?: boolean | null;
   createdTimestamp: number;
+  serviceAccountClientId?: string;
 }
 
 /** Safe OIDC client metadata returned by Studio. */

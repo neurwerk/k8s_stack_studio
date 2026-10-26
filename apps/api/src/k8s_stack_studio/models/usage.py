@@ -228,6 +228,16 @@ class UsageSource(UsagePeriod):
 
     id: str | None
     kind: str | None = None
+    name: str | None = None
+
+
+class UsagePersonSources(BaseModel):
+    """Same-total app and credential views within one recorded principal."""
+
+    user_id: str | None
+    total: UsagePeriod = Field(default_factory=UsagePeriod)
+    apps: list[UsageSource] = Field(default_factory=list)
+    credentials: list[UsageSource] = Field(default_factory=list)
 
 
 class UsageSourcesResponse(BaseModel):
@@ -238,12 +248,16 @@ class UsageSourcesResponse(BaseModel):
     end_date: date
     apps: list[UsageSource]
     credentials: list[UsageSource]
+    people: list[UsagePersonSources] = Field(default_factory=list)
 
 
 class AgentGatewaySourceKey(AgentGatewayAccountingKey):
     """Only trusted normalized origin and credential attributes."""
 
     app_id: str | None = Field(default=None, alias="neurwerk.app_id", max_length=255)
+    user_id: str | None = Field(
+        default=None, alias="agentgateway.user", min_length=1, max_length=255
+    )
     credential_id: str | None = Field(default=None, alias="neurwerk.credential_id", max_length=255)
     credential_kind: str | None = Field(
         default=None, alias="neurwerk.credential_kind", max_length=255
