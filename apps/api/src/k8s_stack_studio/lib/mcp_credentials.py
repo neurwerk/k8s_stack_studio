@@ -203,6 +203,24 @@ def _route_ready(route: dict[str, Any], item: McpRegistration, expected: str) ->
     )
 
 
+def _forward_header(item: McpRegistration, *, lowercase: bool = False) -> dict[str, str]:
+    if item.credential is None:
+        return {}
+    name = item.credential.header
+    # Older catalogs omit forwarding metadata; retain the chart's header convention.
+    prefix = (
+        item.forwarding.header_prefix
+        if item.forwarding
+        else "Bearer "
+        if name.lower() == "authorization"
+        else ""
+    )
+    header = {"name": name.lower() if lowercase else name}
+    if prefix:
+        header["prefix"] = prefix
+    return header
+
+
 def _forward_config(
     config: dict[str, Any], item: McpRegistration, record: CredentialRecord
 ) -> bool:
@@ -212,6 +230,7 @@ def _forward_config(
     # empty fail-closed placeholder. No dump content is logged or returned.
     expected = forward_backend(item.id, record.version)
     upstream = urlsplit(item.upstream_url)
+    host = item.forwarding.host if item.forwarding else upstream.hostname
     backends = [
         backend
         for backend in config["backends"]
@@ -219,7 +238,7 @@ def _forward_config(
         == {
             "name": expected,
             "namespace": "infra-agentgateway",
-            "target": f"{upstream.hostname}:443",
+            "target": f"{host}:443",
         }
     ]
     if len(backends) != 1 or item.credential is None:
@@ -231,7 +250,7 @@ def _forward_config(
             {
                 "credentials": [
                     {
-                        "location": {"header": {"name": item.credential.header.lower()}},
+                        "location": {"header": _forward_header(item, lowercase=True)},
                         "key": "<redacted>",
                     }
                 ]
@@ -243,6 +262,14 @@ def _forward_config(
     return (
         not config.get("policies")
         and auth == expected_auth
+        and [policy["backendTLS"] for policy in policies if "backendTLS" in policy]
+        == [
+            {
+                "hostname": upstream.hostname,
+                "systemRoots": True,
+                "subjectAltNames": [upstream.hostname],
+            }
+        ]
         and _forward_route(config, item, expected)
     )
 
@@ -255,12 +282,14 @@ def _backend_accepted(
     if item.credential is None:
         return False
     metadata, spec = backend["metadata"], backend["spec"]
+    upstream = urlsplit(item.upstream_url)
+    host = item.forwarding.host if item.forwarding else upstream.hostname
     expected_auth = (
         {
             "credentials": [
                 {
                     "secretRef": {"name": _secret_name(item.id, record.version), "key": "apiKey"},
-                    "location": {"header": {"name": item.credential.header}},
+                    "location": {"header": _forward_header(item)},
                 }
             ]
         }
@@ -270,7 +299,12 @@ def _backend_accepted(
     return (
         metadata["name"] == forward_backend(item.id, record.version)
         and metadata["namespace"] == "infra-agentgateway"
-        and spec["static"] == {"host": urlsplit(item.upstream_url).hostname, "port": 443}
+        and spec["static"] == {"host": host, "port": 443}
+        and spec["policies"].get("tls")
+        == {
+            "sni": upstream.hostname,
+            "verifySubjectAltNames": [upstream.hostname],
+        }
         and spec["policies"].get("auth") == expected_auth
         and any(
             condition.get("type") == "Accepted"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -16,7 +17,7 @@ from k8s_stack_studio.lib.mcp_credentials import (
     McpSetupError,
     forward_backend,
 )
-from k8s_stack_studio.models.mcp import McpCredential, McpRegistration
+from k8s_stack_studio.models.mcp import McpCredential, McpForwarding, McpRegistration
 
 
 async def test_cas_and_lost_response_recovery_keep_secrets_out_of_errors(tmp_path, caplog):
@@ -81,7 +82,7 @@ async def test_cas_and_lost_response_recovery_keep_secrets_out_of_errors(tmp_pat
         )
 
 
-def forwarding(configured=True):
+def forwarding(configured=True, internal=False):
     """Pinned v1.6.0 serde shape, derived from source rather than a recursive sample.
 
     store/binds.rs Dump{backends,binds}, types/agent.rs BackendWithPolicies,
@@ -96,8 +97,14 @@ def forwarding(configured=True):
         server_id="server",
         gateway_id="gateway",
         upstream_url="https://mcp.example.test/mcp",
+        forwarding=McpForwarding(host="tools.tools.svc.cluster.local", header_prefix="Bearer ")
+        if internal
+        else None,
         credential=McpCredential(
-            owner="shared", required=False, method="gateway-header", header="CONTEXT7_API_KEY"
+            owner="shared",
+            required=False,
+            method="gateway-header",
+            header="Authorization" if internal else "CONTEXT7_API_KEY",
         ),
     )
     name = forward_backend(item.id, record.version)
@@ -106,7 +113,9 @@ def forwarding(configured=True):
             "host": {
                 "name": name,
                 "namespace": "infra-agentgateway",
-                "target": "mcp.example.test:443",
+                "target": "tools.tools.svc.cluster.local:443"
+                if internal
+                else "mcp.example.test:443",
             }
         },
         "inlinePolicies": [
@@ -114,7 +123,11 @@ def forwarding(configured=True):
                 "backendAuth": {
                     "credentials": [
                         {
-                            "location": {"header": {"name": "context7_api_key"}},
+                            "location": {
+                                "header": {"name": "authorization", "prefix": "Bearer "}
+                                if internal
+                                else {"name": "context7_api_key"}
+                            },
                             "key": "<redacted>",
                         }
                     ]
@@ -124,6 +137,15 @@ def forwarding(configured=True):
         if configured
         else [],
     }
+    backend["inlinePolicies"].append(
+        {
+            "backendTLS": {
+                "hostname": "mcp.example.test",
+                "systemRoots": True,
+                "subjectAltNames": ["mcp.example.test"],
+            }
+        }
+    )
     route = {
         "key": "route-key",
         "name": "mcp-forward-context7",
@@ -137,7 +159,7 @@ def forwarding(configured=True):
                         "authorization",
                         "cookie",
                         "x-contextforge-account-email",
-                        "context7_api_key",
+                        "authorization" if internal else "context7_api_key",
                     ]
                 }
             }
@@ -162,9 +184,17 @@ def forwarding(configured=True):
             }
         ],
     }
-    resource = {
+    resource: dict[str, Any] = {
         "metadata": {"name": name, "namespace": "infra-agentgateway", "generation": 1},
-        "spec": {"static": {"host": "mcp.example.test", "port": 443}, "policies": {}},
+        "spec": {
+            "static": {
+                "host": "tools.tools.svc.cluster.local" if internal else "mcp.example.test",
+                "port": 443,
+            },
+            "policies": {
+                "tls": {"sni": "mcp.example.test", "verifySubjectAltNames": ["mcp.example.test"]}
+            },
+        },
         "status": {
             "conditions": [
                 {
@@ -177,14 +207,19 @@ def forwarding(configured=True):
         },
     }
     if configured:
-        resource["spec"]["policies"]["auth"] = {
+        policies: dict[str, Any] = resource["spec"]["policies"]
+        policies["auth"] = {
             "credentials": [
                 {
                     "secretRef": {
                         "name": name.replace("mcp-forward-", "mcp-key-"),
                         "key": "apiKey",
                     },
-                    "location": {"header": {"name": "CONTEXT7_API_KEY"}},
+                    "location": {
+                        "header": {"name": "Authorization", "prefix": "Bearer "}
+                        if internal
+                        else {"name": "CONTEXT7_API_KEY"}
+                    },
                 }
             ]
         }
@@ -192,10 +227,12 @@ def forwarding(configured=True):
 
 
 @pytest.mark.parametrize("configured", [True, False])
+@pytest.mark.parametrize("internal", [True, False])
 async def test_forward_activation_requires_generation_route_and_exact_auth(
-    tmp_path, configured, caplog
+    tmp_path, configured, internal, caplog
 ):
-    item, record, correct, resource = forwarding(configured)
+    item, record, correct, resource = forwarding(configured, internal)
+    correct_resource = copy.deepcopy(resource)
     dump = copy.deepcopy(correct)
     token = tmp_path / "identity"
     token.write_text("synthetic-kubernetes-token")
@@ -230,9 +267,9 @@ async def test_forward_activation_requires_generation_route_and_exact_auth(
             dump["binds"][0]["listeners"]["listener-key"]["routes"]["route-key"][field] = value
             assert not await activation._forward_ready(item, record)
         dump = copy.deepcopy(correct)
-        dump["backends"][0]["inlinePolicies"] = forwarding(not configured)[2]["backends"][0][
-            "inlinePolicies"
-        ]
+        dump["backends"][0]["inlinePolicies"] = forwarding(not configured, internal)[2]["backends"][
+            0
+        ]["inlinePolicies"]
         assert not await activation._forward_ready(item, record)
         if configured:
             dump = copy.deepcopy(correct)
@@ -240,6 +277,47 @@ async def test_forward_activation_requires_generation_route_and_exact_auth(
                 "header"
             ]["name"] = "wrong-header"
             assert not await activation._forward_ready(item, record)
+            for prefix in ("", "Basic ", "Bearer"):
+                dump = copy.deepcopy(correct)
+                dump["backends"][0]["inlinePolicies"][0]["backendAuth"]["credentials"][0][
+                    "location"
+                ]["header"]["prefix"] = prefix
+                assert not await activation._forward_ready(item, record)
+            for key, value in (("name", "wrong-secret"), ("key", "wrong-key")):
+                resource = copy.deepcopy(correct_resource)
+                resource["spec"]["policies"]["auth"]["credentials"][0]["secretRef"][key] = value
+                dump = copy.deepcopy(correct)
+                assert not await activation._forward_ready(item, record)
+            resource = copy.deepcopy(correct_resource)
+            resource["spec"]["policies"]["auth"]["credentials"][0]["location"]["header"][
+                "prefix"
+            ] = "Basic "
+            assert not await activation._forward_ready(item, record)
+        for key, value in (("host", "wrong.example.test"), ("port", 8443)):
+            resource = copy.deepcopy(correct_resource)
+            resource["spec"]["static"][key] = value
+            dump = copy.deepcopy(correct)
+            assert not await activation._forward_ready(item, record)
+        for key, value in (("sni", "wrong.example.test"), ("verifySubjectAltNames", [])):
+            resource = copy.deepcopy(correct_resource)
+            resource["spec"]["policies"]["tls"][key] = value
+            assert not await activation._forward_ready(item, record)
+        resource = copy.deepcopy(correct_resource)
+        for key, value in (
+            ("hostname", "wrong.example.test"),
+            ("subjectAltNames", []),
+            ("systemRoots", False),
+        ):
+            dump = copy.deepcopy(correct)
+            dump["backends"][0]["inlinePolicies"][-1]["backendTLS"][key] = value
+            assert not await activation._forward_ready(item, record)
+        dump = copy.deepcopy(correct)
+        dump["backends"][0]["backend"]["host"]["target"] = "wrong.example.test:443"
+        assert not await activation._forward_ready(item, record)
+        resource["metadata"]["name"] = forward_backend(item.id, "b" * 32)
+        dump = copy.deepcopy(correct)
+        assert not await activation._forward_ready(item, record)
+        resource = copy.deepcopy(correct_resource)
         dump = copy.deepcopy(correct)
         # v1.6.0 emits Accepted=True/PartiallyValid with empty auth on unresolved Secrets.
         condition = resource["status"]["conditions"][0]

@@ -83,6 +83,15 @@ class McpCheck(BaseModel):
         return value
 
 
+class McpForwarding(BaseModel):
+    """Chart-approved network target, separate from the upstream TLS identity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    host: str = Field(min_length=1, max_length=253, pattern=r"^[a-zA-Z0-9]+[a-zA-Z0-9.-]*$")
+    header_prefix: Literal["", "Bearer "] = ""
+
+
 class McpRegistration(BaseModel):
     """Fixed mapping to an operator-owned native registration and virtual server."""
 
@@ -92,6 +101,7 @@ class McpRegistration(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     authentication_model: AuthenticationModel
     credential: McpCredential | None = None
+    forwarding: McpForwarding | None = None
     upstream_url: str = ""
     native_url: str = ""
     gateway_id: str = Field(default="", max_length=100, pattern=r"^[a-zA-Z0-9_-]*$")
@@ -117,6 +127,13 @@ class McpRegistration(BaseModel):
     @model_validator(mode="after")
     def validate_credential(self) -> Self:
         """Reject mixed per-user/shared credentials and credential-bearing URLs."""
+        if self.forwarding and (
+            not self.credential
+            or self.credential.method != "gateway-header"
+            or urlsplit(self.upstream_url).scheme != "https"
+            or urlsplit(self.upstream_url).port not in {None, 443}
+        ):
+            raise ValueError("MCP forwarding requires a fixed HTTPS shared-header upstream")  # noqa: TRY003
         if self.credential and (
             (self.authentication_model == "individual-authentication")
             != (self.credential.owner == "individual")
