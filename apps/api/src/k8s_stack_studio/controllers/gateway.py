@@ -13,7 +13,6 @@ from k8s_stack_studio.lib.dependencies import get_current_principal, get_setting
 from k8s_stack_studio.lib.gateway import gateway_view
 from k8s_stack_studio.lib.gateway_files import GatewayUnavailableError
 from k8s_stack_studio.lib.gateway_trust import TrustPublication, trust_publication
-from k8s_stack_studio.lib.mcp_admission import filter_gateway
 from k8s_stack_studio.models.gateway import GatewayView
 
 router = APIRouter(tags=["gateway"])
@@ -39,9 +38,7 @@ def get_gateway(
     """Return only entitled destinations, modes and referenced configuration."""
     response.headers["Cache-Control"] = "no-store"
     try:
-        return filter_gateway(
-            gateway_view(settings, principal.agentgateway_roles), settings, principal
-        )
+        return gateway_view(settings, principal.agentgateway_roles)
     except GatewayUnavailableError:
         raise _unavailable() from None
 
@@ -51,16 +48,12 @@ def get_gateway(
     dependencies=[Depends(require_role("studio-user")), Depends(require_role("gateway-admin"))],
 )
 def get_admin_gateway(
-    response: Response,
-    principal: StudioPrincipal = Depends(get_current_principal),
-    settings: Settings = Depends(get_settings),
+    response: Response, settings: Settings = Depends(get_settings)
 ) -> GatewayView:
     """Expose complete configuration; this role grants no invocation permissions."""
     response.headers["Cache-Control"] = "no-store"
     try:
-        return filter_gateway(
-            gateway_view(settings, frozenset(), administrator=True), settings, principal
-        )
+        return gateway_view(settings, frozenset(), administrator=True)
     except GatewayUnavailableError:
         raise _unavailable() from None
 

@@ -16,7 +16,6 @@ from k8s_stack_studio.lib.contextforge import ContextForgeAccountClient, Context
 from k8s_stack_studio.lib.contextforge_oauth import ContextForgeOAuthClient
 from k8s_stack_studio.lib.dependencies import get_current_principal, get_settings, require_role
 from k8s_stack_studio.lib.gateway import GatewayUnavailableError, gateway_view
-from k8s_stack_studio.lib.mcp_admission import admitted, require_admission
 from k8s_stack_studio.lib.mcp_credentials import McpCredentials, McpSetupError
 from k8s_stack_studio.lib.mcp_native_setup import McpNativeSetup
 from k8s_stack_studio.lib.mcp_publication import PublicationUnavailableError, publication_snapshot
@@ -48,11 +47,10 @@ router = APIRouter(
 )
 
 
-def _item(identity: str, settings: Settings, principal: StudioPrincipal) -> McpRegistration:
+def _item(identity: str, settings: Settings) -> McpRegistration:
     item = next((item for item in settings.mcp_catalog if item.id == identity), None)
     if item is None:
         raise HTTPException(status_code=404, detail="MCP server is not installed")
-    require_admission(item, principal)
     return item
 
 
@@ -65,7 +63,6 @@ def _origin(request: Request, settings: Settings) -> None:
 async def list_setup(
     request: Request,
     response: Response,
-    principal: StudioPrincipal = Depends(get_current_principal),
     settings: Settings = Depends(_configuration),
 ) -> list[McpSetupStatus]:
     """List installed integrations regardless of publication, key or connection state."""
@@ -89,8 +86,6 @@ async def list_setup(
         pass
     result = []
     for item in settings.mcp_catalog:
-        if not admitted(item, principal):
-            continue
         state = states.get(item.id, {})
         result.append(
             McpSetupStatus(
@@ -121,15 +116,13 @@ async def setup_tools(
     identity: str,
     request: Request,
     response: Response,
-    principal: StudioPrincipal = Depends(get_current_principal),
     settings: Settings = Depends(_configuration),
 ) -> list[McpSetupTool]:
     """Read native cached definitions; GET never contacts or refreshes a provider."""
     response.headers["Cache-Control"] = "no-store"
-    item = _item(identity, settings, principal)
     try:
         native = McpNativeSetup(settings, request.app.state.contextforge_admin_client)
-        tools = await native.tools(item)
+        tools = await native.tools(_item(identity, settings))
         return [
             McpSetupTool(name=name, description=tool["description"]) for name, tool in tools.items()
         ]
@@ -177,7 +170,7 @@ async def publish(
 ) -> McpOperation:
     """Reserve intent, put secret text only in OpenBao, then let the durable worker publish."""
     _origin(request, settings)
-    item = _item(identity, settings, principal)
+    item = _item(identity, settings)
     response.headers["Cache-Control"] = "no-store"
     key = body.api_key.get_secret_value().strip()
     action = "keep" if body.key_action == "replace" and not key else body.key_action
@@ -233,9 +226,7 @@ async def disable(
     """Clear exposed native membership while retaining the administrator's saved selection."""
     _origin(request, settings)
     response.headers["Cache-Control"] = "no-store"
-    operation, _ = await _begin(
-        settings, _item(identity, settings, principal), body, principal, "disable", {}
-    )
+    operation, _ = await _begin(settings, _item(identity, settings), body, principal, "disable", {})
     return operation
 
 
@@ -250,7 +241,7 @@ async def refresh(
 ) -> McpOperation:
     """Refresh immediately as the admitted administrator; new tools remain unselected."""
     _origin(request, settings)
-    item = _item(identity, settings, principal)
+    item = _item(identity, settings)
     if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
         raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
     email = _verified_email(principal)
