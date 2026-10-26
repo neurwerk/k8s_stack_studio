@@ -259,6 +259,7 @@ class UsageSourcesResponse(BaseModel):
     end_date: date
     apps: list[UsageSource]
     credentials: list[UsageSource]
+    origins: list[UsageSource] = Field(default_factory=list)
     people: list[UsagePersonSources] = Field(default_factory=list)
     key_name_enrichment: UsageNameEnrichment = Field(default_factory=UsageNameEnrichment)
 

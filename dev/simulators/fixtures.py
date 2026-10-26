@@ -17,17 +17,32 @@ def _demo_principals() -> tuple[str, str]:
     return "demo-developer", "demo-viewer"
 
 
-def usage_summary(payload: dict) -> dict:
-    """Return grouped summaries aligned to the caller's UTC bucket boundaries."""
-    start = datetime.fromisoformat(payload["timeRange"]["from"].replace("Z", "+00:00"))
-    end = datetime.fromisoformat(payload["timeRange"]["to"].replace("Z", "+00:00"))
-    if not start < end:
-        raise ValueError("bounded time range required")
-    attributes = payload.get("filters", {}).get("attributes", {})
-    if not isinstance(attributes, dict) or set(attributes) - {"agentgateway.user"}:
-        raise ValueError("unsupported filters")
-    selected_user = attributes.get("agentgateway.user")
-    dimensions = payload.get("groupBy")
+def _usage_samples() -> list[
+    tuple[str | None, int, str | None, str | None, str | None, str | None]
+]:
+    """Represent app traffic, historical key IDs, and missing attribution."""
+    developer, viewer = _demo_principals()
+    samples = []
+    for person, user_id in enumerate((developer, viewer)):
+        for day in range(person, 28, 3 + person * 3):
+            model = None if day == 6 else "demo-model" if day % 2 else "sample-model"
+            app = None if day == 6 else "librechat" if person == 1 or day == 12 else "studio"
+            # These IDs deliberately have no matching bridge record (revoked/old keys).
+            key = (
+                "00000000-0000-4000-8000-000000000001" if day == 3
+                else "00000000-0000-4000-8000-000000000002" if day == 6
+                else None
+            )
+            samples.append((user_id, day, model, app, key, "personal" if key else None))
+    samples.extend([
+        (None, 2, None, None, None, None),
+        (None, 5, "sample-model", "dify", None, None),
+    ])
+    return samples
+
+
+def _usage_grouping(dimensions: object) -> tuple[bool, bool, bool, bool]:
+    """Recognize the four fixed groupings Studio sends to local analytics."""
     completeness = [
         {"field": "attributes", "key": "neurwerk.token_usage_known"},
         {"field": "attributes", "key": "neurwerk.cost_known"},
@@ -36,69 +51,98 @@ def usage_summary(payload: dict) -> dict:
     primary = dimensions[:-2] if with_completeness else dimensions
     by_model = primary == [{"field": "requestModel"}]
     by_user = primary == [{"field": "attributes", "key": "agentgateway.user"}]
-    if primary != [] and not by_model and not by_user:
+    by_source = primary == [
+        {"field": "attributes", "key": f"neurwerk.{name}"}
+        for name in ("app_id", "credential_id", "credential_kind")
+    ] + [{"field": "attributes", "key": "agentgateway.user"}]
+    if primary != [] and not by_model and not by_user and not by_source:
         raise ValueError("unsupported grouping")
+    return with_completeness, by_model, by_user, by_source
+
+
+def usage_summary(payload: dict) -> dict:
+    """Return grouped summaries aligned to the caller's UTC bucket boundaries."""
+    start = datetime.fromisoformat(payload["timeRange"]["from"].replace("Z", "+00:00"))
+    end = datetime.fromisoformat(payload["timeRange"]["to"].replace("Z", "+00:00"))
+    if not start < end:
+        raise ValueError("bounded time range required")
+    attributes = payload.get("filters", {}).get("attributes", {})
+    if not isinstance(attributes, dict) or set(attributes) - {
+        "agentgateway.user", "neurwerk.app_id", "neurwerk.credential_id", "neurwerk.credential_kind"
+    }:
+        raise ValueError("unsupported filters")
+    selected_user = attributes.get("agentgateway.user")
+    with_completeness, by_model, by_user, by_source = _usage_grouping(payload.get("groupBy"))
     seconds = min(
         int(payload.get("bucketSeconds", 86400)),
         max(1, int((end - start).total_seconds())),
     )
     if seconds < 1:
         raise ValueError("invalid bucket duration")
-    groups: dict[str, dict] = {}
-    buckets: dict[tuple[datetime, str], dict] = {}
-    # Synthetic usage belongs to the two actual local Keycloak subjects.
+    groups: dict[tuple, dict] = {}
+    buckets: dict[tuple[datetime, tuple], dict] = {}
+    _, viewer = _demo_principals()
     today = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
-    for person, user_id in enumerate(_demo_principals()):
+    for user_id, day, model, app_id, credential_id, credential_kind in _usage_samples():
         if selected_user is not None and selected_user != user_id:
             continue
-        for day in range(person, 28, 3 + person * 3):
-            at = today - timedelta(days=day)
-            if not start <= at < end:
-                continue
-            model = "demo-model" if day % 2 else "sample-model"
-            group_key = user_id if by_user else model if by_model else "all"
-            group = (
-                {"agentgateway.user": user_id}
-                if by_user
-                else {"requestModel": model}
-                if by_model
-                else {}
+        source = {
+            "neurwerk.app_id": app_id,
+            "neurwerk.credential_id": credential_id,
+            "neurwerk.credential_kind": credential_kind,
+        }
+        if any(attributes.get(key, value) != value for key, value in source.items()):
+            continue
+        at = today - timedelta(days=day)
+        if not start <= at < end:
+            continue
+        group = (
+            {**source, "agentgateway.user": user_id}
+            if by_source
+            else {"agentgateway.user": user_id}
+            if by_user
+            else {"requestModel": model}
+            if by_model
+            else {}
+        )
+        if with_completeness:
+            group = {
+                **group,
+                "neurwerk.token_usage_known": True,
+                "neurwerk.cost_known": True,
+            }
+        key = tuple(sorted(group.items()))
+        tokens = 120 + day * 4 + (40 if user_id == viewer else 0)
+        row = groups.setdefault(
+            key,
+            {"group": group, "requests": 0, "totalTokens": 0, "cost": 0.0},
+        )
+        row["requests"] += 1
+        row["totalTokens"] += tokens
+        row["cost"] += 0.002
+        if by_model:
+            bucket_start = start + timedelta(
+                seconds=((at - start) // timedelta(seconds=seconds)) * seconds
             )
-            if with_completeness:
-                group = {
-                    **group,
-                    "neurwerk.token_usage_known": True,
-                    "neurwerk.cost_known": True,
-                }
-            tokens = 120 + day * 4 + person * 40
-            row = groups.setdefault(
-                group_key,
-                {"group": group, "requests": 0, "totalTokens": 0, "cost": 0.0},
+            bucket = buckets.setdefault(
+                (bucket_start, key),
+                {
+                    "start": bucket_start.isoformat(),
+                    "group": group,
+                    "requests": 0,
+                    "totalTokens": 0,
+                    "cost": 0.0,
+                },
             )
-            row["requests"] += 1
-            row["totalTokens"] += tokens
-            row["cost"] += 0.002
-            if by_model:
-                bucket_start = start + timedelta(
-                    seconds=((at - start) // timedelta(seconds=seconds)) * seconds
-                )
-                bucket = buckets.setdefault(
-                    (bucket_start, model),
-                    {
-                        "start": bucket_start.isoformat(),
-                        "group": group,
-                        "requests": 0,
-                        "totalTokens": 0,
-                        "cost": 0.0,
-                    },
-                )
-                bucket["requests"] += 1
-                bucket["totalTokens"] += tokens
-                bucket["cost"] += 0.002
+            bucket["requests"] += 1
+            bucket["totalTokens"] += tokens
+            bucket["cost"] += 0.002
     return {
         "bucketSeconds": seconds,
         "groups": list(groups.values()),
-        "buckets": [buckets[key] for key in sorted(buckets)],
+        "buckets": [
+            buckets[key] for key in sorted(buckets, key=lambda item: (item[0], repr(item[1])))
+        ],
     }
 
 

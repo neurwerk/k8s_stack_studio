@@ -86,3 +86,28 @@ async def resolve_usage_key_names(result: UsageSourcesResponse, request: Request
                     if identity in looked_up
                     else "not_looked_up"
                 )
+    _resolve_origin_names(result, names)
+
+
+def _resolve_origin_names(
+    result: UsageSourcesResponse, names: dict[tuple[str, str, str], str]
+) -> None:
+    """Show a shared key name only when every recorded owner resolves to the same name."""
+    for origin in result.origins:
+        if origin.id is None or origin.kind not in ("personal", "managed"):
+            continue
+        matching = {
+            owner
+            for person in result.people
+            if (owner := person.user_id) is not None
+            for key in person.credentials
+            if key.id == origin.id and key.kind == origin.kind
+        }
+        resolved = [
+            names[(origin.id, owner, origin.kind)]
+            for owner in matching
+            if (origin.id, owner, origin.kind) in names
+        ]
+        if len(resolved) == len(matching) and len(set(resolved)) == 1:
+            origin.name = resolved[0]
+            origin.name_status = "resolved"

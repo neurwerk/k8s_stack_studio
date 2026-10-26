@@ -74,6 +74,7 @@ export interface UsageSources {
   end_date: string;
   apps: UsageSource[];
   credentials: UsageSource[];
+  origins: UsageSource[];
   people: UsagePersonSources[];
   key_name_enrichment?: {
     eligible_keys: number;
