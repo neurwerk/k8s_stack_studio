@@ -229,6 +229,7 @@ class UsageSource(UsagePeriod):
     id: str | None
     kind: str | None = None
     name: str | None = None
+    name_status: Literal["not_looked_up", "unavailable", "resolved"] = "not_looked_up"
 
 
 class UsagePersonSources(BaseModel):
@@ -240,6 +241,16 @@ class UsagePersonSources(BaseModel):
     credentials: list[UsageSource] = Field(default_factory=list)
 
 
+class UsageNameEnrichment(BaseModel):
+    """Name lookup completeness is independent of usage accounting completeness."""
+
+    eligible_keys: int = 0
+    looked_up_keys: int = 0
+    named_keys: int = 0
+    limit_reached: bool = False
+    lookup_failed: bool = False
+
+
 class UsageSourcesResponse(BaseModel):
     """Independent breakdowns of the same scoped native records."""
 
@@ -249,6 +260,7 @@ class UsageSourcesResponse(BaseModel):
     apps: list[UsageSource]
     credentials: list[UsageSource]
     people: list[UsagePersonSources] = Field(default_factory=list)
+    key_name_enrichment: UsageNameEnrichment = Field(default_factory=UsageNameEnrichment)
 
 
 class AgentGatewaySourceKey(AgentGatewayAccountingKey):

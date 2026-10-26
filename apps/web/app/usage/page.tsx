@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Rectangle, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -65,7 +65,7 @@ function SourceTable({ title, rows, credential, onSelect }: {
           <td className="max-w-sm break-all py-3 pr-3">{row.id === null
             ? (credential ? "No recorded platform key" : "No recorded app")
             : <button type="button" disabled={!onSelect} className="text-left text-primary underline disabled:text-foreground disabled:no-underline" onClick={() => { onSelect?.(row); }}>
-              {credential ? row.name ?? "Unavailable key" : appLabels.get(row.id) ?? row.id}
+              {credential ? row.name ?? (row.name_status === "not_looked_up" ? "Name not looked up" : "Unavailable key") : appLabels.get(row.id) ?? row.id}
               {credential && <span className="mt-1 block text-xs text-muted-foreground">{row.kind === "personal" ? "Personal key" : row.kind === "managed" ? "Managed key" : "Unknown key kind"} · {row.id}</span>}
               {!credential && appLabels.has(row.id) && <span className="ml-2 text-xs text-muted-foreground">({row.id})</span>}
             </button>}</td>
@@ -102,12 +102,18 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [names, setNames] = useState<Record<string, string>>({});
   const [identities, setIdentities] = useState<Record<string, "human" | "service">>({});
   const [directory, setDirectory] = useState<UsagePersonSources[]>([]);
+  const [personLimit, setPersonLimit] = useState(20);
+  const resolvedProfiles = useRef(new Set<string>());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateError, setDateError] = useState<string | null>(null);
   const [filters, setFilters] = useState<GatewayFilters>({});
   const key = JSON.stringify([selected, range?.start, range?.end, filters, refresh]);
   const shown = result?.key === key ? result : undefined;
+  const ranked = useMemo(() => [...(shown?.sources.people ?? [])].sort((a, b) =>
+    b.total[metric] - a.total[metric] || (a.user_id ?? "").localeCompare(b.user_id ?? "")), [shown?.sources.people, metric]);
+  const visiblePeople = useMemo(() => selected === "all" ? ranked.slice(0, personLimit) : ranked,
+    [ranked, personLimit, selected]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -142,35 +148,37 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     return () => { controller.abort(); };
   }, [selected, range, isAdmin, key, filters]);
 
+  useEffect(() => { resolvedProfiles.current.clear(); }, [refresh, canReadNames]);
+
   useEffect(() => {
-    if (!canReadNames || !shown?.people) return;
+    if (!canReadNames) return;
     const controller = new AbortController();
     const ids = [...new Set([
-      ...shown.people.users.slice(0, 20).map((item) => item.user_id),
+      ...visiblePeople.map((item) => item.user_id).filter((id): id is string => id !== null),
       ...(selected !== "all" ? [selected] : []),
-    ])];
+    ])].filter((id) => !resolvedProfiles.current.has(id));
     const resolve = async () => {
-      const found: Record<string, string> = {};
-      const kinds: Record<string, "human" | "service"> = {};
-      for (let index = 0; index < ids.length && !controller.signal.aborted; index += 4) {
+      for (let index = 0; index < ids.length; index += 4) {
+        const found: Record<string, string> = {};
+        const kinds: Record<string, "human" | "service"> = {};
         const users = await Promise.allSettled(ids.slice(index, index + 4).map((id) =>
           fetchUser(id, controller.signal)));
+        if (controller.signal.aborted) return;
         users.forEach((item) => {
           if (item.status === "fulfilled") {
             const user = item.value;
             found[user.id] = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username;
             kinds[user.id] = user.serviceAccountClientId ? "service" : "human";
+            resolvedProfiles.current.add(user.id);
           }
         });
-      }
-      if (!controller.signal.aborted) {
         setNames((previous) => ({ ...previous, ...found }));
         setIdentities((previous) => ({ ...previous, ...kinds }));
       }
     };
     void resolve();
     return () => { controller.abort(); };
-  }, [canReadNames, shown?.people, selected]);
+  }, [canReadNames, visiblePeople, selected]);
 
   const today = shown?.usage.today ?? result?.usage.today;
   const people = shown?.people?.users ?? [];
@@ -181,15 +189,14 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     : [];
   const topStackIndexes = trend.map((day) =>
     summary?.models.findLastIndex((_, index) => Number(day[`model${String(index)}`]) > 0) ?? -1);
-  const ranked = [...(shown?.sources.people ?? [])].sort((a, b) => b.total[metric] - a.total[metric] || (a.user_id ?? "").localeCompare(b.user_id ?? ""));
   const rankedModels = rankModels(summary?.models ?? [], modelMetric);
   const maxModelMetric = rankedModels[0]?.[modelMetric] ?? 0;
-  const label = (id: string) => names[id] ?? (id === userId ? "You" : "Identity unavailable");
+  const label = (id: string) => (canReadNames ? names[id] : undefined) ?? (id === userId ? "You" : "Identity unavailable");
   const activeIds = new Set(people.map((person) => person.user_id));
   const category = (person: UsagePersonSources) => {
     if (person.user_id === null) return "Unknown ownership";
-    if (identities[person.user_id] === "service" || person.credentials.some((key) => key.kind === "managed")) return "System / service accounts";
-    if (identities[person.user_id] === "human") return "People";
+    if ((canReadNames && identities[person.user_id] === "service") || person.credentials.some((key) => key.kind === "managed")) return "System / service accounts";
+    if (canReadNames && identities[person.user_id] === "human") return "People";
     return "Unresolved identities";
   };
   const selectSource = (person: UsagePersonSources, source: UsageSource, credential = false) => {
@@ -310,8 +317,13 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               </select></label>
             </div>
             <p className="mt-2 text-sm text-muted-foreground">Each person or account has one total. Apps and platform keys are alternate breakdowns of that same total, not extra usage. System accounts and unknown ownership are separate from people.</p>
+            {shown.sources.key_name_enrichment && (shown.sources.key_name_enrichment.limit_reached || shown.sources.key_name_enrichment.lookup_failed) && <p role="status" className="mt-2 text-sm text-muted-foreground">
+              {shown.sources.key_name_enrichment.limit_reached && "The 5,000-key name lookup limit was reached. "}
+              {shown.sources.key_name_enrichment.lookup_failed && "Some key name lookups could not be completed. "}
+              Names were looked up for {count(shown.sources.key_name_enrichment.looked_up_keys)} of {count(shown.sources.key_name_enrichment.eligible_keys)} eligible keys; other names were not looked up. All recorded usage remains included; this does not change token or cost completeness.
+            </p>}
             {["People", "System / service accounts", "Unresolved identities", "Unknown ownership"].map((group) => {
-              const members = ranked.filter((person) => category(person) === group);
+              const members = visiblePeople.filter((person) => category(person) === group);
               return members.length > 0 && <section key={group} className="mt-5" aria-label={group}>
                 {selected === "all" && <h3 className="font-semibold">{group}</h3>}
                 {members.map((person) => <details key={person.user_id ?? "unknown"} open={selected !== "all"} className="mt-3 rounded-lg border border-border p-3">
@@ -332,6 +344,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                 </details>)}
               </section>;
             })}
+            {visiblePeople.length < ranked.length && <button type="button" className="btn btn-outline mt-4" onClick={() => { setPersonLimit((limit) => limit + 20); }}>Show 20 more people or accounts ({count(visiblePeople.length)} of {count(ranked.length)} shown)</button>}
             {ranked.length === 0 && <p className="mt-4 text-sm text-muted-foreground">No usage in this range.</p>}
           </section>
           <section className={panel} aria-label="Usage by model">
