@@ -22,6 +22,7 @@ from k8s_stack_studio.models.usage import (
     ModelUsage,
     UsagePeopleResponse,
     UsagePeriod,
+    UsagePersonSources,
     UsageResponse,
     UsageSource,
     UsageSourcesResponse,
@@ -189,12 +190,19 @@ class AgentGatewayClient:
         until = min(midnights[-1], now)
         apps: dict[str | None, UsageSource] = {}
         credentials: dict[tuple[str | None, str | None], UsageSource] = {}
+        people: dict[str | None, UsagePersonSources] = {}
+        person_apps: dict[tuple[str | None, str | None], UsageSource] = {}
+        person_keys: dict[tuple[str | None, str | None, str | None], UsageSource] = {}
         if until > midnights[0]:
             payload = self._summary_payload(user_id, midnights[0], until, filters)
-            payload["groupBy"] = [
-                {"field": "attributes", "key": f"neurwerk.{name}"}
-                for name in ("app_id", "credential_id", "credential_kind")
-            ] + _COMPLETENESS_GROUPS
+            payload["groupBy"] = (
+                [
+                    {"field": "attributes", "key": f"neurwerk.{name}"}
+                    for name in ("app_id", "credential_id", "credential_kind")
+                ]
+                + [{"field": "attributes", "key": "agentgateway.user"}]
+                + _COMPLETENESS_GROUPS
+            )
             try:
                 response = await self._client.post(
                     f"{self._base}/api/logs/analytics/summary", json=payload
@@ -207,11 +215,28 @@ class AgentGatewayClient:
                 raise AgentGatewayUsageError
             for item in summary.groups:
                 group = item.group
+                if user_id is not None and group.user_id not in (None, user_id):
+                    raise AgentGatewayUsageError
                 apps.setdefault(group.app_id, UsageSource(id=group.app_id)).add(item)
                 key = (group.credential_id, group.credential_kind)
                 credentials.setdefault(
                     key, UsageSource(id=group.credential_id, kind=group.credential_kind)
                 ).add(item)
+                owner = user_id if user_id is not None else group.user_id
+                person = people.setdefault(owner, UsagePersonSources(user_id=owner))
+                person.total.add(item)
+                app_key = (owner, group.app_id)
+                if app_key not in person_apps:
+                    person_apps[app_key] = UsageSource(id=group.app_id)
+                    person.apps.append(person_apps[app_key])
+                person_apps[app_key].add(item)
+                person_key = (owner, *key)
+                if person_key not in person_keys:
+                    person_keys[person_key] = UsageSource(
+                        id=group.credential_id, kind=group.credential_kind
+                    )
+                    person.credentials.append(person_keys[person_key])
+                person_keys[person_key].add(item)
         return UsageSourcesResponse(
             timezone=self._timezone.key,
             start_date=start,
@@ -220,6 +245,9 @@ class AgentGatewayClient:
             credentials=sorted(
                 credentials.values(),
                 key=lambda item: (-item.total_tokens, item.id or "", item.kind or ""),
+            ),
+            people=sorted(
+                people.values(), key=lambda item: (-item.total.total_tokens, item.user_id or "")
             ),
         )
 

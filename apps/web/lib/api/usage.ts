@@ -57,6 +57,15 @@ export interface UsagePeople {
 export interface UsageSource extends UsagePeriod {
   id: string | null;
   kind: string | null;
+  name?: string | null;
+  name_status?: "not_looked_up" | "unavailable" | "resolved";
+}
+
+export interface UsagePersonSources {
+  user_id: string | null;
+  total: UsagePeriod;
+  apps: UsageSource[];
+  credentials: UsageSource[];
 }
 
 export interface UsageSources {
@@ -65,6 +74,14 @@ export interface UsageSources {
   end_date: string;
   apps: UsageSource[];
   credentials: UsageSource[];
+  people: UsagePersonSources[];
+  key_name_enrichment?: {
+    eligible_keys: number;
+    looked_up_keys: number;
+    named_keys: number;
+    limit_reached: boolean;
+    lookup_failed: boolean;
+  };
 }
 
 /** Self-or-admin scope is enforced by the API, including identifier discovery. */

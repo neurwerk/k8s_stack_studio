@@ -228,6 +228,27 @@ class UsageSource(UsagePeriod):
 
     id: str | None
     kind: str | None = None
+    name: str | None = None
+    name_status: Literal["not_looked_up", "unavailable", "resolved"] = "not_looked_up"
+
+
+class UsagePersonSources(BaseModel):
+    """Same-total app and credential views within one recorded principal."""
+
+    user_id: str | None
+    total: UsagePeriod = Field(default_factory=UsagePeriod)
+    apps: list[UsageSource] = Field(default_factory=list)
+    credentials: list[UsageSource] = Field(default_factory=list)
+
+
+class UsageNameEnrichment(BaseModel):
+    """Name lookup completeness is independent of usage accounting completeness."""
+
+    eligible_keys: int = 0
+    looked_up_keys: int = 0
+    named_keys: int = 0
+    limit_reached: bool = False
+    lookup_failed: bool = False
 
 
 class UsageSourcesResponse(BaseModel):
@@ -238,12 +259,17 @@ class UsageSourcesResponse(BaseModel):
     end_date: date
     apps: list[UsageSource]
     credentials: list[UsageSource]
+    people: list[UsagePersonSources] = Field(default_factory=list)
+    key_name_enrichment: UsageNameEnrichment = Field(default_factory=UsageNameEnrichment)
 
 
 class AgentGatewaySourceKey(AgentGatewayAccountingKey):
     """Only trusted normalized origin and credential attributes."""
 
     app_id: str | None = Field(default=None, alias="neurwerk.app_id", max_length=255)
+    user_id: str | None = Field(
+        default=None, alias="agentgateway.user", min_length=1, max_length=255
+    )
     credential_id: str | None = Field(default=None, alias="neurwerk.credential_id", max_length=255)
     credential_kind: str | None = Field(
         default=None, alias="neurwerk.credential_kind", max_length=255

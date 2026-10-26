@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Rectangle, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -11,9 +11,9 @@ import { AccountingValue } from "@/components/accounting-value";
 import { GatewayClassificationFilters } from "@/components/gateway-filters";
 import type { GatewayFilters } from "@/lib/api/gateway-metadata";
 import { fetchAllDailyUsage, fetchUsagePeople, fetchUsageSources, fetchUserDailyUsage } from "@/lib/api/usage";
-import type { UsageDateRange, UsagePeople, UsageSources, UsageSource, UserDailyUsage } from "@/lib/api/usage";
+import type { UsageDateRange, UsagePeople, UsageSources, UsageSource, UsagePersonSources, UserDailyUsage } from "@/lib/api/usage";
 import { useCurrentUserId, useHasRole, useIsKeycloakAdmin } from "@/lib/auth/roles";
-import { modelColors, modelTrend, presetRange, rankModels, rankPeople, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
+import { modelColors, modelTrend, presetRange, rankModels, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
 import type { PersonMetric, UsagePreset } from "@/lib/usage-dashboard";
 
 const panel = "card min-w-0 border border-border bg-card p-4 sm:p-6";
@@ -45,16 +45,17 @@ interface UsageResult {
 const appLabels = new Map<string, string>([
   ["open-webui", "Open WebUI"], ["openwebui", "Open WebUI"], ["librechat", "LibreChat"],
   ["studio", "Studio"], ["agentgateway", "AgentGateway"],
+  ["dify", "Dify"],
 ]);
 
 function SourceTable({ title, rows, credential, onSelect }: {
-  title: string; rows: UsageSource[]; credential?: boolean; onSelect: (source: UsageSource) => void;
+  title: string; rows: UsageSource[]; credential?: boolean; onSelect?: (source: UsageSource) => void;
 }) {
   return <section className={panel} aria-label={title}>
     <h2 className="text-xl font-semibold">{title}</h2>
     <p className="mt-2 text-xs text-muted-foreground">{credential
-      ? "Platform key identifiers only, never secrets. Missing IDs include OIDC and older records."
-      : "Verified OIDC client IDs, not caller headers. API keys and older records have no recorded app."} Select an identifier to filter usage.</p>
+      ? "Current saved key names, with stable IDs below; never secrets. Unavailable keys may be revoked, removed or inaccessible."
+      : "Verified OIDC client IDs, not caller headers. Missing app attribution is shown as no recorded app."} {onSelect && "Select a row to filter usage."}</p>
     <div className="mt-4 overflow-x-auto">
       <table className="table w-full min-w-[560px] text-left text-sm">
         <thead><tr><th className="py-3">{credential ? "Platform API key" : "Originating app"}</th>
@@ -62,9 +63,10 @@ function SourceTable({ title, rows, credential, onSelect }: {
           <th className="pl-3 text-right">Native LLM records</th></tr></thead>
         <tbody>{rows.map((row) => <tr key={JSON.stringify([row.id, row.kind])} className="border-t border-border">
           <td className="max-w-sm break-all py-3 pr-3">{row.id === null
-            ? (credential ? "No recorded platform key" : "Unknown / no recorded app")
-            : <button type="button" className="text-left text-primary underline" onClick={() => { onSelect(row); }}>
-              {credential ? `${row.kind === "personal" ? "Personal key" : row.kind === "managed" ? "Managed key" : "Unknown key kind"} · ${row.id}` : appLabels.get(row.id) ?? row.id}
+            ? (credential ? "No recorded platform key" : "No recorded app")
+            : <button type="button" disabled={!onSelect} className="text-left text-primary underline disabled:text-foreground disabled:no-underline" onClick={() => { onSelect?.(row); }}>
+              {credential ? row.name ?? (row.name_status === "not_looked_up" ? "Name not looked up" : "Unavailable key") : appLabels.get(row.id) ?? row.id}
+              {credential && <span className="mt-1 block text-xs text-muted-foreground">{row.kind === "personal" ? "Personal key" : row.kind === "managed" ? "Managed key" : "Unknown key kind"} · {row.id}</span>}
               {!credential && appLabels.has(row.id) && <span className="ml-2 text-xs text-muted-foreground">({row.id})</span>}
             </button>}</td>
           <td className="px-3 text-right"><AccountingValue metric={row.accounting?.tokens} reported={row.total_tokens} /></td>
@@ -98,12 +100,20 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [refresh, setRefresh] = useState(0);
   const [result, setResult] = useState<UsageResult>();
   const [names, setNames] = useState<Record<string, string>>({});
+  const [identities, setIdentities] = useState<Record<string, "human" | "service">>({});
+  const [directory, setDirectory] = useState<UsagePersonSources[]>([]);
+  const [personLimit, setPersonLimit] = useState(20);
+  const resolvedProfiles = useRef(new Set<string>());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dateError, setDateError] = useState<string | null>(null);
   const [filters, setFilters] = useState<GatewayFilters>({});
   const key = JSON.stringify([selected, range?.start, range?.end, filters, refresh]);
   const shown = result?.key === key ? result : undefined;
+  const ranked = useMemo(() => [...(shown?.sources.people ?? [])].sort((a, b) =>
+    b.total[metric] - a.total[metric] || (a.user_id ?? "").localeCompare(b.user_id ?? "")), [shown?.sources.people, metric]);
+  const visiblePeople = useMemo(() => selected === "all" ? ranked.slice(0, personLimit) : ranked,
+    [ranked, personLimit, selected]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -125,6 +135,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
         ]);
         if (controller.signal.aborted) return;
         setResult({ key, range: bounds, usage, people, sources });
+        if (selected === "all") setDirectory(sources.people);
         setDraftStart(bounds.start);
         setDraftEnd(bounds.end);
       } catch {
@@ -137,30 +148,37 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     return () => { controller.abort(); };
   }, [selected, range, isAdmin, key, filters]);
 
+  useEffect(() => { resolvedProfiles.current.clear(); }, [refresh, canReadNames]);
+
   useEffect(() => {
-    if (!canReadNames || !shown?.people) return;
+    if (!canReadNames) return;
     const controller = new AbortController();
     const ids = [...new Set([
-      ...shown.people.users.slice(0, 20).map((item) => item.user_id),
+      ...visiblePeople.map((item) => item.user_id).filter((id): id is string => id !== null),
       ...(selected !== "all" ? [selected] : []),
-    ])];
+    ])].filter((id) => !resolvedProfiles.current.has(id));
     const resolve = async () => {
-      const found: Record<string, string> = {};
-      for (let index = 0; index < ids.length && !controller.signal.aborted; index += 4) {
+      for (let index = 0; index < ids.length; index += 4) {
+        const found: Record<string, string> = {};
+        const kinds: Record<string, "human" | "service"> = {};
         const users = await Promise.allSettled(ids.slice(index, index + 4).map((id) =>
           fetchUser(id, controller.signal)));
+        if (controller.signal.aborted) return;
         users.forEach((item) => {
           if (item.status === "fulfilled") {
             const user = item.value;
             found[user.id] = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username;
+            kinds[user.id] = user.serviceAccountClientId ? "service" : "human";
+            resolvedProfiles.current.add(user.id);
           }
         });
+        setNames((previous) => ({ ...previous, ...found }));
+        setIdentities((previous) => ({ ...previous, ...kinds }));
       }
-      if (!controller.signal.aborted) setNames((previous) => ({ ...previous, ...found }));
     };
     void resolve();
     return () => { controller.abort(); };
-  }, [canReadNames, shown?.people, selected]);
+  }, [canReadNames, visiblePeople, selected]);
 
   const today = shown?.usage.today ?? result?.usage.today;
   const people = shown?.people?.users ?? [];
@@ -171,11 +189,21 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     : [];
   const topStackIndexes = trend.map((day) =>
     summary?.models.findLastIndex((_, index) => Number(day[`model${String(index)}`]) > 0) ?? -1);
-  const ranked = rankPeople(people, metric);
   const rankedModels = rankModels(summary?.models ?? [], modelMetric);
   const maxModelMetric = rankedModels[0]?.[modelMetric] ?? 0;
-  const label = (id: string) => names[id] ?? (id === userId ? "You" : `Unknown – ID ${id}`);
+  const label = (id: string) => (canReadNames ? names[id] : undefined) ?? (id === userId ? "You" : "Identity unavailable");
   const activeIds = new Set(people.map((person) => person.user_id));
+  const category = (person: UsagePersonSources) => {
+    if (person.user_id === null) return "Unknown ownership";
+    if ((canReadNames && identities[person.user_id] === "service") || person.credentials.some((key) => key.kind === "managed")) return "System / service accounts";
+    if (canReadNames && identities[person.user_id] === "human") return "People";
+    return "Unresolved identities";
+  };
+  const selectSource = (person: UsagePersonSources, source: UsageSource, credential = false) => {
+    if (source.id === null || person.user_id === null) return;
+    setSelected(person.user_id);
+    setFilters(credential ? { ...filters, credential_id: source.id, credential_kind: source.kind === "personal" || source.kind === "managed" ? source.kind : "" } : { ...filters, app_id: source.id });
+  };
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-5 p-4 sm:p-6">
@@ -193,18 +221,16 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
       <section className={panel} aria-label="Usage filters">
         {isAdmin && (
           <label className="mb-4 flex max-w-md flex-col gap-1 text-xs font-medium text-muted-foreground">
-            User
+            Person or account
             <select className={control} value={selected} onChange={(event) => { setSelected(event.target.value); }}>
-              <option value="all">All users</option>
+              <option value="all">All people</option>
               <option value={userId}>My usage</option>
               {selected !== "all" && selected !== userId && !activeIds.has(selected) && (
                 <option value={selected}>{label(selected)}</option>
               )}
-              {people.filter((person) => person.user_id !== userId).map((person) => (
-                <option key={person.user_id} value={person.user_id}>
-                  {label(person.user_id)}
-                </option>
-              ))}
+              {["People", "System / service accounts", "Unresolved identities"].map((group) => <optgroup key={group} label={group}>
+                {(selected === "all" ? ranked : directory).filter((person) => person.user_id !== null && person.user_id !== userId && activeIds.has(person.user_id) && category(person) === group).map((person) => person.user_id !== null && <option key={person.user_id} value={person.user_id}>{label(person.user_id)} · {person.user_id}</option>)}
+              </optgroup>)}
             </select>
           </label>
         )}
@@ -274,8 +300,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               ["Cost (USD)", <AccountingValue key="cost" metric={summary.totals.accounting.cost_usd} reported={summary.totals.cost_usd} currency />],
               ["Native LLM records", count(summary.totals.requests)],
               ["Models", count(summary.models.length)],
-              [selected === "all" ? "Active users" : "Token completeness",
-                selected === "all" ? count(people.length) : summary.totals.accounting.tokens.state],
+              [selected === "all" ? "Recorded principals" : "Token completeness",
+                selected === "all" ? count(ranked.filter((person) => person.user_id !== null).length) : summary.totals.accounting.tokens.state],
             ] as const).map(([title, value]) => (
               <div key={title} className={panel}>
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
@@ -283,10 +309,44 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               </div>
             ))}
           </section>
-          <SourceTable title="Usage by originating app" rows={shown.sources.apps}
-            onSelect={(source) => { if (source.id !== null) setFilters({ ...filters, app_id: source.id }); }} />
-          <SourceTable title="Usage by platform API key" rows={shown.sources.credentials} credential
-            onSelect={(source) => { if (source.id !== null) setFilters({ ...filters, credential_id: source.id, credential_kind: source.kind === "personal" || source.kind === "managed" ? source.kind : "" }); }} />
+          <section className={panel} aria-label="Usage per person">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold">{selected === "all" ? "Usage per person" : `Usage for ${label(selected)}`}</h2>
+              <label className="text-xs text-muted-foreground">Rank by{" "}<select className={control} value={metric} onChange={(event) => { setMetric(event.target.value as PersonMetric); }}>
+                <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option><option value="requests">Native LLM records</option>
+              </select></label>
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">Each person or account has one total. Apps and platform keys are alternate breakdowns of that same total, not extra usage. System accounts and unknown ownership are separate from people.</p>
+            {shown.sources.key_name_enrichment && (shown.sources.key_name_enrichment.limit_reached || shown.sources.key_name_enrichment.lookup_failed) && <p role="status" className="mt-2 text-sm text-muted-foreground">
+              {shown.sources.key_name_enrichment.limit_reached && "The 5,000-key name lookup limit was reached. "}
+              {shown.sources.key_name_enrichment.lookup_failed && "Some key name lookups could not be completed. "}
+              Names were looked up for {count(shown.sources.key_name_enrichment.looked_up_keys)} of {count(shown.sources.key_name_enrichment.eligible_keys)} eligible keys; other names were not looked up. All recorded usage remains included; this does not change token or cost completeness.
+            </p>}
+            {["People", "System / service accounts", "Unresolved identities", "Unknown ownership"].map((group) => {
+              const members = visiblePeople.filter((person) => category(person) === group);
+              return members.length > 0 && <section key={group} className="mt-5" aria-label={group}>
+                {selected === "all" && <h3 className="font-semibold">{group}</h3>}
+                {members.map((person) => <details key={person.user_id ?? "unknown"} open={selected !== "all"} className="mt-3 rounded-lg border border-border p-3">
+                  <summary className="cursor-pointer">
+                    <span className="font-medium">{person.user_id === null ? "Unknown ownership" : label(person.user_id)}</span>
+                    {person.user_id !== null && <span className="ml-2 break-all text-xs text-muted-foreground">{person.user_id}</span>}
+                    <span className="mt-2 flex flex-wrap gap-4 text-sm">
+                      <span>Tokens: <AccountingValue metric={person.total.accounting?.tokens} reported={person.total.total_tokens} /></span>
+                      <span>USD: <AccountingValue metric={person.total.accounting?.cost_usd} reported={person.total.cost_usd} currency /></span>
+                      <span>Native LLM records: {count(person.total.requests)}</span>
+                    </span>
+                  </summary>
+                  {person.user_id === null && <p className="mt-3 text-sm text-muted-foreground">No recorded principal. This usage is not assigned to a person or a system account.</p>}
+                  <div className="mt-4 space-y-3">
+                    <SourceTable title="Originating apps" rows={person.apps} onSelect={person.user_id === null ? undefined : (source) => { selectSource(person, source); }} />
+                    <SourceTable title="Platform API keys" rows={person.credentials} credential onSelect={person.user_id === null ? undefined : (source) => { selectSource(person, source, true); }} />
+                  </div>
+                </details>)}
+              </section>;
+            })}
+            {visiblePeople.length < ranked.length && <button type="button" className="btn btn-outline mt-4" onClick={() => { setPersonLimit((limit) => limit + 20); }}>Show 20 more people or accounts ({count(visiblePeople.length)} of {count(ranked.length)} shown)</button>}
+            {ranked.length === 0 && <p className="mt-4 text-sm text-muted-foreground">No usage in this range.</p>}
+          </section>
           <section className={panel} aria-label="Usage by model">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-semibold">Models</h2>
@@ -326,35 +386,6 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               </table>
             </div>
           </section>
-
-          {isAdmin && selected === "all" && (
-            <section className={panel} aria-label="Usage per person">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="text-xl font-semibold">Usage per person</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">Top {count(Math.min(20, ranked.length))} of {count(ranked.length)} active users.</p></div>
-                <label className="text-xs text-muted-foreground">Rank by{" "}
-                  <select className={control} value={metric} onChange={(event) => { setMetric(event.target.value as PersonMetric); }}>
-                    <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option>
-                    <option value="requests">Native LLM records</option>
-                  </select>
-                </label>
-              </div>
-              <div className="mt-5 space-y-3">
-                {ranked.slice(0, 20).map((person) => (
-                  <button key={person.user_id} type="button" onClick={() => { setSelected(person.user_id); }}
-                    className="grid w-full items-center gap-2 text-left text-sm hover:text-primary sm:grid-cols-[minmax(8rem,13rem)_minmax(0,1fr)_6rem]"
-                    title={person.user_id}>
-                    <span className="truncate">{label(person.user_id)}</span>
-                     <span className="h-3 rounded-full bg-muted"><span className="block h-full rounded-full bg-primary"
-                      style={{ width: usageBarWidth(person[metric], ranked[0]?.[metric] ?? 0) }} /></span>
-                    <span className="text-right tabular-nums">{metric === "requests" ? count(person.requests) :
-                      <AccountingValue metric={person.accounting?.[metric === "cost_usd" ? "cost_usd" : "tokens"]} reported={person[metric]} currency={metric === "cost_usd"} />}</span>
-                  </button>
-                ))}
-                {ranked.length === 0 && <p className="text-sm text-muted-foreground">No attributed users in this range.</p>}
-              </div>
-            </section>
-          )}
 
           <section className={panel} aria-label="Usage trend">
             <div className="flex flex-wrap items-center justify-between gap-3">

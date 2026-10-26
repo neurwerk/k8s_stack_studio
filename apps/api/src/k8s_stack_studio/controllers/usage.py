@@ -17,6 +17,7 @@ from k8s_stack_studio.lib.dependencies import (
     get_current_user_id,
     require_role,
 )
+from k8s_stack_studio.lib.usage_names import resolve_usage_key_names
 from k8s_stack_studio.models.gateway_metadata import GatewayFilters, UsageQuery
 from k8s_stack_studio.models.usage import (
     DailyUsageResponse,
@@ -120,22 +121,28 @@ async def get_usage_people(
 @router.get("/{user_id}/usage/sources", response_model=UsageSourcesResponse)
 async def get_user_usage_sources(
     user_id: str,
+    request: Request,
     filters: Annotated[UsageQuery, Query()],
     _: None = Depends(_require_self_or_usage_admin),
     agentgateway: AgentGatewayClient = Depends(get_agentgateway),
 ) -> UsageSourcesResponse:
     """Return a user's originating apps and platform key totals, never key secrets."""
-    return await _source_breakdown(agentgateway, user_id, filters)
+    result = await _source_breakdown(agentgateway, user_id, filters)
+    await resolve_usage_key_names(result, request)
+    return result
 
 
 @aggregate_router.get("/sources", response_model=UsageSourcesResponse)
 async def get_all_usage_sources(
+    request: Request,
     filters: Annotated[UsageQuery, Query()],
     _: None = Depends(require_role("langfuse-admin")),
     agentgateway: AgentGatewayClient = Depends(get_agentgateway),
 ) -> UsageSourcesResponse:
     """Only usage admins may aggregate origins and keys across principals."""
-    return await _source_breakdown(agentgateway, None, filters)
+    result = await _source_breakdown(agentgateway, None, filters)
+    await resolve_usage_key_names(result, request)
+    return result
 
 
 async def _source_breakdown(
