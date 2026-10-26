@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Rectangle, ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -48,34 +48,9 @@ const appLabels = new Map<string, string>([
   ["dify", "Dify"],
 ]);
 
-function SourceTable({ title, rows, credential, onSelect }: {
-  title: string; rows: UsageSource[]; credential?: boolean; onSelect?: (source: UsageSource) => void;
-}) {
-  return <section className={panel} aria-label={title}>
-    <h2 className="text-xl font-semibold">{title}</h2>
-    <p className="mt-2 text-xs text-muted-foreground">{credential
-      ? "Current saved key names, with stable IDs below; never secrets. Unavailable keys may be revoked, removed or inaccessible."
-      : "Verified OIDC client IDs, not caller headers. Missing app attribution is shown as no recorded app."} {onSelect && "Select a row to filter usage."}</p>
-    <div className="mt-4 overflow-x-auto">
-      <table className="table w-full min-w-[560px] text-left text-sm">
-        <thead><tr><th className="py-3">{credential ? "Platform API key" : "Originating app"}</th>
-          <th className="px-3 text-right">Tokens</th><th className="px-3 text-right">Cost (USD)</th>
-          <th className="pl-3 text-right">Native LLM records</th></tr></thead>
-        <tbody>{rows.map((row) => <tr key={JSON.stringify([row.id, row.kind])} className="border-t border-border">
-          <td className="max-w-sm break-all py-3 pr-3">{row.id === null
-            ? (credential ? "No recorded platform key" : "No recorded app")
-            : <button type="button" disabled={!onSelect} className="text-left text-primary underline disabled:text-foreground disabled:no-underline" onClick={() => { onSelect?.(row); }}>
-              {credential ? row.name ?? (row.name_status === "not_looked_up" ? "Name not looked up" : "Unavailable key") : appLabels.get(row.id) ?? row.id}
-              {credential && <span className="mt-1 block text-xs text-muted-foreground">{row.kind === "personal" ? "Personal key" : row.kind === "managed" ? "Managed key" : "Unknown key kind"} · {row.id}</span>}
-              {!credential && appLabels.has(row.id) && <span className="ml-2 text-xs text-muted-foreground">({row.id})</span>}
-            </button>}</td>
-          <td className="px-3 text-right"><AccountingValue metric={row.accounting?.tokens} reported={row.total_tokens} /></td>
-          <td className="px-3 text-right"><AccountingValue metric={row.accounting?.cost_usd} reported={row.cost_usd} currency /></td>
-          <td className="pl-3 text-right">{count(row.requests)}</td>
-        </tr>)}{rows.length === 0 && <tr><td colSpan={4} className="py-6 text-muted-foreground">No usage in this range.</td></tr>}</tbody>
-      </table>
-    </div>
-  </section>;
+function sourceLabel(source: UsageSource): string {
+  if (source.kind === "app") return source.id ? appLabels.get(source.id) ?? source.id : "Unknown app";
+  return source.name ?? (source.id ? `API key ${source.id}` : "No recorded app or API key");
 }
 
 export default function UsagePage() {
@@ -96,6 +71,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [draftEnd, setDraftEnd] = useState("");
   const [metric, setMetric] = useState<PersonMetric>("cost_usd");
   const [modelMetric, setModelMetric] = useState<PersonMetric>("cost_usd");
+  const [originMetric, setOriginMetric] = useState<PersonMetric>("cost_usd");
   const [trendMetric, setTrendMetric] = useState<PersonMetric>("cost_usd");
   const [refresh, setRefresh] = useState(0);
   const [result, setResult] = useState<UsageResult>();
@@ -103,6 +79,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [identities, setIdentities] = useState<Record<string, "human" | "service">>({});
   const [directory, setDirectory] = useState<UsagePersonSources[]>([]);
   const [personLimit, setPersonLimit] = useState(20);
+  const [expandedPerson, setExpandedPerson] = useState<string | null>(null);
   const resolvedProfiles = useRef(new Set<string>());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -199,11 +176,9 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     if (canReadNames && identities[person.user_id] === "human") return "People";
     return "Unresolved identities";
   };
-  const selectSource = (person: UsagePersonSources, source: UsageSource, credential = false) => {
-    if (source.id === null || person.user_id === null) return;
-    setSelected(person.user_id);
-    setFilters(credential ? { ...filters, credential_id: source.id, credential_kind: source.kind === "personal" || source.kind === "managed" ? source.kind : "" } : { ...filters, app_id: source.id });
-  };
+  const maxPersonMetric = ranked[0]?.total[metric] ?? 0;
+  const origins = [...(shown?.sources.origins ?? [])].sort((a, b) => b[originMetric] - a[originMetric]);
+  const maxOriginMetric = origins[0]?.[originMetric] ?? 0;
 
   return (
     <main className="mx-auto max-w-[1600px] space-y-5 p-4 sm:p-6">
@@ -316,40 +291,81 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                 <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option><option value="requests">Native LLM records</option>
               </select></label>
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">Each person or account has one total. Apps and platform keys are alternate breakdowns of that same total, not extra usage. System accounts and unknown ownership are separate from people.</p>
+            <p className="mt-2 text-sm text-muted-foreground">Select a person to see their originating apps and platform API keys. Each is a separate breakdown of the same usage; do not add them together.</p>
             {shown.sources.key_name_enrichment && (shown.sources.key_name_enrichment.limit_reached || shown.sources.key_name_enrichment.lookup_failed) && <p role="status" className="mt-2 text-sm text-muted-foreground">
               {shown.sources.key_name_enrichment.limit_reached && "The 5,000-key name lookup limit was reached. "}
               {shown.sources.key_name_enrichment.lookup_failed && "Some key name lookups could not be completed. "}
               Names were looked up for {count(shown.sources.key_name_enrichment.looked_up_keys)} of {count(shown.sources.key_name_enrichment.eligible_keys)} eligible keys; other names were not looked up. All recorded usage remains included; this does not change token or cost completeness.
             </p>}
-            {["People", "System / service accounts", "Unresolved identities", "Unknown ownership"].map((group) => {
-              const members = visiblePeople.filter((person) => category(person) === group);
-              return members.length > 0 && <section key={group} className="mt-5" aria-label={group}>
-                {selected === "all" && <h3 className="font-semibold">{group}</h3>}
-                {members.map((person) => <details key={person.user_id ?? "unknown"} open={selected !== "all"} className="mt-3 rounded-lg border border-border p-3">
-                  <summary className="cursor-pointer">
-                    <span className="font-medium">{person.user_id === null ? "Unknown ownership" : label(person.user_id)}</span>
-                    {person.user_id !== null && <span className="ml-2 break-all text-xs text-muted-foreground">{person.user_id}</span>}
-                    <span className="mt-2 flex flex-wrap gap-4 text-sm">
-                      <span>Tokens: <AccountingValue metric={person.total.accounting?.tokens} reported={person.total.total_tokens} /></span>
-                      <span>USD: <AccountingValue metric={person.total.accounting?.cost_usd} reported={person.total.cost_usd} currency /></span>
-                      <span>Native LLM records: {count(person.total.requests)}</span>
-                    </span>
-                  </summary>
-                  {person.user_id === null && <p className="mt-3 text-sm text-muted-foreground">No recorded principal. This usage is not assigned to a person or a system account.</p>}
-                  <div className="mt-4 space-y-3">
-                    <SourceTable title="Originating apps" rows={person.apps} onSelect={person.user_id === null ? undefined : (source) => { selectSource(person, source); }} />
-                    <SourceTable title="Platform API keys" rows={person.credentials} credential onSelect={person.user_id === null ? undefined : (source) => { selectSource(person, source, true); }} />
-                  </div>
-                </details>)}
-              </section>;
-            })}
+            <div className="mt-5 overflow-x-auto"><table className="table w-full min-w-[640px] text-left text-sm">
+              <thead className="border-b border-border text-xs uppercase text-muted-foreground"><tr>
+                <th className="py-3 pr-4">Person or account</th><th className="px-3 text-right">Tokens</th>
+                <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">Native LLM records</th>
+              </tr></thead><tbody>{visiblePeople.map((person) => {
+                const id = person.user_id ?? "unknown";
+                const expanded = expandedPerson === id;
+                return <Fragment key={id}><tr className="border-b border-border/70">
+                  <td className="max-w-xs py-3 pr-4 font-medium"><button type="button" aria-expanded={expanded}
+                    className="w-full text-left hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                    onClick={() => { setExpandedPerson(expanded ? null : id); }}>
+                    <span className="break-all">{person.user_id === null ? "Unknown ownership" : label(person.user_id)}</span>
+                    <span className="ml-2 text-xs text-muted-foreground" aria-hidden="true">{expanded ? "▴" : "▾"}</span>
+                    <span className="mt-2 block h-1.5 rounded-full bg-muted"><span className="block h-full rounded-full bg-primary"
+                      style={{ width: usageBarWidth(person.total[metric], maxPersonMetric) }} /></span>
+                  </button></td>
+                  <td className="px-3 text-right tabular-nums"><AccountingValue metric={person.total.accounting?.tokens} reported={person.total.total_tokens} /></td>
+                  <td className="px-3 text-right tabular-nums"><AccountingValue metric={person.total.accounting?.cost_usd} reported={person.total.cost_usd} currency /></td>
+                  <td className="pl-3 text-right tabular-nums">{count(person.total.requests)}</td>
+                </tr>{expanded && <tr className="border-b border-border/70 bg-muted/30"><td colSpan={4} className="p-4">
+                   <p className="mb-2 text-sm font-medium">Originating apps</p>
+                   {person.apps.length ? <table className="table w-full text-left text-sm"><thead><tr>
+                     <th>App</th><th className="text-right">Tokens</th><th className="text-right">Cost (USD)</th><th className="text-right">Native LLM records</th>
+                   </tr></thead><tbody>{person.apps.map((app) => <tr key={app.id ?? "unknown"}>
+                     <td className="break-all">{app.id ? appLabels.get(app.id) ?? app.id : "No recorded app"}</td>
+                     <td className="text-right tabular-nums"><AccountingValue metric={app.accounting?.tokens} reported={app.total_tokens} /></td>
+                     <td className="text-right tabular-nums"><AccountingValue metric={app.accounting?.cost_usd} reported={app.cost_usd} currency /></td>
+                     <td className="text-right tabular-nums">{count(app.requests)}</td>
+                   </tr>)}</tbody></table> : <p className="text-sm text-muted-foreground">No originating app recorded for this usage.</p>}
+                   <p className="mb-2 mt-5 text-sm font-medium">Platform API keys</p>
+                   <p className="mb-2 text-xs text-muted-foreground">No recorded API key can mean an OIDC-authenticated request or missing key attribution in older records.</p>
+                  {person.credentials.length ? <table className="table w-full text-left text-sm"><thead><tr>
+                    <th>API key</th><th className="text-right">Tokens</th><th className="text-right">Cost (USD)</th><th className="text-right">Native LLM records</th>
+                  </tr></thead><tbody>{person.credentials.map((key) => <tr key={JSON.stringify([key.id, key.kind])}>
+                    <td className="break-all">{key.id ? sourceLabel(key) : "No recorded API key"}{key.id && key.name && <span className="ml-2 text-xs text-muted-foreground">{key.id}</span>}</td>
+                    <td className="text-right tabular-nums"><AccountingValue metric={key.accounting?.tokens} reported={key.total_tokens} /></td>
+                    <td className="text-right tabular-nums"><AccountingValue metric={key.accounting?.cost_usd} reported={key.cost_usd} currency /></td>
+                    <td className="text-right tabular-nums">{count(key.requests)}</td>
+                  </tr>)}</tbody></table> : <p className="text-sm text-muted-foreground">No API key recorded for this usage.</p>}
+                </td></tr>}</Fragment>;
+              })}{ranked.length === 0 && <tr><td colSpan={4} className="py-8 text-center text-muted-foreground">No usage in this range.</td></tr>}</tbody>
+            </table></div>
             {visiblePeople.length < ranked.length && <button type="button" className="btn btn-outline mt-4" onClick={() => { setPersonLimit((limit) => limit + 20); }}>Show 20 more people or accounts ({count(visiblePeople.length)} of {count(ranked.length)} shown)</button>}
-            {ranked.length === 0 && <p className="mt-4 text-sm text-muted-foreground">No usage in this range.</p>}
+          </section>
+          <section className={panel} aria-label="Usage per app">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold">Usage per app</h2>
+              <label className="text-xs text-muted-foreground">Rank by{" "}<select className={control} value={originMetric} onChange={(event) => { setOriginMetric(event.target.value as PersonMetric); }}>
+                <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option><option value="requests">Native LLM records</option>
+              </select></label>
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">Verified originating app when recorded; otherwise the platform API key name and ID. Each record appears once.</p>
+            <div className="mt-5 overflow-x-auto"><table className="table w-full min-w-[640px] text-left text-sm">
+              <thead className="border-b border-border text-xs uppercase text-muted-foreground"><tr>
+                <th className="py-3 pr-4">App or API key</th><th className="px-3 text-right">Tokens</th><th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">Native LLM records</th>
+              </tr></thead><tbody>{origins.map((origin) => <tr key={JSON.stringify([origin.id, origin.kind])} className="border-b border-border/70 last:border-0">
+                <td className="max-w-xs py-3 pr-4 font-medium"><span className="break-all">{origin.kind === "app" ? sourceLabel(origin) : origin.id ? origin.name ?? "API key name unavailable" : "No recorded app or API key"}</span>
+                  {origin.kind !== "app" && origin.id && <span className="ml-2 break-all text-xs font-normal text-muted-foreground">(ID: {origin.id})</span>}
+                  <div className="mt-2 h-1.5 rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: usageBarWidth(origin[originMetric], maxOriginMetric) }} /></div>
+                </td>
+                <td className="px-3 text-right tabular-nums"><AccountingValue metric={origin.accounting?.tokens} reported={origin.total_tokens} /></td>
+                <td className="px-3 text-right tabular-nums"><AccountingValue metric={origin.accounting?.cost_usd} reported={origin.cost_usd} currency /></td>
+                <td className="pl-3 text-right tabular-nums">{count(origin.requests)}</td>
+              </tr>)}{origins.length === 0 && <tr><td colSpan={4} className="py-8 text-center text-muted-foreground">No usage in this range.</td></tr>}</tbody>
+            </table></div>
           </section>
           <section className={panel} aria-label="Usage by model">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-xl font-semibold">Models</h2>
+              <h2 className="text-xl font-semibold">Usage per model</h2>
               <label className="text-xs text-muted-foreground">Rank by{" "}
                 <select className={control} value={modelMetric}
                   onChange={(event) => { setModelMetric(event.target.value as PersonMetric); }}>

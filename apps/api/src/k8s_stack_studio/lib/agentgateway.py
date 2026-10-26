@@ -190,6 +190,7 @@ class AgentGatewayClient:
         until = min(midnights[-1], now)
         apps: dict[str | None, UsageSource] = {}
         credentials: dict[tuple[str | None, str | None], UsageSource] = {}
+        origins: dict[tuple[str | None, str | None], UsageSource] = {}
         people: dict[str | None, UsagePersonSources] = {}
         person_apps: dict[tuple[str | None, str | None], UsageSource] = {}
         person_keys: dict[tuple[str | None, str | None, str | None], UsageSource] = {}
@@ -222,6 +223,12 @@ class AgentGatewayClient:
                 credentials.setdefault(
                     key, UsageSource(id=group.credential_id, kind=group.credential_kind)
                 ).add(item)
+                origin = (
+                    (group.app_id, "app")
+                    if group.app_id is not None
+                    else (group.credential_id, group.credential_kind)
+                )
+                origins.setdefault(origin, UsageSource(id=origin[0], kind=origin[1])).add(item)
                 owner = user_id if user_id is not None else group.user_id
                 person = people.setdefault(owner, UsagePersonSources(user_id=owner))
                 person.total.add(item)
@@ -244,6 +251,10 @@ class AgentGatewayClient:
             apps=sorted(apps.values(), key=lambda item: (-item.total_tokens, item.id or "")),
             credentials=sorted(
                 credentials.values(),
+                key=lambda item: (-item.total_tokens, item.id or "", item.kind or ""),
+            ),
+            origins=sorted(
+                origins.values(),
                 key=lambda item: (-item.total_tokens, item.id or "", item.kind or ""),
             ),
             people=sorted(
