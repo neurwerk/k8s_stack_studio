@@ -709,24 +709,27 @@ async def test_simulator_requires_nonempty_user_text_and_codex_input(simulator):
 
 
 @pytest.mark.parametrize("published", [None, "disabled", "missing", "configured"])
-def test_company_configuration_is_optional_and_not_health(projection, tmp_path, published):
+def test_global_configuration_is_optional_and_not_health(projection, tmp_path, published):
     data = catalog()
     entry = data["external-subscription-providers"][0]
     if published is not None:
-        entry["company_credential_status"] = published
+        entry["global_credential_status"] = published
     (tmp_path / "catalog.json").write_text(json.dumps(data))
     (tmp_path / "status.json").unlink()
     view = gateway.gateway_view(projection, frozenset(), administrator=True)
-    assert view.catalog.external_subscription_providers[0].company_credential_status == published
+    assert view.catalog.external_subscription_providers[0].global_credential_status == published
+    serialized = view.catalog.model_dump(mode="json", by_alias=True)
+    assert serialized["external-subscription-providers"][0]["global_credential_status"] == published
+    assert "company_credential_status" not in json.dumps(serialized)
     assert view.status.reason == "missing"
     assert all(item.state == "unknown" for item in view.status.endpoints)
     assert gateway.gateway_view(projection, frozenset()).catalog.destinations == []
 
 
 @pytest.mark.parametrize("invalid", [True, 1, [], {}, "unknown", "available", "CONFIGURED"])
-def test_invalid_company_configuration_fails_closed(projection, tmp_path, invalid):
+def test_invalid_global_configuration_fails_closed(projection, tmp_path, invalid):
     data = catalog()
-    data["external-subscription-providers"][0]["company_credential_status"] = invalid
+    data["external-subscription-providers"][0]["global_credential_status"] = invalid
     (tmp_path / "catalog.json").write_text(json.dumps(data))
     with pytest.raises(GatewayUnavailableError):
         gateway.gateway_view(projection, frozenset(), administrator=True)
@@ -734,24 +737,24 @@ def test_invalid_company_configuration_fails_closed(projection, tmp_path, invali
 
 @pytest.mark.parametrize("published", ["disabled", "missing", "configured"])
 @pytest.mark.parametrize("destination_access", [False, True])
-@pytest.mark.parametrize("company_access", [False, True])
-def test_company_configuration_requires_both_grants(published, destination_access, company_access):
+@pytest.mark.parametrize("global_access", [False, True])
+def test_global_configuration_requires_both_grants(published, destination_access, global_access):
     data = catalog()
     entry = data["external-subscription-providers"][0]
-    entry.update(provider_id="example", company_credential_status=published)
+    entry.update(provider_id="example", global_credential_status=published)
     destination = entry["destinations"][0]
     destination["provider_id"] = "example"
     permissions = set(destination["required_permissions"]) if destination_access else set()
-    if company_access:
+    if global_access:
         permissions.add("provider:example:company-use")
     filtered = gateway._entitled(GatewayCatalog.model_validate(data), frozenset(permissions))
     if not destination_access:
         assert filtered.destinations == []
         assert filtered.external_subscription_providers == []
     else:
-        assert filtered.external_subscription_providers[0].company_credential_status == (
-            published if company_access else None
+        assert filtered.external_subscription_providers[0].global_credential_status == (
+            published if global_access else None
         )
         assert {mode.source for mode in filtered.destinations[0].credential_modes} == (
-            {"caller_supplied", "company"} if company_access else {"caller_supplied"}
+            {"caller_supplied", "company"} if global_access else {"caller_supplied"}
         )
