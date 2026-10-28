@@ -5,7 +5,7 @@
   "self-hosted-api-providers": [
     {
       "id": "local", "provider_id": "local", "display_name": "Local sample model",
-      "company_credential_status": "disabled",
+      "global_credential_status": "disabled",
       "routes": [{"id": "api-local", "url": "http://localhost:4010/local/api/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer"]}],
       "destinations": [{
         "id": "demo-model", "model": "demo-model", "kind": "model", "display_name": "Synthetic local model", "provider_id": "local",
@@ -18,7 +18,7 @@
   "external-api-providers": [
     {
       "id": "openrouter", "provider_id": "openrouter", "display_name": "OpenRouter sample",
-      "company_credential_status": "configured",
+      "global_credential_status": "configured",
       "routes": [{"id": "api-openrouter", "url": "http://localhost:4010/openrouter/api/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer"]}],
       "destinations": [{
         "id": "remote/openrouter/deepseek/deepseek-v4-flash-0731", "model": "remote/openrouter/deepseek/deepseek-v4-flash-0731", "kind": "model", "display_name": "DeepSeek Flash sample", "provider_id": "openrouter",
@@ -29,7 +29,7 @@
     },
     {
       "id": "openai-model", "provider_id": "openai", "display_name": "OpenAI API sample",
-      "company_credential_status": "configured",
+      "global_credential_status": "configured",
       "routes": [{"id": "api-openai-model", "url": "http://localhost:4010/openai/model/v1", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer"]}],
       "destinations": [{
         "id": "demo-openai-api", "model": "demo-openai-api", "kind": "model", "display_name": "Synthetic OpenAI API model", "provider_id": "openai",
@@ -40,7 +40,7 @@
     },
     {
       "id": "openai-web", "provider_id": "openai", "display_name": "OpenAI web API sample",
-      "company_credential_status": "disabled",
+      "global_credential_status": "disabled",
       "routes": [{"id": "api-openai-web", "url": "http://localhost:4010/openai/api", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer"]}],
       "destinations": [{
         "id": "demo-openai-web", "kind": "application", "display_name": "Synthetic web API", "provider_id": "openai",
@@ -53,7 +53,7 @@
   "external-subscription-providers": [
     {
       "id": "openai-codex", "provider_id": "openai", "display_name": "Codex sample",
-      "company_credential_status": "disabled",
+      "global_credential_status": "disabled",
       "routes": [{"id": "api-codex", "url": "http://localhost:4010/openai/codex/v1/responses", "entry_mode": "api", "caller_auth_modes": ["neurwerk_bearer"]}],
       "destinations": [{
         "id": "demo-codex", "model": "demo-codex", "kind": "model", "display_name": "Synthetic Codex model", "provider_id": "openai",

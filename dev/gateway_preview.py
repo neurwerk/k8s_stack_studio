@@ -170,8 +170,8 @@ def _destination(
     if source == "company":
         if f"provider:{entry.provider_id}:company-use" not in principal.agentgateway_roles:
             raise HTTPException(403, "Missing sample company-use permission")
-        if entry.company_credential_status != "configured":
-            raise HTTPException(409, "Sample company credential not configured")
+        if entry.global_credential_status != "configured":
+            raise HTTPException(409, "Sample global credential not configured")
     return destination
 
 
