@@ -102,7 +102,9 @@ function endpointSpec(view: GatewayView) {
       const hasOverride = destinations.some((destination) => destination.kind === "model" &&
         destination.credential_modes.some((mode) => mode.source === "override"));
       const hasGlobal = destinations.some((destination) => destination.kind === "model" &&
-        destination.credential_modes.some((mode) => mode.source === "global"));
+        destination.credential_modes.some((mode) => mode.source === "global")) && entry.global_credential_status === "configured";
+      const hasNone = destinations.some((destination) => destination.credential_modes.some((mode) => mode.source === "none"));
+      const providerOptional = hasGlobal || hasNone;
       const providerHeader = profileIds.has("anthropic-messages-v1") ? "x-api-key" :
         ["openai-chat-completions-v1", "openai-responses-v1", "openai-codex-responses-v1"].some((profile) => profileIds.has(profile)) ? "Authorization" : null;
       const credentialName = profileIds.has("openai-codex-responses-v1") ? "CodexSubscriptionSession" :
@@ -116,28 +118,36 @@ function endpointSpec(view: GatewayView) {
           ...(providerHeader === "Authorization" ? { type: "http", scheme: "bearer" } :
             { type: "apiKey", in: "header", name: providerHeader }),
           "x-studio-label": codex ? "Codex bearer token (required for Codex)" :
-            `${providerName} API key (${hasGlobal ? "optional" : "required"})`,
+            `${providerName} API key (${providerOptional ? "required for override" : "required for invocation"})`,
           description: codex
             ? "Use a Codex session token from ChatGPT sign-in. [Learn about sign-in](https://developers.openai.com/codex/auth)."
-            : `Use a custom ${providerName} API key ${hasGlobal ? "instead of the globally set credential" : "for this binding"}.${keyPage ? ` [Create an API key](${keyPage}).` : ""}${hasGlobal ? "  \nOptional when a global credential is set. An invalid key does not fall back to the global credential." : ""}`,
+            : `Required for override invocation, not model discovery. Global mode requires a configured global credential and permission; none mode uses no provider credential.${keyPage ? ` [Create an API key](${keyPage}).` : ""} An invalid key does not fall back to the global credential.`,
         };
       }
       for (const operation of operations(destinations, view.catalog.profiles)) {
         const path = operation.path === "/responses" && basePath.endsWith("/responses") ? basePath : `${basePath}${operation.path}`;
         const parameters = [...(operation.parameters ?? []), ...(operation.path === "/models/{model}" ? [{ name: "model", in: "path", required: true, schema: { type: "string", enum: destinations.filter((destination) => destination.kind === "model").map((destination) => destination.model ?? destination.id) } }] : [])];
+        if (route.credential_mode_header) {
+          parameters.push({
+            name: route.credential_mode_header, in: "header", required: false,
+            "x-fill-example": "no",
+            schema: { type: "string", enum: destinations.some((destination) => destination.kind === "mcp") ? ["none"] : ["global", "none", "override"] },
+            description: "Leave unset to preserve automatic credential selection. An explicit mode requires X-Neurwerk-Authorization and must be allowed for the destination and caller. Global requires a configured global credential; none uses no provider credential; override requires a provider credential for invocation only, never for model discovery. No fallback to another mode.",
+          });
+        }
         paths[path] ??= {};
         paths[path][operation.method] = {
           tags: [tag], summary: `${entry.display_name} · ${operation.summary}`,
           description: [operation.description,
             proxyRoute && profileIds.has("openai-codex-responses-v1") && operation.path === "/responses"
               ? `**Also available through the inspected forward proxy**\n\nKeep the original Codex request URL and configure your client to use \`${proxyRoute.url}\` as its HTTPS proxy. Use a Neurwerk API key as the proxy password; Codex authentication stays with the client. [Proxy setup and certificate](/forward-proxy).` : undefined,
-            providerScheme && operation.method === "post" && !hasGlobal && !profileIds.has("openai-codex-responses-v1")
+            providerScheme && operation.method === "post" && !providerOptional && !profileIds.has("openai-codex-responses-v1")
               ? "A provider API key is required for this operation. Enter it in Authentication above the operations." : undefined,
              ...(group === "mcp-servers" ? [] : limitations)].filter(Boolean).join("\n\n"),
           operationId: `${entry.id}-${operation.method}-${path}`,
           servers: [{ url: url.origin }], parameters,
           ...(providerScheme && operation.method === "post" ? {
-            security: hasGlobal ? [{ NeurwerkKey: [], [providerScheme]: [] }, { NeurwerkKey: [] }] :
+            security: providerOptional ? [{ NeurwerkKey: [], [providerScheme]: [] }, { NeurwerkKey: [] }] :
               [{ NeurwerkKey: [], [providerScheme]: [] }],
           } : {}),
           ...(operation.body ? { requestBody: operation.body } : {}),

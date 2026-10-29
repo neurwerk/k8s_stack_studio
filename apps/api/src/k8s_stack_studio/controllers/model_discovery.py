@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -10,12 +12,26 @@ from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.dependencies import get_settings
 from k8s_stack_studio.lib.gateway import gateway_view
 from k8s_stack_studio.lib.gateway_files import GatewayUnavailableError
+from k8s_stack_studio.models.gateway import CredentialSource
 
 router = APIRouter()
 NO_STORE = {"Cache-Control": "no-store"}
 
 
-async def _permissions(request: Request, settings: Settings, binding_id: str) -> frozenset[str]:
+def _credential_mode(request: Request) -> CredentialSource | None:
+    """An explicit selector is one exact lowercase value, with HTTP whitespace allowed."""
+    values = request.headers.getlist("x-neurwerk-credential-mode")
+    if not values:
+        return None
+    value = values[0].strip(" \t")
+    if len(values) != 1 or value not in {"global", "none", "override"}:
+        raise HTTPException(400, "Invalid credential mode", headers=NO_STORE)
+    return cast(CredentialSource, value)
+
+
+async def _permissions(
+    request: Request, settings: Settings, binding_id: str, *, dedicated_required: bool = False
+) -> frozenset[str]:
     """Ask the Bridge to verify the original credential, not a caller's role header."""
     headers: dict[str, str] = {}
     dedicated = request.headers.getlist("x-neurwerk-authorization")
@@ -24,6 +40,8 @@ async def _permissions(request: Request, settings: Settings, binding_id: str) ->
             raise HTTPException(401, "Invalid authentication credentials", headers=NO_STORE)
         headers["x-neurwerk-authorization"] = dedicated[0]
     else:
+        if dedicated_required:
+            raise HTTPException(401, "Missing authentication credentials", headers=NO_STORE)
         bearer = request.headers.getlist("authorization")
         if len(bearer) != 1:
             raise HTTPException(401, "Missing authentication credentials", headers=NO_STORE)
@@ -59,7 +77,10 @@ async def models(
     settings: Settings = Depends(get_settings),
 ) -> JSONResponse:
     """Discover only models owned by the fixed, trusted route binding."""
-    permissions = await _permissions(request, settings, binding_id)
+    selected = _credential_mode(request)
+    permissions = await _permissions(
+        request, settings, binding_id, dedicated_required=selected is not None
+    )
     if "llm:invoke" not in permissions:
         raise HTTPException(403, "Model access denied", headers=NO_STORE)
     try:
@@ -77,11 +98,26 @@ async def models(
     if entry is None:
         raise HTTPException(404, "Model not found", headers=NO_STORE)
     api_routes = {route.id for route in entry.routes if route.entry_mode == "api"}
+    if selected is not None:
+        api_routes = {
+            route.id
+            for route in entry.routes
+            if route.entry_mode == "api" and route.credential_mode_header is not None
+        }
+        if not api_routes:
+            raise HTTPException(400, "Unsupported credential mode", headers=NO_STORE)
     data = [
         {"id": item.id, "object": "model", "created": 0, "owned_by": "neurwerk"}
         for item in entry.destinations
         if item.kind == "model"
         and item.credential_modes
+        and (
+            selected is None
+            or (
+                any(mode.source == selected for mode in item.credential_modes)
+                and (selected != "global" or entry.global_credential_status == "configured")
+            )
+        )
         and api_routes.intersection(item.endpoint_ids)
     ]
     if model is None:

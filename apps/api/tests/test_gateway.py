@@ -122,6 +122,49 @@ def projection(tmp_path):
     )
 
 
+@pytest.mark.parametrize("header", [None, "X-Neurwerk-Credential-Mode"])
+def test_route_credential_selector_does_not_expand_permissions(header):
+    data = catalog()
+    route = data["external-subscription-providers"][0]["routes"][0]
+    route.update(entry_mode="api", caller_auth_modes=["neurwerk_bearer"])
+    if header is not None:
+        route["credential_mode_header"] = header
+    parsed = GatewayCatalog.model_validate(data)
+    filtered = gateway._entitled(parsed, frozenset({"llm:invoke", "application:visible:invoke"}))
+    entry = filtered.external_subscription_providers[0]
+    assert [mode.source for mode in entry.destinations[0].credential_modes] == ["override"]
+    assert entry.routes[0].credential_mode_header == header
+
+
+@pytest.mark.parametrize("kind", ["application", "mcp"])
+def test_route_credential_selector_optional_and_mcp_none(kind):
+    data = catalog()
+    entry = data["external-subscription-providers"][0]
+    entry["destinations"][0]["kind"] = kind
+    entry["destinations"][0]["credential_modes"] = [{"source": "none", "required_permissions": []}]
+    for header in (None, "X-Neurwerk-Credential-Mode"):
+        entry["routes"][0].update(entry_mode="api", credential_mode_header=header)
+        GatewayCatalog.model_validate(data)
+
+
+@pytest.mark.parametrize(
+    "header,entry_mode",
+    [
+        ("Other", "api"),
+        ("x-neurwerk-credential-mode", "api"),
+        (True, "api"),
+        ({"header": "X-Neurwerk-Credential-Mode"}, "api"),
+        ("X-Neurwerk-Credential-Mode", "forward_proxy"),
+    ],
+)
+def test_route_credential_selector_rejects_malformed_or_incompatible(header, entry_mode):
+    data = catalog()
+    entry = data["external-subscription-providers"][0]
+    entry["routes"][0].update(entry_mode=entry_mode, credential_mode_header=header)
+    with pytest.raises(ValueError):
+        GatewayCatalog.model_validate(data)
+
+
 def test_environment_path_contract(monkeypatch):
     monkeypatch.setenv("STUDIO_GATEWAY_CATALOG_FILE", "/public/catalog.json")
     monkeypatch.setenv("STUDIO_GATEWAY_STATUS_FILE", "/public/status.json")
