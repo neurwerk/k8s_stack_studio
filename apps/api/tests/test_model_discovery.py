@@ -14,7 +14,7 @@ from k8s_stack_studio.lib.dependencies import get_settings
 @pytest.mark.parametrize("group", ["self-hosted-api-providers", "external-api-providers"])
 async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
     catalog = {
-        "schema_version": 2,
+        "schema_version": 3,
         "catalog_revision": "current",
         "policy_revision": "current",
         "endpoints": [
@@ -24,7 +24,7 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
                 "entry_mode": "api",
                 "caller_auth_modes": ["neurwerk_bearer"],
             }
-            for name in ("api-local", "api-company")
+            for name in ("api-local", "api-global")
         ],
         "destinations": [
             {
@@ -35,14 +35,14 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
                 "profile_ids": [],
                 "required_permissions": ["llm:invoke", f"model:{name}:invoke"],
                 "credential_modes": [
-                    {"source": "caller_supplied", "required_permissions": mode_permissions}
+                    {"source": "override", "required_permissions": mode_permissions}
                 ],
             }
             for name, endpoint, mode_permissions in (
                 ("local/visible", "api-local", []),
                 ("local/hidden", "api-local", []),
-                ("local/no-mode", "api-local", ["provider:private:company-use"]),
-                ("company/visible", "api-company", []),
+                ("local/no-mode", "api-local", ["provider:private:global-use"]),
+                ("global/visible", "api-global", []),
             )
         ],
         "profiles": [],
@@ -92,7 +92,7 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
                     "llm:invoke",
                     "model:local/visible:invoke",
                     "model:local/no-mode:invoke",
-                    "model:company/visible:invoke",
+                    "model:global/visible:invoke",
                 ]
             },
         )
@@ -106,10 +106,10 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
                 "X-Neurwerk-Authorization": "Bearer test-key",
                 "X-Roles": "admin",
                 "Authorization": "Bearer upstream-must-not-be-forwarded",
-                "X-Binding-Id": "api-company",
+                "X-Binding-Id": "api-global",
             }
             listed = await client.get(
-                "/gateway/model-discovery/api-local/models?binding_id=api-company", headers=headers
+                "/gateway/model-discovery/api-local/models?binding_id=api-global", headers=headers
             )
             assert listed.status_code == 200
             assert listed.headers["cache-control"] == "no-store"
@@ -133,7 +133,7 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
             assert hidden.status_code == 404
             assert hidden.headers["cache-control"] == "no-store"
             cross_binding = await client.get(
-                "/gateway/model-discovery/api-local/models/company%2Fvisible", headers=headers
+                "/gateway/model-discovery/api-local/models/global%2Fvisible", headers=headers
             )
             assert (cross_binding.status_code, cross_binding.json()) == (404, hidden.json())
             encoded_twice = await client.get(

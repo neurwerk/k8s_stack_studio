@@ -234,7 +234,7 @@ export function ApiKeyManager({ userId, canManage, isSelf = false, noticeAvailab
       </div>
 
       <p className="mb-4 text-sm text-muted-foreground">
-        These keys identify callers to the AI Gateway. Personal or company provider credentials are separate.
+        These keys identify callers to the AI Gateway. Global or override provider credentials are separate.
         Each key retains its own permission grants, expiry and revocation.
       </p>
 

@@ -153,11 +153,40 @@ async def test_personal_activity_boundary(activity_api):
 
 
 @pytest.mark.parametrize(
+    "source,billing", [("company", "company_api"), ("caller_supplied", "personal_api")]
+)
+async def test_historical_credential_metadata_remains_readable(activity_api, source, billing):
+    client, calls, state = activity_api
+    row = observation("historical")
+    row["metadata"] = {
+        "neurwerk.provider_credential_source": source,
+        "neurwerk.target_credential_mode": source,
+        "neurwerk.billing_classification": billing,
+        "neurwerk.cost_known": False,
+    }
+    state["result"] = httpx.Response(200, json={"data": [row]})
+    result = await client.post("/api/me/llm-activity", json={})
+    assert result.status_code == 200
+    metadata = result.json()[0]["gateway"]
+    assert metadata["provider_credential_source"] is None
+    assert metadata["target_credential_mode"] == "unknown"
+    assert metadata["billing_classification"] == "unknown"
+    assert metadata["cost_known"] is False
+    calls.clear()
+    for field, value in [
+        ("provider_credential_source", source),
+        ("billing_classification", billing),
+    ]:
+        assert (await client.post("/api/me/llm-activity", json={field: value})).status_code == 422
+    assert calls == []
+
+
+@pytest.mark.parametrize(
     "inspection,source,target",
     [
-        ("scanned", "caller_supplied", "caller_supplied"),
-        ("cached_decision", "company", "none"),
-        ("disabled", "company", "company"),
+        ("scanned", "override", "override"),
+        ("cached_decision", "global", "none"),
+        ("disabled", "global", "global"),
         ("not_scanned", "none", "none"),
     ],
 )
@@ -255,7 +284,7 @@ async def test_classified_activity_stays_self_only_and_allowlisted(
             "attributes.neurwerk.request_text_inspection": "scanned",
             "attributes.neurwerk.dispatch_attempted": True,
             "headers": {"neurwerk.request_outcome": "http_error"},
-            "neurwerk.request_context": {"target_credential_mode": "company"},
+            "neurwerk.request_context": {"target_credential_mode": "global"},
         },
         {
             "neurwerk.request_text_inspection": "enabled",

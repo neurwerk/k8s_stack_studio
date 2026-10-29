@@ -1,7 +1,7 @@
 import { apiGet, ApiRequestError } from "@/lib/api/client";
 
 export type HealthState = "available" | "unavailable" | "unknown";
-export type CredentialSource = "company" | "caller_supplied" | "none";
+export type CredentialSource = "global" | "override" | "none";
 
 export interface GatewayEndpoint {
   id: string;
@@ -48,7 +48,7 @@ export interface GatewayEntry {
 
 export interface GatewayView {
   catalog: {
-    schema_version: 2;
+    schema_version: 3;
     catalog_revision: string;
     policy_revision: string;
     "self-hosted-api-providers": GatewayEntry[];

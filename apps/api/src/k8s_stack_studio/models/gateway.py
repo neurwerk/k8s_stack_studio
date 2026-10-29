@@ -11,7 +11,7 @@ Identifier = Annotated[str, Field(min_length=1, max_length=256, pattern=r"^[^\x0
 Description = Annotated[str, Field(max_length=2000)]
 Permissions = Annotated[list[Identifier], Field(max_length=128)]
 ObservedState = Literal["available", "unavailable", "unknown"]
-CredentialSource = Literal["company", "caller_supplied", "none"]
+CredentialSource = Literal["global", "override", "none"]
 
 
 class GatewayDocumentError(ValueError):
@@ -157,7 +157,7 @@ class GatewayEntry(GatewayModel):
 class GatewayCatalog(GatewayModel):
     """One effective catalog, with validated references and stable identities."""
 
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     catalog_revision: Identifier
     policy_revision: Identifier
     profiles: list[GatewayProfile] = Field(max_length=128)
@@ -176,7 +176,7 @@ class GatewayCatalog(GatewayModel):
     @classmethod
     def validate_schema(cls, value: object) -> int:
         """Accept only the exact grouped catalog version."""
-        if type(value) is not int or value != 2:
+        if type(value) is not int or value != 3:
             raise GatewayDocumentError
         return value
 

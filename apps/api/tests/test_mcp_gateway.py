@@ -39,7 +39,7 @@ def endpoint(tmp_path):
         "destinations": [destination],
     }
     catalog = {
-        "schema_version": 2,
+        "schema_version": 3,
         "catalog_revision": "catalog-1",
         "policy_revision": "policy-1",
         "profiles": [],

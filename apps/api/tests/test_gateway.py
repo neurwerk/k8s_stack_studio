@@ -24,7 +24,7 @@ from k8s_stack_studio.models.gateway import GatewayCatalog, GatewayStatus
 
 def catalog():
     data: dict[str, Any] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "catalog_revision": "catalog-1",
         "policy_revision": "policy-1",
         "endpoints": [
@@ -45,8 +45,8 @@ def catalog():
                 "profile_ids": [name],
                 "required_permissions": ["llm:invoke", f"application:{name}:invoke"],
                 "credential_modes": [
-                    {"source": "caller_supplied", "required_permissions": []},
-                    {"source": "company", "required_permissions": ["provider:example:company-use"]},
+                    {"source": "override", "required_permissions": []},
+                    {"source": "global", "required_permissions": ["provider:example:global-use"]},
                 ],
             }
             for name in ("visible", "hidden")
@@ -163,14 +163,14 @@ async def test_gateway_authorization_and_entitlement(projection):
             {},
         )
         assert (await client.get("/api/admin/gateway")).status_code == 403
-        response = await client.get("/api/gateway?permissions=provider:example:company-use")
+        response = await client.get("/api/gateway?permissions=provider:example:global-use")
         assert response.status_code == 200
         assert response.headers["cache-control"] == "no-store"
         assert "hidden" not in response.text
         data = response.json()
         assert data["catalog"]["external-subscription-providers"][0]["destinations"][0][
             "credential_modes"
-        ] == [{"source": "caller_supplied", "required_permissions": []}]
+        ] == [{"source": "override", "required_permissions": []}]
         assert data["status"]["endpoints"] == [{"id": "visible", "state": "available"}]
         assert data["catalog"]["profiles"][0]["operations"][1]["support"] == "unknown"
         state["principal"] = StudioPrincipal(
@@ -205,7 +205,7 @@ async def test_gateway_authorization_and_entitlement(projection):
         ({"observed_at": "2020-01-01T00:00:00Z", "valid_until": "2020-01-02T00:00:00Z"}, "stale"),
         ({"observed_at": "2100-01-01T00:00:00Z", "valid_until": "2100-01-02T00:00:00Z"}, "stale"),
         ({"raw_diagnostic": "private-body"}, "invalid"),
-        ({"schema_version": 2}, "invalid"),
+        ({"schema_version": 3}, "invalid"),
     ],
 )
 def test_untrusted_observations_remain_unknown(projection, tmp_path, change, reason):
@@ -407,13 +407,14 @@ def test_physical_endpoint_and_provider_limits_are_aggregate():
 @pytest.mark.parametrize(
     "modes,grants,expected",
     [
-        (["caller_supplied"], [], ["caller_supplied"]),
-        (["company"], [], []),
-        (["company"], ["provider:example:company-use"], ["company"]),
-        ([], ["provider:example:company-use"], []),
+        (["override"], [], ["override"]),
+        (["global"], [], []),
+        (["global"], ["provider:example:company-use"], []),
+        (["global"], ["provider:example:global-use"], ["global"]),
+        ([], ["provider:example:global-use"], []),
     ],
 )
-def test_credential_modes_require_provision_and_company_permission(modes, grants, expected):
+def test_credential_modes_require_provision_and_global_permission(modes, grants, expected):
     data = catalog()
     entry = data["external-subscription-providers"][0]
     entry["provider_id"] = "example"
@@ -425,6 +426,23 @@ def test_credential_modes_require_provision_and_company_permission(modes, grants
     permissions = frozenset(destination["required_permissions"] + grants)
     filtered = gateway._entitled(GatewayCatalog.model_validate(data), permissions)
     assert [mode.source for mode in filtered.destinations[0].credential_modes] == expected
+
+
+@pytest.mark.parametrize("source", ["company", "caller_supplied"])
+def test_catalog_rejects_legacy_modes(source):
+    data = catalog()
+    data["external-subscription-providers"][0]["destinations"][0]["credential_modes"].append(
+        {"source": source, "required_permissions": []}
+    )
+    with pytest.raises(ValueError):
+        GatewayCatalog.model_validate(data)
+
+
+def test_catalog_rejects_previous_version():
+    data = catalog()
+    data["schema_version"] = 2
+    with pytest.raises(ValueError):
+        GatewayCatalog.model_validate(data)
 
 
 @pytest.fixture
@@ -488,23 +506,23 @@ async def test_simulator_discovery_needs_eligible_mode_not_provider_credentials(
             json=body,
         )
         assert response.status_code == 200
-        company, personal = destination["credential_modes"]
-        destination["credential_modes"] = [personal]
+        global_mode, override_mode = destination["credential_modes"]
+        destination["credential_modes"] = [override_mode]
         catalog_path.write_text(json.dumps(data))
         assert (await client.get(f"{base}/models", headers=headers)).status_code == 200
         destination["required_permissions"] = ["llm:invoke", "model:not-granted:invoke"]
         catalog_path.write_text(json.dumps(data))
         assert (await client.get(f"{base}/models", headers=headers)).status_code == 403
         destination["required_permissions"] = ["llm:invoke", f"model:{destination['id']}:invoke"]
-        for modes in ([company], []):
+        for modes in ([global_mode], []):
             destination["credential_modes"] = modes
             catalog_path.write_text(json.dumps(data))
             assert (await client.get(f"{base}/models", headers=headers)).status_code == 403
 
 
-async def test_simulator_personal_credentials_never_fall_back_to_company(simulator):
+async def test_simulator_override_credentials_never_fall_back_to_global(simulator):
     app, data, _ = simulator
-    app.state.simulator_permissions |= {"provider:openrouter:company-use"}
+    app.state.simulator_permissions |= {"provider:openrouter:global-use"}
     entry = next(item for item in data["external-api-providers"] if item["id"] == "openrouter")
     headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
     chat = {
@@ -746,7 +764,7 @@ def test_global_configuration_requires_both_grants(published, destination_access
     destination["provider_id"] = "example"
     permissions = set(destination["required_permissions"]) if destination_access else set()
     if global_access:
-        permissions.add("provider:example:company-use")
+        permissions.add("provider:example:global-use")
     filtered = gateway._entitled(GatewayCatalog.model_validate(data), frozenset(permissions))
     if not destination_access:
         assert filtered.destinations == []
@@ -756,5 +774,5 @@ def test_global_configuration_requires_both_grants(published, destination_access
             published if global_access else None
         )
         assert {mode.source for mode in filtered.destinations[0].credential_modes} == (
-            {"caller_supplied", "company"} if global_access else {"caller_supplied"}
+            {"override", "global"} if global_access else {"override"}
         )

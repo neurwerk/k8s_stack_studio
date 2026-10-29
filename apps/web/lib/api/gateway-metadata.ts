@@ -35,15 +35,15 @@ export interface GatewayMetadata {
   dispatch_destination_id: string | null;
   dispatch_attempted: boolean | null;
   request_outcome: "http_error" | "gateway_error" | "unknown";
-  target_credential_mode: "company" | "caller_supplied" | "none" | "unknown";
-  billing_classification: "company_api" | "personal_api" | "subscription" | "unknown";
+  target_credential_mode: "global" | "override" | "none" | "unknown";
+  billing_classification: "global_api" | "override_api" | "subscription" | "unknown";
   request_id: string | null;
   token_usage_known: boolean | null;
   cost_known: boolean | null;
 }
 
 export const billingLabels: Record<string, string> = {
-  company_api: "Company API", personal_api: "Personal API", subscription: "Subscription", unknown: "Unknown billing",
+  global_api: "Global API", override_api: "Override API", subscription: "Subscription", unknown: "Unknown billing",
 };
 
 export function gatewayParams(filters: GatewayFilters): Record<string, string> {

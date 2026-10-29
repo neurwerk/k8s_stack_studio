@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 MetadataValue = Annotated[
     str, Field(min_length=1, max_length=255, pattern=r"^[^\s\x00-\x1f\x7f]+$")
 ]
-BillingClassification = Literal["company_api", "personal_api", "subscription", "unknown"]
+BillingClassification = Literal["global_api", "override_api", "subscription", "unknown"]
 
 
 class GatewayFilters(BaseModel):
@@ -24,7 +24,7 @@ class GatewayFilters(BaseModel):
     binding_id: MetadataValue | None = None
     protocol_profile: MetadataValue | None = None
     operation_id: MetadataValue | None = None
-    provider_credential_source: Literal["company", "caller_supplied", "none"] | None = None
+    provider_credential_source: Literal["global", "override", "none"] | None = None
     policy_revision: MetadataValue | None = None
     requested_model: MetadataValue | None = None
     resolved_model: MetadataValue | None = None
@@ -61,7 +61,7 @@ class GatewayMetadata(GatewayFilters):
     dispatch_destination_id: MetadataValue | None = None
     dispatch_attempted: StrictBool | None = None
     request_outcome: Literal["http_error", "gateway_error", "unknown"] = "unknown"
-    target_credential_mode: Literal["company", "caller_supplied", "none", "unknown"] = "unknown"
+    target_credential_mode: Literal["global", "override", "none", "unknown"] = "unknown"
     token_usage_known: StrictBool | None = None
     cost_known: StrictBool | None = None
 

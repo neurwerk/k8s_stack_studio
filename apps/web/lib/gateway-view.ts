@@ -1,8 +1,8 @@
 import type { CredentialSource, GatewayView, HealthState, TrustCertificate } from "@/lib/api/gateway";
 
 export const credentialLabels: Record<CredentialSource, string> = {
-  company: "Company credential",
-  caller_supplied: "Personal credential",
+  global: "Global credential",
+  override: "Override credential",
   none: "No provider credential",
 };
 
