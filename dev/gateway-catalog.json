@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "catalog_revision": "studio-dev-catalog-7",
   "policy_revision": "studio-dev-policy-2",
   "self-hosted-api-providers": [
@@ -24,7 +24,7 @@
         "id": "remote/openrouter/deepseek/deepseek-v4-flash-0731", "model": "remote/openrouter/deepseek/deepseek-v4-flash-0731", "kind": "model", "display_name": "DeepSeek Flash sample", "provider_id": "openrouter",
         "endpoint_ids": ["api-openrouter"], "profile_ids": ["openai-chat-completions-v1", "openai-model-discovery-v1"],
         "required_permissions": ["llm:invoke", "model:remote/openrouter/deepseek/deepseek-v4-flash-0731:invoke"],
-        "credential_modes": [{"source": "company", "required_permissions": ["provider:openrouter:company-use"]}, {"source": "caller_supplied", "required_permissions": []}]
+        "credential_modes": [{"source": "global", "required_permissions": ["provider:openrouter:global-use"]}, {"source": "override", "required_permissions": []}]
       }]
     },
     {
@@ -35,7 +35,7 @@
         "id": "demo-openai-api", "model": "demo-openai-api", "kind": "model", "display_name": "Synthetic OpenAI API model", "provider_id": "openai",
         "endpoint_ids": ["api-openai-model"], "profile_ids": ["openai-responses-v1"],
         "required_permissions": ["llm:invoke", "model:demo-openai-api:invoke"],
-        "credential_modes": [{"source": "company", "required_permissions": ["provider:openai:company-use"]}, {"source": "caller_supplied", "required_permissions": []}]
+        "credential_modes": [{"source": "global", "required_permissions": ["provider:openai:global-use"]}, {"source": "override", "required_permissions": []}]
       }]
     },
     {
@@ -46,7 +46,7 @@
         "id": "demo-openai-web", "kind": "application", "display_name": "Synthetic web API", "provider_id": "openai",
         "endpoint_ids": ["api-openai-web"], "profile_ids": ["web-api-preview"],
         "required_permissions": ["llm:invoke", "application:demo-openai-web:invoke"],
-        "credential_modes": [{"source": "caller_supplied", "required_permissions": []}]
+        "credential_modes": [{"source": "override", "required_permissions": []}]
       }]
     }
   ],
@@ -59,7 +59,7 @@
         "id": "demo-codex", "model": "demo-codex", "kind": "model", "display_name": "Synthetic Codex model", "provider_id": "openai",
         "endpoint_ids": ["api-codex"], "profile_ids": ["openai-codex-responses-v1"],
         "required_permissions": ["llm:invoke", "model:demo-codex:invoke"],
-        "credential_modes": [{"source": "caller_supplied", "required_permissions": []}]
+        "credential_modes": [{"source": "override", "required_permissions": []}]
       }]
     }
   ],

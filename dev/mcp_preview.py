@@ -77,7 +77,7 @@ INTEGRATIONS = (
     ),
 )
 MODELS = {item.id: item for item in INTEGRATIONS}
-AUTH_LABELS = {"context7": "No provider sign-in", "brave": "Company-managed", "github": "Personal"}
+AUTH_LABELS = {"context7": "No provider sign-in", "brave": "Shared credential", "github": "Saved user connection"}
 
 
 def _stamp() -> str:

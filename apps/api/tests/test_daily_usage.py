@@ -678,7 +678,7 @@ async def test_mixed_completeness_groups_recombine_without_losing_reported_usage
         params={
             "start": "2026-10-31",
             "end": "2026-10-31",
-            "provider_credential_source": "caller_supplied",
+            "provider_credential_source": "override",
             "billing_classification": "unknown",
         },
     )
@@ -707,7 +707,7 @@ async def test_mixed_completeness_groups_recombine_without_losing_reported_usage
         },
     }
     attrs = payloads[0]["filters"]["attributes"]
-    assert attrs["neurwerk.provider_credential_source"] == "caller_supplied"
+    assert attrs["neurwerk.provider_credential_source"] == "override"
     assert attrs["neurwerk.billing_classification"] == "unknown"
     if route.endswith("daily"):
         assert attrs["agentgateway.user"] == "self"

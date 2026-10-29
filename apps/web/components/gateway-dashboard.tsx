@@ -99,15 +99,15 @@ function endpointSpec(view: GatewayView) {
       const proxyRoute = entry.routes.find((item) => item.entry_mode === "forward_proxy" &&
         item.caller_auth_modes.includes("proxy_basic") && destinations.some((destination) => destination.endpoint_ids.includes(item.id)));
       const limitations = view.catalog.profiles.filter((profile) => profileIds.has(profile.id)).flatMap((profile) => profile.limitations);
-      const callerSupplied = destinations.some((destination) => destination.kind === "model" &&
-        destination.credential_modes.some((mode) => mode.source === "caller_supplied"));
-      const company = destinations.some((destination) => destination.kind === "model" &&
-        destination.credential_modes.some((mode) => mode.source === "company"));
+      const hasOverride = destinations.some((destination) => destination.kind === "model" &&
+        destination.credential_modes.some((mode) => mode.source === "override"));
+      const hasGlobal = destinations.some((destination) => destination.kind === "model" &&
+        destination.credential_modes.some((mode) => mode.source === "global"));
       const providerHeader = profileIds.has("anthropic-messages-v1") ? "x-api-key" :
         ["openai-chat-completions-v1", "openai-responses-v1", "openai-codex-responses-v1"].some((profile) => profileIds.has(profile)) ? "Authorization" : null;
       const credentialName = profileIds.has("openai-codex-responses-v1") ? "CodexSubscriptionSession" :
         `${entry.display_name.replace(/[^a-zA-Z0-9]/g, "") || "Provider"}ProviderKey`;
-      const providerScheme = callerSupplied && providerHeader ? `${credentialName}_${String(providerIndex++)}` : null;
+      const providerScheme = hasOverride && providerHeader ? `${credentialName}_${String(providerIndex++)}` : null;
       if (providerScheme && providerHeader) {
         const codex = profileIds.has("openai-codex-responses-v1");
         const keyPage = providerKeyPages[entry.provider_id ?? ""];
@@ -116,10 +116,10 @@ function endpointSpec(view: GatewayView) {
           ...(providerHeader === "Authorization" ? { type: "http", scheme: "bearer" } :
             { type: "apiKey", in: "header", name: providerHeader }),
           "x-studio-label": codex ? "Codex bearer token (required for Codex)" :
-            `${providerName} API key (${company ? "optional" : "required"})`,
+            `${providerName} API key (${hasGlobal ? "optional" : "required"})`,
           description: codex
             ? "Use a Codex session token from ChatGPT sign-in. [Learn about sign-in](https://developers.openai.com/codex/auth)."
-            : `Use a custom ${providerName} API key ${company ? "instead of the globally set credential" : "for this binding"}.${keyPage ? ` [Create an API key](${keyPage}).` : ""}${company ? "  \nOptional when a global credential is set. An invalid key does not fall back to the global credential." : ""}`,
+            : `Use a custom ${providerName} API key ${hasGlobal ? "instead of the globally set credential" : "for this binding"}.${keyPage ? ` [Create an API key](${keyPage}).` : ""}${hasGlobal ? "  \nOptional when a global credential is set. An invalid key does not fall back to the global credential." : ""}`,
         };
       }
       for (const operation of operations(destinations, view.catalog.profiles)) {
@@ -131,13 +131,13 @@ function endpointSpec(view: GatewayView) {
           description: [operation.description,
             proxyRoute && profileIds.has("openai-codex-responses-v1") && operation.path === "/responses"
               ? `**Also available through the inspected forward proxy**\n\nKeep the original Codex request URL and configure your client to use \`${proxyRoute.url}\` as its HTTPS proxy. Use a Neurwerk API key as the proxy password; Codex authentication stays with the client. [Proxy setup and certificate](/forward-proxy).` : undefined,
-            providerScheme && operation.method === "post" && !company && !profileIds.has("openai-codex-responses-v1")
+            providerScheme && operation.method === "post" && !hasGlobal && !profileIds.has("openai-codex-responses-v1")
               ? "A provider API key is required for this operation. Enter it in Authentication above the operations." : undefined,
              ...(group === "mcp-servers" ? [] : limitations)].filter(Boolean).join("\n\n"),
           operationId: `${entry.id}-${operation.method}-${path}`,
           servers: [{ url: url.origin }], parameters,
           ...(providerScheme && operation.method === "post" ? {
-            security: company ? [{ NeurwerkKey: [], [providerScheme]: [] }, { NeurwerkKey: [] }] :
+            security: hasGlobal ? [{ NeurwerkKey: [], [providerScheme]: [] }, { NeurwerkKey: [] }] :
               [{ NeurwerkKey: [], [providerScheme]: [] }],
           } : {}),
           ...(operation.body ? { requestBody: operation.body } : {}),

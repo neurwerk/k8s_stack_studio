@@ -4,7 +4,7 @@ import { billingLabels } from "@/lib/api/gateway-metadata";
 const selectors = [
   ["credential_kind", "Platform key kind", { personal: "Personal API key", managed: "Managed API key" }],
   ["billing_classification", "Billing", billingLabels],
-  ["provider_credential_source", "Provider credential", { company: "Company credential", caller_supplied: "Personal credential", none: "No provider credential" }],
+  ["provider_credential_source", "Provider credential", { global: "Global credential", override: "Override credential", none: "No provider credential" }],
   ["entry_mode", "Entry mode", { api: "API", forward_proxy: "Forward proxy" }],
   ["destination_kind", "Destination kind", { model: "Model", mcp: "MCP", application: "Application" }],
 ] as const;
@@ -41,6 +41,6 @@ export function GatewayClassificationFilters({ value, onChange }: {
         </label>)}
       </div>
     </details>
-    <p className="text-xs text-muted-foreground">Exact matches use recorded metadata. Older records without a selected field are excluded. Personal credentials do not prove personal or subscription billing.</p>
+    <p className="text-xs text-muted-foreground">Exact matches use recorded metadata. Older records without a selected field are excluded. Override credentials do not prove who pays or subscription billing.</p>
   </fieldset>;
 }

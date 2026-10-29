@@ -34,10 +34,10 @@ def _entitled(catalog: GatewayCatalog, permissions: frozenset[str]) -> GatewayCa
                             for mode in item.credential_modes
                             if set(mode.required_permissions) <= permissions
                             and (
-                                mode.source != "company"
+                                mode.source != "global"
                                 or (
                                     item.provider_id is not None
-                                    and f"provider:{item.provider_id}:company-use" in permissions
+                                    and f"provider:{item.provider_id}:global-use" in permissions
                                 )
                             )
                         ]
@@ -56,7 +56,7 @@ def _entitled(catalog: GatewayCatalog, permissions: frozenset[str]) -> GatewayCa
                             "global_credential_status": entry.global_credential_status
                             if (
                                 entry.provider_id is not None
-                                and f"provider:{entry.provider_id}:company-use" in permissions
+                                and f"provider:{entry.provider_id}:global-use" in permissions
                             )
                             else None,
                         }

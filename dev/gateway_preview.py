@@ -148,8 +148,8 @@ def _destination(
         if not any(
             set(mode.required_permissions) <= principal.agentgateway_roles
             and (
-                mode.source != "company"
-                or f"provider:{entry.provider_id}:company-use" in principal.agentgateway_roles
+                mode.source != "global"
+                or f"provider:{entry.provider_id}:global-use" in principal.agentgateway_roles
             )
             for mode in destination.credential_modes
         ):
@@ -159,7 +159,7 @@ def _destination(
         "preview_provider_valid"
     ):
         raise HTTPException(401, "Invalid synthetic provider credential")
-    source = "caller_supplied" if request.scope.get("preview_provider_supplied") else "company"
+    source = "override" if request.scope.get("preview_provider_supplied") else "global"
     if any(mode.source == "none" for mode in destination.credential_modes):
         source = "none"
     mode = next((mode for mode in destination.credential_modes if mode.source == source), None)
@@ -167,9 +167,9 @@ def _destination(
         raise HTTPException(403, "Use a dummy provider Bearer value for this sample")
     if not set(mode.required_permissions) <= principal.agentgateway_roles:
         raise HTTPException(403, "Missing sample credential-mode permission")
-    if source == "company":
-        if f"provider:{entry.provider_id}:company-use" not in principal.agentgateway_roles:
-            raise HTTPException(403, "Missing sample company-use permission")
+    if source == "global":
+        if f"provider:{entry.provider_id}:global-use" not in principal.agentgateway_roles:
+            raise HTTPException(403, "Missing sample global-use permission")
         if entry.global_credential_status != "configured":
             raise HTTPException(409, "Sample global credential not configured")
     return destination

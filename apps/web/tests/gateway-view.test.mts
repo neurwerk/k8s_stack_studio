@@ -8,7 +8,7 @@ import type { UserDailyUsage } from "../lib/api/usage";
 const now = Date.parse("2026-10-14T12:00:00Z");
 function view(): GatewayView {
   return {
-    catalog: { schema_version: 2, catalog_revision: "catalog", policy_revision: "policy",
+    catalog: { schema_version: 3, catalog_revision: "catalog", policy_revision: "policy",
       "self-hosted-api-providers": [], "external-api-providers": [], "external-subscription-providers": [], "mcp-servers": [],
       profiles: [{ id: "profile", revision: "new", limitations: [], operations: [] }] },
     status: { state: "current", reason: null, catalog_revision: "catalog", applied_policy_revision: "policy",
