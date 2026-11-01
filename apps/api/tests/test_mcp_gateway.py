@@ -104,18 +104,10 @@ async def test_custom_catalog_path_drives_internal_sdk_and_exact_caller_scope(
         assert str(request.url) == settings.mcp_gateway_url + "/operator/selected-endpoint"
         assert request.method == "POST"
         assert request.headers["authorization"] == "Bearer caller-token"
-        if request.headers.get("x-neurwerk-credential-mode") != "none":
-            return httpx2.Response(400, json={"error": "Missing explicit credential mode"})
+        assert "x-neurwerk-credential-mode" not in request.headers
         assert "cookie" not in request.headers
         sent.append(request)
         return mcp_response(request)
-
-    missing_mode = httpx2.Request(
-        "POST",
-        settings.mcp_gateway_url + "/operator/selected-endpoint",
-        headers={"Authorization": "Bearer caller-token"},
-    )
-    assert upstream(missing_mode).status_code == 400
 
     def client_factory(**kwargs):
         assert kwargs["follow_redirects"] is False and kwargs["trust_env"] is False
@@ -279,7 +271,7 @@ async def test_concurrent_callers_keep_credentials_and_cookies_isolated(endpoint
         async def upstream(request):
             await asyncio.sleep(0)
             assert request.headers["authorization"] == authorization
-            assert request.headers["x-neurwerk-credential-mode"] == "none"
+            assert "x-neurwerk-credential-mode" not in request.headers
             assert "cookie" not in request.headers
             assert str(request.url) == settings.mcp_gateway_url + "/operator/selected-endpoint"
             seen[authorization].append(json.loads(request.content)["method"])
