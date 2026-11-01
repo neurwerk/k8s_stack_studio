@@ -116,7 +116,10 @@ async def gateway_client(
             asyncio.timeout(45),
             _in_flight,
             httpx2.AsyncClient(
-                headers={"Authorization": authorization},
+                headers={
+                    "Authorization": authorization,
+                    "X-Neurwerk-Credential-Mode": "none",
+                },
                 trust_env=False,
                 follow_redirects=False,
                 timeout=30,
