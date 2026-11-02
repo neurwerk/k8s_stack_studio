@@ -21,12 +21,16 @@ async def selector_discovery(tmp_path):
         "global_credential_status": "configured",
         "routes": [
             {
-                "id": "api",
+                "id": f"api-{mode}",
                 "url": "https://gateway.example.test/v1",
                 "entry_mode": "api",
                 "caller_auth_modes": ["neurwerk_bearer"],
-                "credential_mode_header": "X-Neurwerk-Credential-Mode",
+                "identity_header": "Authorization-Neurwerk"
+                if mode == "override"
+                else "Authorization",
+                "provider_credential_source": mode,
             }
+            for mode in modes
         ],
         "destinations": [
             {
@@ -34,7 +38,7 @@ async def selector_discovery(tmp_path):
                 "kind": "model",
                 "display_name": mode,
                 "provider_id": "example",
-                "endpoint_ids": ["api"],
+                "endpoint_ids": [f"api-{mode}"],
                 "profile_ids": [],
                 "required_permissions": ["llm:invoke", f"model:{mode}:invoke"],
                 "credential_modes": [{"source": mode, "required_permissions": [f"mode:{mode}"]}],
@@ -64,8 +68,8 @@ async def selector_discovery(tmp_path):
         assert json.loads(request.content) == {"binding_id": "binding"}
         assert "x-neurwerk-credential-mode" not in request.headers
         assert "x-api-key" not in request.headers
-        assert "authorization" not in request.headers
-        assert request.headers["x-neurwerk-authorization"] == "Bearer test-key"
+        assert "x-neurwerk-authorization" not in request.headers
+        assert request.headers["authorization"] == "Bearer test-key"
         return httpx.Response(200, json={"permissions": permissions})
 
     app = FastAPI()
@@ -87,10 +91,10 @@ async def test_explicit_discovery_filters_list_and_retrieve_without_provider(
 ):
     client, _, _, _, _, calls = selector_discovery
     headers = {
-        "X-Neurwerk-Authorization": "Bearer test-key",
-        "X-Neurwerk-Credential-Mode": f" \t{mode}\t ",
+        "Authorization": "Bearer test-key",
+        "X-Neurwerk-Credential-Mode": "ignored",
     }
-    base = "/gateway/model-discovery/binding/models"
+    base = f"/gateway/model-discovery/api-{mode}/models"
     listed = await client.get(base, headers=headers)
     assert listed.status_code == 200
     assert listed.headers["cache-control"] == "no-store"
@@ -99,7 +103,7 @@ async def test_explicit_discovery_filters_list_and_retrieve_without_provider(
     assert retrieved.json() == listed.json()["data"][0]
     if mode == "override":
         # Discovery neither consumes nor validates provider credentials, even if supplied.
-        headers["Authorization"] = "not-a-provider-credential"
+        headers["Authorization-Neurwerk"] = "ignored-on-internal-endpoint"
         headers["x-api-key"] = "not-a-provider-credential"
         assert (await client.get(base, headers=headers)).json() == listed.json()
     hidden = "none" if mode != "none" else "global"
@@ -114,10 +118,10 @@ async def test_explicit_discovery_requires_all_permissions(selector_discovery, m
     client, permissions, _, _, _, _ = selector_discovery
     permissions.remove(missing)
     headers = {
-        "X-Neurwerk-Authorization": "Bearer test-key",
+        "Authorization": "Bearer test-key",
         "X-Neurwerk-Credential-Mode": "global",
     }
-    base = "/gateway/model-discovery/binding/models"
+    base = "/gateway/model-discovery/api-global/models"
     listed = await client.get(base, headers=headers)
     retrieved = await client.get(f"{base}/global", headers=headers)
     if missing == "llm:invoke":
@@ -134,50 +138,57 @@ async def test_explicit_global_discovery_requires_configured_credential(selector
     entry["global_credential_status"] = status
     path.write_text(json.dumps(catalog))
     headers = {
-        "X-Neurwerk-Authorization": "Bearer test-key",
+        "Authorization": "Bearer test-key",
         "X-Neurwerk-Credential-Mode": "global",
     }
-    base = "/gateway/model-discovery/binding/models"
+    base = "/gateway/model-discovery/api-global/models"
     assert (await client.get(base, headers=headers)).json()["data"] == []
     assert (await client.get(f"{base}/global", headers=headers)).status_code == 404
     del headers["X-Neurwerk-Credential-Mode"]
-    assert len((await client.get(base, headers=headers)).json()["data"]) == 3
+    assert (await client.get(base, headers=headers)).json()["data"] == []
 
 
 @pytest.mark.parametrize("absent", [True, False])
 async def test_explicit_discovery_requires_route_capability(selector_discovery, absent):
     client, _, entry, path, catalog, _ = selector_discovery
     if absent:
-        del entry["routes"][0]["credential_mode_header"]
+        entry["routes"] = entry["routes"][:2]
     else:
-        entry["routes"][0]["credential_mode_header"] = None
+        entry["routes"][2].update(entry_mode="forward_proxy", identity_header="Proxy-Authorization")
+    entry["destinations"] = entry["destinations"][:2]
     path.write_text(json.dumps(catalog))
     headers = {
-        "X-Neurwerk-Authorization": "Bearer test-key",
+        "Authorization": "Bearer test-key",
         "X-Neurwerk-Credential-Mode": "override",
     }
-    response = await client.get("/gateway/model-discovery/binding/models", headers=headers)
-    assert response.status_code == 400
+    response = await client.get("/gateway/model-discovery/api-override/models", headers=headers)
+    assert response.status_code == 404
     assert response.headers["cache-control"] == "no-store"
 
 
 @pytest.mark.parametrize(
     "headers,code",
     [
-        ([("X-Neurwerk-Credential-Mode", "override"), ("Authorization", "Bearer test-key")], 401),
         (
             [
                 ("X-Neurwerk-Credential-Mode", "override"),
                 ("X-Neurwerk-Authorization", "Bearer test-key"),
-                ("x-neurwerk-authorization", "Bearer test-key"),
             ],
             401,
         ),
-        ([("X-Neurwerk-Credential-Mode", "none"), ("x-neurwerk-credential-mode", "none")], 400),
-        ([("X-Neurwerk-Credential-Mode", "none,override")], 400),
-        ([("X-Neurwerk-Credential-Mode", "")], 400),
-        ([("X-Neurwerk-Credential-Mode", "GLOBAL")], 400),
-        ([("X-Neurwerk-Credential-Mode", "other")], 400),
+        (
+            [
+                ("X-Neurwerk-Credential-Mode", "override"),
+                ("Authorization", "Bearer test-key"),
+                ("authorization", "Bearer test-key"),
+            ],
+            401,
+        ),
+        ([("Authorization", "Bearer test-key,Bearer other")], 401),
+        ([("Authorization-Neurwerk", "Bearer test-key")], 401),
+        ([("X-Neurwerk-Credential-Mode", "")], 401),
+        ([("X-Neurwerk-Credential-Mode", "GLOBAL")], 401),
+        ([("X-Neurwerk-Credential-Mode", "other")], 401),
     ],
 )
 async def test_explicit_discovery_rejects_ambiguous_mode_or_missing_identity(
@@ -186,14 +197,17 @@ async def test_explicit_discovery_rejects_ambiguous_mode_or_missing_identity(
     client, _, _, _, _, calls = selector_discovery
     for suffix in ("", "/override"):
         response = await client.get(
-            f"/gateway/model-discovery/binding/models{suffix}", headers=headers
+            f"/gateway/model-discovery/api-override/models{suffix}", headers=headers
         )
         assert response.status_code == code
         assert response.headers["cache-control"] == "no-store"
     assert calls == []
 
 
-@pytest.mark.parametrize("group", ["self-hosted-api-providers", "external-api-providers"])
+@pytest.mark.parametrize(
+    "group",
+    ["self-hosted-api-providers", "external-api-providers", "external-subscription-providers"],
+)
 async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
     catalog = {
         "schema_version": 3,
@@ -205,6 +219,8 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
                 "url": f"https://{name}.example.test/v1",
                 "entry_mode": "api",
                 "caller_auth_modes": ["neurwerk_bearer"],
+                "identity_header": "Authorization-Neurwerk",
+                "provider_credential_source": "override",
             }
             for name in ("api-local", "api-global")
         ],
@@ -250,7 +266,7 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
             "mcp-servers": [],
         }
     )
-    if group == "external-api-providers":
+    if group != "self-hosted-api-providers":
         catalog[group] = catalog["self-hosted-api-providers"]
         catalog["self-hosted-api-providers"] = []
     path = tmp_path / "catalog.json"
@@ -264,8 +280,8 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
     def verify(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/gateway/caller-permissions"
         assert json.loads(request.content) == {"binding_id": "api-local"}
-        assert request.headers["x-neurwerk-authorization"] == "Bearer test-key"
-        assert "authorization" not in request.headers
+        assert request.headers["authorization"] == "Bearer test-key"
+        assert "authorization-neurwerk" not in request.headers
         assert "x-binding-id" not in request.headers
         return httpx.Response(
             200,
@@ -285,9 +301,9 @@ async def test_local_discovery_filters_and_conceals_models(tmp_path, group):
             transport=httpx.ASGITransport(app), base_url="http://studio.test"
         ) as client:
             headers = {
-                "X-Neurwerk-Authorization": "Bearer test-key",
+                "Authorization": "Bearer test-key",
                 "X-Roles": "admin",
-                "Authorization": "Bearer upstream-must-not-be-forwarded",
+                "Authorization-Neurwerk": "Bearer ignored-internal-header",
                 "X-Binding-Id": "api-global",
             }
             listed = await client.get(

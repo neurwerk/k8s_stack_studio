@@ -46,13 +46,45 @@ def _entitled(catalog: GatewayCatalog, permissions: frozenset[str]) -> GatewayCa
                 for item in entry.destinations
                 if set(item.required_permissions) <= permissions
             ]
-            endpoints = {identity for item in destinations for identity in item.endpoint_ids}
+            routes = [
+                route
+                for route in entry.routes
+                if (
+                    route.provider_credential_source != "global"
+                    or entry.global_credential_status == "configured"
+                )
+                and any(
+                    route.id in item.endpoint_ids
+                    and any(
+                        mode.source == route.provider_credential_source
+                        for mode in item.credential_modes
+                    )
+                    for item in destinations
+                )
+            ]
+            destinations = [
+                item.model_copy(
+                    update={
+                        "endpoint_ids": [
+                            route.id
+                            for route in routes
+                            if route.id in item.endpoint_ids
+                            and any(
+                                mode.source == route.provider_credential_source
+                                for mode in item.credential_modes
+                            )
+                        ]
+                    }
+                )
+                for item in destinations
+            ]
+            destinations = [item for item in destinations if item.endpoint_ids]
             if destinations:
                 filtered.append(
                     entry.model_copy(
                         update={
                             "destinations": destinations,
-                            "routes": [route for route in entry.routes if route.id in endpoints],
+                            "routes": routes,
                             "global_credential_status": entry.global_credential_status
                             if (
                                 entry.provider_id is not None

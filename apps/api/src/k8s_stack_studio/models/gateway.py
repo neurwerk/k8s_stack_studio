@@ -47,12 +47,22 @@ class GatewayEndpoint(GatewayModel):
     caller_auth_modes: list[Literal["oidc_bearer", "neurwerk_bearer", "proxy_basic"]] = Field(
         min_length=1, max_length=3
     )
-    credential_mode_header: Literal["X-Neurwerk-Credential-Mode"] | None = None
+    identity_header: Literal["Authorization", "Authorization-Neurwerk", "Proxy-Authorization"]
+    provider_credential_source: CredentialSource
 
     @model_validator(mode="after")
-    def api_selection_only(self) -> Self:
-        """Forward proxies do not expose the API credential selector."""
-        if self.entry_mode == "forward_proxy" and self.credential_mode_header is not None:
+    def fixed_credentials(self) -> Self:
+        """Each endpoint fixes both identity location and provider credential source."""
+        expected = (
+            "Proxy-Authorization"
+            if self.entry_mode == "forward_proxy"
+            else "Authorization-Neurwerk"
+            if self.provider_credential_source == "override"
+            else "Authorization"
+        )
+        if self.identity_header != expected or (
+            self.entry_mode == "forward_proxy" and self.provider_credential_source != "override"
+        ):
             raise GatewayDocumentError
         return self
 
@@ -245,7 +255,7 @@ class GatewayCatalog(GatewayModel):
                 ):
                     raise GatewayDocumentError
                 routes[route.id] = route
-            if sum(item.kind == "model" for item in entry.destinations) > 32:
+            if sum(item.kind == "model" for item in entry.destinations) > 100:
                 raise GatewayDocumentError
             if any(
                 not set(item.endpoint_ids) <= owned or item.provider_id != entry.provider_id

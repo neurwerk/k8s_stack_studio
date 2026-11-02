@@ -7,7 +7,9 @@ gateway implementation: API keys and real provider sessions are unsupported.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,12 +28,14 @@ Configuration = Annotated[Settings, Depends(get_settings)]
 PATHS = {
     "/local/api/v1": "local",
     "/openrouter/api/v1": "openrouter",
-    "/openai/model/v1": "openai-model",
-    "/openai/codex/v1/responses": "openai-codex",
-    "/openai/api": "openai-web",
+    "/override/openrouter/api/v1": "openrouter",
+    "/override/openai/model/v1": "openai-model",
+    "/openai/codex/v1": "openai-codex",
+    "/override/openai/api": "openai-web",
     **{f"/mcp/{name}": f"mcp-{name}" for name in ("brave", "context7", "github")},
 }
 SAMPLE = "Synthetic Studio gateway response. No provider request was sent."
+logger = logging.getLogger(__name__)
 # Public, harmless preview credentials; never use real keys or provider sessions.
 # Send the API-key dummy on ordinary routes and the session dummy on Codex only.
 SYNTHETIC_PROVIDER_API_KEY = "studio-demo-provider-key"
@@ -101,7 +105,22 @@ class PreviewIdentity:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and _binding(scope["path"]):
             headers = list(scope["headers"])
-            platform = [value for key, value in headers if key == b"x-neurwerk-authorization"]
+            override = (
+                scope["path"].startswith("/override/") or _binding(scope["path"]) == "openai-codex"
+            )
+            identity_header = b"authorization-neurwerk" if override else b"authorization"
+            platform = [value for key, value in headers if key == identity_header]
+            ignored = {
+                b"x-neurwerk-authorization",
+                b"x-neurwerk-credential-mode",
+                b"proxy-authorization",
+                b"x-api-key",
+            }
+            if not override:
+                ignored.add(b"authorization-neurwerk")
+            for name in ignored:
+                if any(key == name for key, _ in headers):
+                    logger.warning("Ignored authentication header: %s", name.decode("ascii"))
             origins = [value for key, value in headers if key == b"origin"]
             if origins and origins != [b"http://localhost:3001"]:
                 await JSONResponse({"detail": "Local Studio origin required"}, status_code=403)(
@@ -109,8 +128,9 @@ class PreviewIdentity:
                 )
                 return
             # Provider credentials are never passed to the verifier or retained.
-            provider = [value for key, value in headers if key == b"authorization"]
-            scope["preview_provider_supplied"] = bool(provider)
+            provider = (
+                [value for key, value in headers if key == b"authorization"] if override else []
+            )
             dummy = (
                 SYNTHETIC_CODEX_SESSION
                 if _binding(scope["path"]) == "openai-codex"
@@ -122,10 +142,14 @@ class PreviewIdentity:
             scope["headers"] = [
                 (key, value)
                 for key, value in headers
-                if key not in {b"authorization", b"x-neurwerk-authorization"}
+                if key not in ignored | {b"authorization", b"authorization-neurwerk"}
             ]
-            if len(platform) == 1:
+            if len(platform) == 1 and b"," not in platform[0]:
                 scope["headers"].append((b"authorization", platform[0]))
+            elif platform:
+                logger.warning("Ignored authentication header: %s", identity_header.decode("ascii"))
+            if len(provider) > 1 or any(b"," in value for value in provider):
+                logger.warning("Ignored authentication header: authorization")
         await self.app(scope, receive, send)
 
 
@@ -142,29 +166,18 @@ def _destination(
     destination = entry.destinations[0]
     if not set(destination.required_permissions) <= principal.agentgateway_roles:
         raise HTTPException(403, "Missing sample destination invocation permission")
-    if discovery:
-        if request.scope.get("preview_provider_supplied"):
-            raise HTTPException(400, "Provider Authorization is not accepted for model discovery")
-        if not any(
-            set(mode.required_permissions) <= principal.agentgateway_roles
-            and (
-                mode.source != "global"
-                or f"provider:{entry.provider_id}:global-use" in principal.agentgateway_roles
-            )
-            for mode in destination.credential_modes
-        ):
-            raise HTTPException(403, "No eligible sample credential mode")
-        return destination
-    if request.scope.get("preview_provider_supplied") and not request.scope.get(
-        "preview_provider_valid"
-    ):
+    route = next(
+        route
+        for route in entry.routes
+        if request.url.path == urlsplit(route.url).path
+        or request.url.path.startswith(urlsplit(route.url).path + "/")
+    )
+    source = route.provider_credential_source
+    if not discovery and source == "override" and not request.scope.get("preview_provider_valid"):
         raise HTTPException(401, "Invalid synthetic provider credential")
-    source = "override" if request.scope.get("preview_provider_supplied") else "global"
-    if any(mode.source == "none" for mode in destination.credential_modes):
-        source = "none"
     mode = next((mode for mode in destination.credential_modes if mode.source == source), None)
     if mode is None:
-        raise HTTPException(403, "Use a dummy provider Bearer value for this sample")
+        raise HTTPException(403, "Model is not eligible for this sample endpoint")
     if not set(mode.required_permissions) <= principal.agentgateway_roles:
         raise HTTPException(403, "Missing sample credential-mode permission")
     if source == "global":
@@ -222,6 +235,9 @@ routes = APIRouter()
 
 @routes.get("/local/api/v1/models")
 @routes.get("/openrouter/api/v1/models")
+@routes.get("/override/openrouter/api/v1/models")
+@routes.get("/override/openai/model/v1/models")
+@routes.get("/openai/codex/v1/models")
 def models(request: Request, principal: Principal, settings: Configuration) -> dict[str, object]:
     destination = _destination(request, principal, settings, discovery=True)
     return {"object": "list", "data": [{"id": destination.model, "object": "model"}]}
@@ -229,18 +245,22 @@ def models(request: Request, principal: Principal, settings: Configuration) -> d
 
 @routes.get("/local/api/v1/models/{model:path}")
 @routes.get("/openrouter/api/v1/models/{model:path}")
+@routes.get("/override/openrouter/api/v1/models/{model:path}")
+@routes.get("/override/openai/model/v1/models/{model:path}")
+@routes.get("/openai/codex/v1/models/{model:path}")
 def model_details(
     model: str, request: Request, principal: Principal, settings: Configuration
 ) -> dict[str, object]:
     destination = _destination(request, principal, settings, discovery=True)
     if model != destination.model:
-        raise HTTPException(403, "Model does not match this sample binding")
+        raise HTTPException(404, "Model not found")
     return {"id": destination.model, "object": "model"}
 
 
 @routes.post("/local/api/v1/chat/completions")
 @routes.post("/openrouter/api/v1/chat/completions")
-@routes.post("/openai/model/v1/responses")
+@routes.post("/override/openrouter/api/v1/chat/completions")
+@routes.post("/override/openai/model/v1/responses")
 @routes.post("/openai/codex/v1/responses")
 async def model_response(
     request: Request, principal: Principal, settings: Configuration
@@ -249,7 +269,7 @@ async def model_response(
     body = await _body(request)
     if body.get("model") != destination.model:
         raise HTTPException(403, "Model does not match this sample binding")
-    if request.url.path in {"/openai/model/v1/responses", "/openai/codex/v1/responses"}:
+    if request.url.path in {"/override/openai/model/v1/responses", "/openai/codex/v1/responses"}:
         if not _responses_input(body.get("input")):
             raise HTTPException(
                 400, "This sample requires nonempty text or user input_text messages"
@@ -308,8 +328,8 @@ async def model_response(
     )
 
 
-@routes.get("/openai/api")
-@routes.post("/openai/api")
+@routes.get("/override/openai/api")
+@routes.post("/override/openai/api")
 def web_response(request: Request, principal: Principal, settings: Configuration) -> dict[str, str]:
     _destination(request, principal, settings)
     return {"mode": "synthetic", "message": SAMPLE}
@@ -371,7 +391,7 @@ def install(app: FastAPI) -> None:
         CORSMiddleware,
         allow_origins=["http://localhost:3001"],
         allow_methods=["GET", "POST"],
-        allow_headers=["Authorization", "X-Neurwerk-Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Authorization-Neurwerk", "Content-Type"],
     )
 
     @app.middleware("http")
