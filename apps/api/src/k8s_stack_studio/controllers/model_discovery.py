@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -10,42 +10,31 @@ from fastapi.responses import JSONResponse
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.dependencies import get_settings
-from k8s_stack_studio.lib.gateway import gateway_view
+from k8s_stack_studio.lib.gateway import _entitled, gateway_catalog
 from k8s_stack_studio.lib.gateway_files import GatewayUnavailableError
-from k8s_stack_studio.models.gateway import CredentialSource
 
 router = APIRouter()
 NO_STORE = {"Cache-Control": "no-store"}
+logger = logging.getLogger(__name__)
 
 
-def _credential_mode(request: Request) -> CredentialSource | None:
-    """An explicit selector is one exact lowercase value, with HTTP whitespace allowed."""
-    values = request.headers.getlist("x-neurwerk-credential-mode")
-    if not values:
-        return None
-    value = values[0].strip(" \t")
-    if len(values) != 1 or value not in {"global", "none", "override"}:
-        raise HTTPException(400, "Invalid credential mode", headers=NO_STORE)
-    return cast(CredentialSource, value)
-
-
-async def _permissions(
-    request: Request, settings: Settings, binding_id: str, *, dedicated_required: bool = False
-) -> frozenset[str]:
-    """Ask the Bridge to verify the original credential, not a caller's role header."""
-    headers: dict[str, str] = {}
-    dedicated = request.headers.getlist("x-neurwerk-authorization")
-    if dedicated:
-        if len(dedicated) != 1:
-            raise HTTPException(401, "Invalid authentication credentials", headers=NO_STORE)
-        headers["x-neurwerk-authorization"] = dedicated[0]
-    else:
-        if dedicated_required:
-            raise HTTPException(401, "Missing authentication credentials", headers=NO_STORE)
-        bearer = request.headers.getlist("authorization")
-        if len(bearer) != 1:
-            raise HTTPException(401, "Missing authentication credentials", headers=NO_STORE)
-        headers["authorization"] = bearer[0]
+async def _permissions(request: Request, settings: Settings, binding_id: str) -> frozenset[str]:
+    """Verify gateway-normalized internal bearer identity through the Bridge."""
+    for name in (
+        "x-neurwerk-authorization",
+        "x-neurwerk-credential-mode",
+        "authorization-neurwerk",
+        "x-api-key",
+        "proxy-authorization",
+    ):
+        if name in request.headers:
+            logger.warning("Ignored authentication header: %s", name)
+    bearer = request.headers.getlist("authorization")
+    if len(bearer) != 1 or "," in bearer[0]:
+        if bearer:
+            logger.warning("Ignored authentication header: authorization")
+        raise HTTPException(401, "Missing authentication credentials", headers=NO_STORE)
+    headers = {"authorization": bearer[0]}
     if not settings.keycloak_api_key_bridge_url:
         raise HTTPException(503, "Gateway authentication unavailable", headers=NO_STORE)
     try:
@@ -68,57 +57,53 @@ async def _permissions(
     return frozenset(role for role in roles if isinstance(role, str))
 
 
-@router.get("/gateway/model-discovery/{binding_id}/models")
-@router.get("/gateway/model-discovery/{binding_id}/models/{model:path}")
+@router.get("/gateway/model-discovery/{route_id}/models")
+@router.get("/gateway/model-discovery/{route_id}/models/{model:path}")
 async def models(
     request: Request,
-    binding_id: str,
+    route_id: str,
     model: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> JSONResponse:
-    """Discover only models owned by the fixed, trusted route binding."""
-    selected = _credential_mode(request)
-    permissions = await _permissions(
-        request, settings, binding_id, dedicated_required=selected is not None
-    )
-    if "llm:invoke" not in permissions:
-        raise HTTPException(403, "Model access denied", headers=NO_STORE)
+    """The gateway rewrite selects a fixed route, never a caller mode header."""
     try:
-        catalog = gateway_view(settings, permissions).catalog
+        catalog = gateway_catalog(settings)
     except GatewayUnavailableError:
         raise HTTPException(503, "Model catalog unavailable", headers=NO_STORE) from None
     entry = next(
         (
             entry
-            for entry in catalog.self_hosted_api_providers + catalog.external_api_providers
-            if entry.id == binding_id and any(route.entry_mode == "api" for route in entry.routes)
+            for entry in catalog.self_hosted_api_providers
+            + catalog.external_api_providers
+            + catalog.external_subscription_providers
+            if any(route.id == route_id and route.entry_mode == "api" for route in entry.routes)
         ),
         None,
     )
     if entry is None:
         raise HTTPException(404, "Model not found", headers=NO_STORE)
-    api_routes = {route.id for route in entry.routes if route.entry_mode == "api"}
-    if selected is not None:
-        api_routes = {
-            route.id
-            for route in entry.routes
-            if route.entry_mode == "api" and route.credential_mode_header is not None
-        }
-        if not api_routes:
-            raise HTTPException(400, "Unsupported credential mode", headers=NO_STORE)
+    permissions = await _permissions(request, settings, entry.id)
+    if "llm:invoke" not in permissions:
+        raise HTTPException(403, "Model access denied", headers=NO_STORE)
+    route = next(route for route in entry.routes if route.id == route_id)
+    selected = route.provider_credential_source
+    permitted = _entitled(catalog, permissions)
+    destinations = next(
+        (
+            item.destinations
+            for entries in permitted.groups().values()
+            for item in entries
+            if item.id == entry.id
+        ),
+        [],
+    )
     data = [
         {"id": item.id, "object": "model", "created": 0, "owned_by": "neurwerk"}
-        for item in entry.destinations
+        for item in destinations
         if item.kind == "model"
-        and item.credential_modes
-        and (
-            selected is None
-            or (
-                any(mode.source == selected for mode in item.credential_modes)
-                and (selected != "global" or entry.global_credential_status == "configured")
-            )
-        )
-        and api_routes.intersection(item.endpoint_ids)
+        and any(mode.source == selected for mode in item.credential_modes)
+        and (selected != "global" or entry.global_credential_status == "configured")
+        and route_id in item.endpoint_ids
     ]
     if model is None:
         return JSONResponse({"object": "list", "data": data}, headers=NO_STORE)

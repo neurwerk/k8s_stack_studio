@@ -8,7 +8,8 @@ export interface GatewayEndpoint {
   url: string;
   entry_mode: "api" | "forward_proxy";
   caller_auth_modes: ("oidc_bearer" | "neurwerk_bearer" | "proxy_basic")[];
-  credential_mode_header?: "X-Neurwerk-Credential-Mode" | null;
+  identity_header: "Authorization" | "Authorization-Neurwerk" | "Proxy-Authorization";
+  provider_credential_source: CredentialSource;
 }
 
 export interface GatewayDestination {

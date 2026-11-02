@@ -63,7 +63,8 @@ function operations(destinations: GatewayDestination[], catalogProfiles: Gateway
     (profiles.has("openai-codex-responses-v1") && supports("openai-codex-responses-v1", "create"))) {
     const codex = profiles.has("openai-codex-responses-v1");
     result.push({ method: "post", path: "/responses", summary: codex ? "Create a Codex response (two headers required)" : "Create a response",
-       description: codex ? "Set both credentials in Authentication above the operations:\n\n| Header | Value |\n| --- | --- |\n| `X-Neurwerk-Authorization` | `Bearer <Neurwerk API key or eligible Keycloak token>` |\n| `Authorization` | `Bearer <Codex session token>` — not an OpenAI API key |" : undefined,
+       description: codex ? "Set both credentials in Authentication above the operations:\n\n| Header | Value |\n| --- | --- |\n| `Authorization-Neurwerk` | `Bearer <Neurwerk API key or eligible Keycloak access token>` |\n| `Authorization` | `Bearer <Codex access token>` — not an OpenAI API key |" : undefined,
+       parameters: codex ? [{ name: "chatgpt-account-id", in: "header", required: false, schema: { type: "string" }, description: "Account context supplied by your Codex client when required by the provider." }] : undefined,
        body: jsonBody({ model, input: { description: "Prompt text, or an array of structured input items for supported models.", oneOf: [{ type: "string", minLength: 1 }, { type: "array", minItems: 1, items: { type: "object" } }] }, instructions: { type: "string", description: "Optional instructions guiding the response." }, stream: { type: "boolean", default: codex, description: "Return incremental events instead of one complete response when supported." }, store: { type: "boolean", description: "Whether the provider may store this response when supported; use false to request no storage." }, max_output_tokens: { type: "integer", minimum: 1, description: "Upper limit on tokens generated in the response, subject to model and provider limits." } }, ["model", "input"],
         { model: sampleModel, input: "Say hello briefly.", stream: codex, ...(codex ? { store: false } : {}) }) });
   }
@@ -81,78 +82,70 @@ function endpointSpec(view: GatewayView) {
   const tags = groups.map(([, name]) => ({ name }));
   const securitySchemes: Record<string, object> = {
     NeurwerkKey: {
-      type: "apiKey", in: "header", name: "X-Neurwerk-Authorization",
-      "x-studio-label": "X-Neurwerk-Authorization (required)",
-      description: "Use a Neurwerk API key or an eligible Keycloak bearer token. [Create an API key](/api-keys).",
+      type: "http", scheme: "bearer",
+      "x-studio-label": "Neurwerk bearer (default routes and MCP)",
+      description: "Authorization: use a Neurwerk API key or eligible Keycloak access token. [Create an API key](/api-keys).",
+    },
+    NeurwerkOverrideKey: {
+      type: "apiKey", in: "header", name: "Authorization-Neurwerk",
+      "x-studio-label": "Authorization-Neurwerk (override and Codex)",
+      description: "Enter Bearer followed by your Neurwerk API key or eligible Keycloak access token. Provider credentials are separate.",
     },
   };
   let providerIndex = 0;
   for (const [group, title] of groups) {
     for (const entry of view.catalog[group]) {
-      const route = entry.routes.find((item) => item.entry_mode === "api" && item.caller_auth_modes.includes("neurwerk_bearer"));
-      if (!route) continue;
-      const tag = title;
-      const url = new URL(route.url);
-      const basePath = url.pathname.replace(/\/$/, "");
-      const destinations = entry.destinations.filter((destination) => destination.endpoint_ids.includes(route.id));
-      const profileIds = new Set(destinations.flatMap((destination) => destination.profile_ids));
-      const proxyRoute = entry.routes.find((item) => item.entry_mode === "forward_proxy" &&
-        item.caller_auth_modes.includes("proxy_basic") && destinations.some((destination) => destination.endpoint_ids.includes(item.id)));
-      const limitations = view.catalog.profiles.filter((profile) => profileIds.has(profile.id)).flatMap((profile) => profile.limitations);
-      const hasOverride = destinations.some((destination) => destination.kind === "model" &&
-        destination.credential_modes.some((mode) => mode.source === "override"));
-      const hasGlobal = destinations.some((destination) => destination.kind === "model" &&
-        destination.credential_modes.some((mode) => mode.source === "global")) && entry.global_credential_status === "configured";
-      const hasNone = destinations.some((destination) => destination.credential_modes.some((mode) => mode.source === "none"));
-      const providerOptional = hasGlobal || hasNone;
-      const providerHeader = profileIds.has("anthropic-messages-v1") ? "x-api-key" :
-        ["openai-chat-completions-v1", "openai-responses-v1", "openai-codex-responses-v1"].some((profile) => profileIds.has(profile)) ? "Authorization" : null;
-      const credentialName = profileIds.has("openai-codex-responses-v1") ? "CodexSubscriptionSession" :
-        `${entry.display_name.replace(/[^a-zA-Z0-9]/g, "") || "Provider"}ProviderKey`;
-      const providerScheme = hasOverride && providerHeader ? `${credentialName}_${String(providerIndex++)}` : null;
-      if (providerScheme && providerHeader) {
-        const codex = profileIds.has("openai-codex-responses-v1");
-        const keyPage = providerKeyPages[entry.provider_id ?? ""];
-        const providerName = entry.display_name.replace(/ sample$/i, "").replace(/ API$/i, "");
-        securitySchemes[providerScheme] = {
-          ...(providerHeader === "Authorization" ? { type: "http", scheme: "bearer" } :
-            { type: "apiKey", in: "header", name: providerHeader }),
-          "x-studio-label": codex ? "Codex bearer token (required for Codex)" :
-            `${providerName} API key (${providerOptional ? "required for override" : "required for invocation"})`,
-          description: codex
-            ? "Use a Codex session token from ChatGPT sign-in. [Learn about sign-in](https://developers.openai.com/codex/auth)."
-            : `Required for override invocation, not model discovery. Global mode requires a configured global credential and permission; none mode uses no provider credential.${keyPage ? ` [Create an API key](${keyPage}).` : ""} An invalid key does not fall back to the global credential.`,
-        };
-      }
-      for (const operation of operations(destinations, view.catalog.profiles)) {
-        const path = operation.path === "/responses" && basePath.endsWith("/responses") ? basePath : `${basePath}${operation.path}`;
-        const parameters = [...(operation.parameters ?? []), ...(operation.path === "/models/{model}" ? [{ name: "model", in: "path", required: true, schema: { type: "string", enum: destinations.filter((destination) => destination.kind === "model").map((destination) => destination.model ?? destination.id) } }] : [])];
-        if (route.credential_mode_header) {
-          parameters.push({
-            name: route.credential_mode_header, in: "header", required: false,
-            "x-fill-example": "no",
-            schema: { type: "string", enum: destinations.some((destination) => destination.kind === "mcp") ? ["none"] : ["global", "none", "override"] },
-            description: "Leave unset to preserve automatic credential selection. An explicit mode requires X-Neurwerk-Authorization and must be allowed for the destination and caller. Global requires a configured global credential; none uses no provider credential; override requires a provider credential for invocation only, never for model discovery. No fallback to another mode.",
-          });
+      for (const route of entry.routes.filter((item) => item.entry_mode === "api" && item.caller_auth_modes.includes("neurwerk_bearer"))) {
+        const tag = title;
+        const url = new URL(route.url);
+        const basePath = url.pathname.replace(/\/$/, "");
+        const destinations = entry.destinations.filter((destination) => destination.endpoint_ids.includes(route.id) &&
+          destination.credential_modes.some((mode) => mode.source === route.provider_credential_source));
+        if (!destinations.length || (route.provider_credential_source === "global" && entry.global_credential_status !== "configured")) continue;
+        const identityScheme = route.identity_header === "Authorization-Neurwerk" ? "NeurwerkOverrideKey" : "NeurwerkKey";
+        const profileIds = new Set(destinations.flatMap((destination) => destination.profile_ids));
+        const proxyRoute = entry.routes.find((item) => item.entry_mode === "forward_proxy" &&
+          item.caller_auth_modes.includes("proxy_basic") && destinations.some((destination) => destination.endpoint_ids.includes(item.id)));
+        const limitations = view.catalog.profiles.filter((profile) => profileIds.has(profile.id)).flatMap((profile) => profile.limitations);
+        const hasOverride = route.provider_credential_source === "override";
+        const providerHeader = profileIds.has("anthropic-messages-v1") ? "x-api-key" :
+          ["openai-chat-completions-v1", "openai-responses-v1", "openai-codex-responses-v1"].some((profile) => profileIds.has(profile)) ? "Authorization" : null;
+        const credentialName = profileIds.has("openai-codex-responses-v1") ? "CodexSubscriptionSession" :
+          `${entry.display_name.replace(/[^a-zA-Z0-9]/g, "") || "Provider"}ProviderKey`;
+        const providerScheme = hasOverride && providerHeader ? `${credentialName}_${String(providerIndex++)}` : null;
+        if (providerScheme && providerHeader) {
+          const codex = profileIds.has("openai-codex-responses-v1");
+          const keyPage = providerKeyPages[entry.provider_id ?? ""];
+          const providerName = entry.display_name.replace(/ sample$/i, "").replace(/ API$/i, "");
+          securitySchemes[providerScheme] = {
+            ...(providerHeader === "Authorization" ? { type: "http", scheme: "bearer" } :
+              { type: "apiKey", in: "header", name: providerHeader }),
+            "x-studio-label": codex ? "Codex bearer token (required for invocation)" :
+              `${providerName} API key (required for invocation)`,
+            description: codex
+              ? "Use a client-managed Codex access token from ChatGPT sign-in; not required for discovery. [Learn about sign-in](https://developers.openai.com/codex/auth)."
+              : `Required for invocation on this override endpoint, not model discovery.${keyPage ? ` [Create an API key](${keyPage}).` : ""} An invalid key does not fall back to the global credential.`,
+          };
         }
-        paths[path] ??= {};
-        paths[path][operation.method] = {
-          tags: [tag], summary: `${entry.display_name} · ${operation.summary}`,
-          description: [operation.description,
-            proxyRoute && profileIds.has("openai-codex-responses-v1") && operation.path === "/responses"
-              ? `**Also available through the inspected forward proxy**\n\nKeep the original Codex request URL and configure your client to use \`${proxyRoute.url}\` as its HTTPS proxy. Use a Neurwerk API key as the proxy password; Codex authentication stays with the client. [Proxy setup and certificate](/forward-proxy).` : undefined,
-            providerScheme && operation.method === "post" && !providerOptional && !profileIds.has("openai-codex-responses-v1")
-              ? "A provider API key is required for this operation. Enter it in Authentication above the operations." : undefined,
-             ...(group === "mcp-servers" ? [] : limitations)].filter(Boolean).join("\n\n"),
-          operationId: `${entry.id}-${operation.method}-${path}`,
-          servers: [{ url: url.origin }], parameters,
-          ...(providerScheme && operation.method === "post" ? {
-            security: providerOptional ? [{ NeurwerkKey: [], [providerScheme]: [] }, { NeurwerkKey: [] }] :
-              [{ NeurwerkKey: [], [providerScheme]: [] }],
-          } : {}),
-          ...(operation.body ? { requestBody: operation.body } : {}),
-          responses: { "200": { description: "Successful response (JSON or, where supported, SSE)" }, "401": { description: "Authentication rejected" }, "403": { description: "Permission denied" } },
-        };
+        for (const operation of operations(destinations, view.catalog.profiles)) {
+          const path = operation.path === "/responses" && basePath.endsWith("/responses") ? basePath : `${basePath}${operation.path}`;
+          const parameters = [...(operation.parameters ?? []), ...(operation.path === "/models/{model}" ? [{ name: "model", in: "path", required: true, schema: { type: "string", enum: destinations.filter((destination) => destination.kind === "model").map((destination) => destination.model ?? destination.id) } }] : [])];
+          paths[path] ??= {};
+          paths[path][operation.method] = {
+            tags: [tag], summary: `${entry.display_name} · ${route.provider_credential_source} · ${operation.summary}`,
+            description: [`Neurwerk identity: \`${route.identity_header}: Bearer <Neurwerk key or eligible access token>\`. Provider credential source: **${route.provider_credential_source}**, fixed by this endpoint.`, operation.description,
+              proxyRoute && profileIds.has("openai-codex-responses-v1") && operation.path === "/responses"
+                ? `**Also available through the inspected forward proxy**\n\nKeep the original Codex request URL and configure your client to use \`${proxyRoute.url}\` as its HTTPS proxy. Use a Neurwerk API key as the proxy password; Codex authentication stays with the client. [Proxy setup and certificate](/forward-proxy).` : undefined,
+              providerScheme && operation.method === "post" && !profileIds.has("openai-codex-responses-v1")
+                ? "A provider API key is required for this operation. Enter it in Authentication above the operations." : undefined,
+               ...(group === "mcp-servers" ? [] : limitations)].filter(Boolean).join("\n\n"),
+            operationId: `${entry.id}-${operation.method}-${path}`,
+            servers: [{ url: url.origin }], parameters,
+            security: [{ [identityScheme]: [], ...(providerScheme && operation.method === "post" ? { [providerScheme]: [] } : {}) }],
+            ...(operation.body ? { requestBody: operation.body } : {}),
+            responses: { "200": { description: "Successful response (JSON or, where supported, SSE)" }, "401": { description: "Authentication rejected" }, "403": { description: "Permission denied" } },
+          };
+        }
       }
     }
   }
@@ -200,7 +193,7 @@ function GatewayReference({ spec }: { spec: ReturnType<typeof endpointSpec> }) {
           for (const scheme of parsed.securitySchemes ?? []) {
             const input = loaded.shadowRoot.getElementById(`${scheme.type}-${scheme.securitySchemeId}-api-key-input`) as HTMLInputElement | null;
             if (!input) continue;
-            if (scheme.securitySchemeId === "NeurwerkKey") {
+            if (scheme.securitySchemeId === "NeurwerkOverrideKey") {
               input.placeholder = "Bearer <API key or Keycloak token>";
             } else if (scheme.type === "http" && scheme["x-studio-label"]) {
               input.placeholder = `${scheme["x-studio-label"].replace(/ \(.*\)$/, "")} (Bearer added automatically)`;
@@ -262,7 +255,8 @@ function GatewayContent({ subject }: { subject: string }) {
       <h2 className="mb-2 font-semibold text-foreground">Local preview credentials</h2>
       <p>No upstream provider calls. Use these credentials for local requests:</p>
       <ul className="mt-2 list-disc space-y-1 pl-5">
-        <li><code>X-Neurwerk-Authorization</code> (including MCP): <code>Bearer &lt;local Studio Keycloak token&gt;</code>.</li>
+        <li>Default routes and MCP: <code>Authorization: Bearer &lt;local Studio Keycloak access token&gt;</code>.</li>
+        <li>Override and Codex routes: <code>Authorization-Neurwerk: Bearer &lt;local Studio Keycloak access token&gt;</code>, with the provider credential in <code>Authorization</code>.</li>
         <li>OpenRouter/OpenAI key override: <code>studio-demo-provider-key</code>.</li>
         <li>Codex session: <code>studio-demo-codex-session</code>.</li>
       </ul>

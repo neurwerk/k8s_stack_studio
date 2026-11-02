@@ -21,6 +21,8 @@ def endpoint(tmp_path):
         "url": "https://gateway.example.test:443/operator/selected-endpoint",
         "entry_mode": "api",
         "caller_auth_modes": ["oidc_bearer", "neurwerk_bearer"],
+        "identity_header": "Authorization",
+        "provider_credential_source": "none",
     }
     destination = {
         "id": "custom-server",

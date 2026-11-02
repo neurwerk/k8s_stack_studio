@@ -33,6 +33,8 @@ def catalog():
                 "url": f"https://{name}.example.test:8443",
                 "entry_mode": "forward_proxy",
                 "caller_auth_modes": ["proxy_basic"],
+                "identity_header": "Proxy-Authorization",
+                "provider_credential_source": "override",
             }
             for name in ("visible", "hidden")
         ],
@@ -122,45 +124,52 @@ def projection(tmp_path):
     )
 
 
-@pytest.mark.parametrize("header", [None, "X-Neurwerk-Credential-Mode"])
-def test_route_credential_selector_does_not_expand_permissions(header):
+@pytest.mark.parametrize("source", ["global", "override"])
+def test_route_credential_source_does_not_expand_permissions(source):
     data = catalog()
     route = data["external-subscription-providers"][0]["routes"][0]
-    route.update(entry_mode="api", caller_auth_modes=["neurwerk_bearer"])
-    if header is not None:
-        route["credential_mode_header"] = header
+    route.update(
+        entry_mode="api",
+        caller_auth_modes=["neurwerk_bearer"],
+        provider_credential_source=source,
+        identity_header="Authorization-Neurwerk" if source == "override" else "Authorization",
+    )
     parsed = GatewayCatalog.model_validate(data)
     filtered = gateway._entitled(parsed, frozenset({"llm:invoke", "application:visible:invoke"}))
-    entry = filtered.external_subscription_providers[0]
-    assert [mode.source for mode in entry.destinations[0].credential_modes] == ["override"]
-    assert entry.routes[0].credential_mode_header == header
+    if source == "global":
+        assert filtered.external_subscription_providers == []
+    else:
+        entry = filtered.external_subscription_providers[0]
+        assert [mode.source for mode in entry.destinations[0].credential_modes] == ["override"]
+        assert entry.routes[0].provider_credential_source == source
 
 
 @pytest.mark.parametrize("kind", ["application", "mcp"])
-def test_route_credential_selector_optional_and_mcp_none(kind):
+def test_route_credential_source_mcp_none(kind):
     data = catalog()
     entry = data["external-subscription-providers"][0]
     entry["destinations"][0]["kind"] = kind
     entry["destinations"][0]["credential_modes"] = [{"source": "none", "required_permissions": []}]
-    for header in (None, "X-Neurwerk-Credential-Mode"):
-        entry["routes"][0].update(entry_mode="api", credential_mode_header=header)
-        GatewayCatalog.model_validate(data)
+    entry["routes"][0].update(
+        entry_mode="api", identity_header="Authorization", provider_credential_source="none"
+    )
+    GatewayCatalog.model_validate(data)
 
 
 @pytest.mark.parametrize(
     "header,entry_mode",
     [
         ("Other", "api"),
-        ("x-neurwerk-credential-mode", "api"),
+        ("authorization-neurwerk", "api"),
         (True, "api"),
-        ({"header": "X-Neurwerk-Credential-Mode"}, "api"),
-        ("X-Neurwerk-Credential-Mode", "forward_proxy"),
+        ({"header": "Authorization-Neurwerk"}, "api"),
+        ("Authorization-Neurwerk", "forward_proxy"),
     ],
 )
-def test_route_credential_selector_rejects_malformed_or_incompatible(header, entry_mode):
+def test_route_identity_header_rejects_malformed_or_incompatible(header, entry_mode):
     data = catalog()
     entry = data["external-subscription-providers"][0]
-    entry["routes"][0].update(entry_mode=entry_mode, credential_mode_header=header)
+    entry["routes"][0].update(entry_mode=entry_mode, identity_header=header)
     with pytest.raises(ValueError):
         GatewayCatalog.model_validate(data)
 
@@ -461,6 +470,11 @@ def test_credential_modes_require_provision_and_global_permission(modes, grants,
     data = catalog()
     entry = data["external-subscription-providers"][0]
     entry["provider_id"] = "example"
+    if modes == ["global"]:
+        entry["routes"][0].update(
+            entry_mode="api", identity_header="Authorization", provider_credential_source="global"
+        )
+        entry["global_credential_status"] = "configured"
     destination = entry["destinations"][0]
     destination["provider_id"] = "example"
     destination["credential_modes"] = [
@@ -468,7 +482,9 @@ def test_credential_modes_require_provision_and_global_permission(modes, grants,
     ]
     permissions = frozenset(destination["required_permissions"] + grants)
     filtered = gateway._entitled(GatewayCatalog.model_validate(data), permissions)
-    assert [mode.source for mode in filtered.destinations[0].credential_modes] == expected
+    assert [
+        mode.source for item in filtered.destinations for mode in item.credential_modes
+    ] == expected
 
 
 @pytest.mark.parametrize("source", ["company", "caller_supplied"])
@@ -523,8 +539,8 @@ async def test_simulator_discovery_needs_eligible_mode_not_provider_credentials(
     app, data, catalog_path = simulator
     entry = next(item for item in data["external-api-providers"] if item["id"] == "openrouter")
     destination = entry["destinations"][0]
-    headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
-    base = "/openrouter/api/v1"
+    headers = {"Authorization-Neurwerk": "Bearer synthetic-session"}
+    base = "/override/openrouter/api/v1"
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://localhost:4010"
     ) as client:
@@ -537,12 +553,12 @@ async def test_simulator_discovery_needs_eligible_mode_not_provider_credentials(
                 "",
             ):
                 response = await client.get(path, headers={**headers, "Authorization": provider})
-                assert response.status_code == 400
+                assert response.status_code == 200
                 assert response.headers["cache-control"] == "no-store"
         body = {"model": destination["model"], "messages": [{"role": "user", "content": "Hello"}]}
         assert (
             await client.post(f"{base}/chat/completions", headers=headers, json=body)
-        ).status_code == 403
+        ).status_code == 401
         response = await client.post(
             f"{base}/chat/completions",
             headers={**headers, "Authorization": "Bearer studio-demo-provider-key"},
@@ -567,7 +583,7 @@ async def test_simulator_override_credentials_never_fall_back_to_global(simulato
     app, data, _ = simulator
     app.state.simulator_permissions |= {"provider:openrouter:global-use"}
     entry = next(item for item in data["external-api-providers"] if item["id"] == "openrouter")
-    headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
+    headers = {"Authorization-Neurwerk": "Bearer synthetic-session"}
     chat = {
         "model": entry["destinations"][0]["model"],
         "messages": [{"role": "user", "content": "Hi"}],
@@ -575,8 +591,19 @@ async def test_simulator_override_credentials_never_fall_back_to_global(simulato
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://localhost:4010"
     ) as client:
-        path = "/openrouter/api/v1/chat/completions"
-        assert (await client.post(path, headers=headers, json=chat)).status_code == 200
+        path = "/override/openrouter/api/v1/chat/completions"
+        assert (await client.post(path, headers=headers, json=chat)).status_code == 401
+        assert (
+            await client.post(
+                "/openrouter/api/v1/chat/completions",
+                headers={
+                    "Authorization": "Bearer synthetic-session",
+                    "Authorization-Neurwerk": "ignored",
+                    "X-Neurwerk-Credential-Mode": "override",
+                },
+                json=chat,
+            )
+        ).status_code == 200
         for credential in (
             "Bearer not-a-key",
             "Bearer studio-demo-codex-session",
@@ -613,7 +640,7 @@ async def test_simulator_mcp_schema_envelope_arguments_and_local_cors(simulator,
     state = preview.PreviewState()
     state.connected.add("sample")
     monkeypatch.setattr(preview, "state", state)
-    headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
+    headers = {"Authorization": "Bearer synthetic-session"}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://localhost:4010"
     ) as client:
@@ -677,7 +704,7 @@ async def test_simulator_mcp_schema_envelope_arguments_and_local_cors(simulator,
                 headers={
                     "Origin": origin,
                     "Access-Control-Request-Method": "POST",
-                    "Access-Control-Request-Headers": "Content-Type,X-Neurwerk-Authorization",
+                    "Access-Control-Request-Headers": "Content-Type,Authorization",
                 },
             )
             assert response.status_code == expected
@@ -689,7 +716,7 @@ async def test_simulator_mcp_schema_envelope_arguments_and_local_cors(simulator,
 
 async def test_simulator_requires_nonempty_user_text_and_codex_input(simulator):
     app, _, _ = simulator
-    headers = {"X-Neurwerk-Authorization": "Bearer synthetic-session"}
+    headers = {"Authorization": "Bearer synthetic-session"}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app), base_url="http://localhost:4010"
     ) as client:
@@ -715,6 +742,7 @@ async def test_simulator_requires_nonempty_user_text_and_codex_input(simulator):
         )
         assert response.status_code == 200
         assert "do-not-echo" not in response.text
+        headers["Authorization-Neurwerk"] = headers["Authorization"]
         headers["Authorization"] = "Bearer studio-demo-codex-session"
         for prompt in (
             None,
