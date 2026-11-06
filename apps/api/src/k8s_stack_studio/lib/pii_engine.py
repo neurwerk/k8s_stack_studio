@@ -169,7 +169,7 @@ class PiiEngineClient:
         payload: dict[str, object] = {"request": _segment_payload(extracted)}
         if request.policy is not None:
             payload["policy"] = request.policy
-        data = await self._post("/v2/studio/analyze-segments", payload)
+        data = await self._request("POST", "/v2/studio/analyze-segments", payload)
         try:
             return StudioAnalyzeResponse.model_validate(_restore_response(data, extracted))
         except (ValueError, TypeError, KeyError) as error:
@@ -186,7 +186,7 @@ class PiiEngineClient:
         }
         if request.policy is not None:
             payload["policy"] = request.policy
-        data = await self._post("/v2/studio/evaluate-policy", payload)
+        data = await self._request("POST", "/v2/studio/evaluate-policy", payload)
         try:
             return _evaluation_response_adapter.validate_python(_restore_response(data, extracted))
         except (ValueError, TypeError, KeyError) as error:
@@ -194,7 +194,7 @@ class PiiEngineClient:
 
     async def get_actions(self) -> list[ActionDescription]:
         """Return the shared PII action registry."""
-        data = await self._get("/v1/actions")
+        data = await self._request("GET", "/v1/actions", None)
         if not isinstance(data, list):
             raise PiiEngineRequestError(502, "Invalid action registry response")
         try:
@@ -204,19 +204,11 @@ class PiiEngineClient:
 
     async def get_policy(self) -> PolicyResponse:
         """Return shared policy metadata and the normalized entity catalog."""
-        data = await self._get("/v1/policy")
+        data = await self._request("GET", "/v1/policy", None)
         try:
             return PolicyResponse.model_validate(data)
         except ValidationError as error:
             raise PiiEngineRequestError(502, "Invalid PII Engine policy response") from error
-
-    async def _post(self, path: str, payload: object) -> object:
-        """POST a typed payload and translate transport failures."""
-        return await self._request("POST", path, payload)
-
-    async def _get(self, path: str) -> object:
-        """GET a typed engine resource and translate transport failures."""
-        return await self._request("GET", path, None)
 
     async def _request(self, method: str, path: str, payload: object | None) -> object:
         """Execute one request through the dedicated client."""

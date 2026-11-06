@@ -74,14 +74,14 @@ async def _proxy_to_bridge(
         ) from exc
 
     if resp.status_code >= 400:
-        detail = await _extract_detail(resp)
+        detail = _extract_detail(resp)
         raise HTTPException(status_code=resp.status_code, detail=detail)
 
     result: dict[str, Any] | list[Any] = resp.json()
     return result
 
 
-async def _extract_detail(resp: httpx.Response) -> str:
+def _extract_detail(resp: httpx.Response) -> str:
     """Try to extract a detail message from an error response."""
     try:
         body: dict[str, Any] = resp.json()

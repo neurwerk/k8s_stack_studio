@@ -6,7 +6,7 @@ from typing import Literal
 
 import httpx
 from fastapi import Request
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from k8s_stack_studio.lib.dependencies import get_current_principal, get_settings
 from k8s_stack_studio.models.usage import UsageSourcesResponse
@@ -63,7 +63,7 @@ async def resolve_usage_key_names(result: UsageSourcesResponse, request: Request
             )
             response.raise_for_status()
             entries = TypeAdapter(list[UsageKeyName]).validate_json(response.content)
-        except (httpx.HTTPError, ValidationError, ValueError):
+        except (httpx.HTTPError, ValueError):
             enrichment.lookup_failed = True
             break
         requested = set(batch)

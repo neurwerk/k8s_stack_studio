@@ -45,10 +45,6 @@ def _https_url(value: object) -> str:
     raise ContextForgeAccountError
 
 
-def _origin(value: str) -> str:
-    return https_origin(value)
-
-
 class ContextForgeOAuthClient:
     """Expose only allowlisted native OAuth metadata for approved catalog mappings."""
 
@@ -105,7 +101,7 @@ class ContextForgeOAuthClient:
         if (
             gateway.get("authType") != "oauth"
             or config.get("grant_type") != "authorization_code"
-            or _origin(authorization_url) != item.oauth_authorization_origin
+            or https_origin(authorization_url) != item.oauth_authorization_origin
             or config.get("redirect_uri") != self.settings.contextforge_oauth_callback_url
             or gateway.get("authValue")
             or gateway.get("authHeaders")

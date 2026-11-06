@@ -7,7 +7,6 @@ from itertools import groupby, pairwise
 from zoneinfo import ZoneInfo
 
 import httpx
-from pydantic import ValidationError
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.models.gateway_metadata import GatewayFilters
@@ -157,7 +156,7 @@ class AgentGatewayClient:
             )
             response.raise_for_status()
             summary = AgentGatewayUserSummary.model_validate_json(response.content)
-        except (httpx.HTTPError, ValidationError, ValueError) as error:
+        except (httpx.HTTPError, ValueError) as error:
             raise AgentGatewayUsageError from error
         users_by_id: dict[str, UserUsageTotal] = {}
         if len({item.group for item in summary.groups}) != len(summary.groups):
@@ -210,7 +209,7 @@ class AgentGatewayClient:
                 )
                 response.raise_for_status()
                 summary = AgentGatewaySourceSummary.model_validate_json(response.content)
-            except (httpx.HTTPError, ValidationError, ValueError) as error:
+            except (httpx.HTTPError, ValueError) as error:
                 raise AgentGatewayUsageError from error
             if len({item.group for item in summary.groups}) != len(summary.groups):
                 raise AgentGatewayUsageError
@@ -292,7 +291,7 @@ class AgentGatewayClient:
             )
             response.raise_for_status()
             summary = AgentGatewayDailySummary.model_validate_json(response.content)
-        except (httpx.HTTPError, ValidationError, ValueError) as error:
+        except (httpx.HTTPError, ValueError) as error:
             raise AgentGatewayUsageError from error
         # Gateway clamps bucketSeconds to the whole-second span for a partial day.
         effective_seconds = min(seconds, max(1, int((end - start).total_seconds())))
@@ -366,7 +365,7 @@ class AgentGatewayClient:
             )
             response.raise_for_status()
             summary = AgentGatewaySummary.model_validate(response.json())
-        except (httpx.HTTPError, ValidationError, ValueError) as error:
+        except (httpx.HTTPError, ValueError) as error:
             raise AgentGatewayUsageError from error
 
         if len({item.group for item in summary.groups}) != len(summary.groups):
