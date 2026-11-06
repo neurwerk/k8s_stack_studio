@@ -104,13 +104,7 @@ def require_role(role: str) -> Callable[[Request], None]:
     """
 
     def _check_role(request: Request) -> None:
-        principal = request.scope.get("user")
-        if not isinstance(principal, StudioPrincipal):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Not authenticated",
-                headers={"Cache-Control": "no-store"},
-            )
+        principal = get_current_principal(request)
         if role not in principal.roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

@@ -7,7 +7,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import asyncpg
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from k8s_stack_studio import mcp_store
 from k8s_stack_studio.config.settings import Settings
@@ -172,7 +172,7 @@ def publication_snapshot(settings: Settings) -> tuple[Settings, dict[str, McpPub
         elif path.is_symlink():
             directory = path.resolve(strict=True).parent
         result = _snapshot(directory, path.name, settings)
-    except (OSError, ValueError, ValidationError):
+    except (OSError, ValueError):
         raise PublicationUnavailableError from None
     else:
         return result

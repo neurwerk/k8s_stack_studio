@@ -1,9 +1,4 @@
-"""Shared httpx.AsyncClient factory and lifespan management.
-
-Provides a single-argument ``request`` factory so every dependency can get a client
-without re-creating one.  The client is attached to ``app.state`` at startup and
-closed at shutdown.
-"""
+"""HTTP client factories and lifespan management for app.state clients."""
 
 from __future__ import annotations
 
@@ -12,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 
 from k8s_stack_studio.config.settings import Settings
 from k8s_stack_studio.lib.exceptions import PiiEngineTlsConfigError
@@ -96,8 +91,3 @@ async def http_client_lifespan(app: FastAPI) -> AsyncIterator[None]:
             app.state.mcp_credentials = McpCredentials(settings, bao)
             app.state.mcp_activation = McpActivation(settings, kube, app.state.agentgateway_client)
         yield
-
-
-async def get_http_client(request: Request) -> httpx.AsyncClient:
-    """FastAPI dependency: return the shared httpx.AsyncClient."""
-    return request.app.state.http_client
