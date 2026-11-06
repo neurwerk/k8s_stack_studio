@@ -477,9 +477,12 @@ dependencies = [
     { name = "httpx" },
     { name = "httpx2" },
     { name = "mcp" },
+    { name = "mcp-types" },
     { name = "neurwerk-request-segments" },
     { name = "prometheus-fastapi-instrumentator" },
+    { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "starlette" },
     { name = "uvicorn" },
 ]
 
@@ -502,9 +505,12 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx2", specifier = ">=2.10.0" },
     { name = "mcp", specifier = "==2.3.0" },
+    { name = "mcp-types", specifier = "==2.3.0" },
     { name = "neurwerk-request-segments", directory = "vendor/request_segments" },
     { name = "prometheus-fastapi-instrumentator", specifier = ">=8.0.2" },
+    { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pydantic-settings", specifier = ">=2.7" },
+    { name = "starlette", specifier = ">=0.46.0" },
     { name = "uvicorn", specifier = ">=0.34.0" },
 ]
 
