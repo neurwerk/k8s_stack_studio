@@ -34,6 +34,7 @@ def _parse_sample(value: object) -> SupportedRequest:
 
 
 type StudioRequest = Annotated[SupportedRequest, BeforeValidator(_parse_sample)]
+type McpSource = Annotated[str, Field(strict=True, max_length=64, pattern=r"^MCP_TOOL_[A-Z0-9_]+$")]
 
 
 class StrictModel(BaseModel):
@@ -98,9 +99,16 @@ class StudioAnalyzeRequest(StrictModel):
 
     request: StudioRequest
     policy: dict[str, JsonValue] | None = Field(default=None, max_length=16)
+    mcp_sources: list[McpSource] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def normalize_sources(self) -> StudioAnalyzeRequest:
+        """Normalize preview classifications without changing provider content."""
+        self.mcp_sources = sorted(set(self.mcp_sources))
+        return self
 
 
-class StudioPolicyEvaluationRequest(StrictModel):
+class StudioPolicyEvaluationRequest(StudioAnalyzeRequest):
     """Accept a request sample and an unvalidated bounded policy candidate."""
 
     request: StudioRequest

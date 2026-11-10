@@ -135,6 +135,12 @@ export const VALID_ACTIONS = [
   "reroute",
 ];
 
+export const MCP_SOURCE_ACTIONS = ["pass", "block", "reroute"];
+export const MCP_SOURCE_PATTERN = "MCP_TOOL_[A-Z0-9_]+";
+export function isMcpSource(entityType: string): boolean {
+  return entityType.startsWith("MCP_TOOL_");
+}
+
 export const CREDENTIAL_PATTERNS = [
   "\\bAKIA[0-9A-Z]{16}\\b",
   "\\bsk-[a-zA-Z0-9_-]{20,}\\b",
@@ -168,6 +174,7 @@ export function createDefaultState(): ConfigState {
         maskOnReroute: true,
         hashWindowHours: 24,
         entityPolicies: [
+          { entityType: "MCP_TOOL_DEFAULT", action: "block", params: {}, patterns: [] },
           { entityType: "PERSON_NAME", action: "replace", params: {}, patterns: [] },
           { entityType: "EMAIL_ADDRESS", action: "replace", params: {}, patterns: [] },
           {
@@ -204,6 +211,13 @@ function yamlString(value: string): string {
 }
 
 function normalizedEntityPolicy(entry: EntityPolicyEntry): Record<string, unknown> {
+  if (isMcpSource(entry.entityType)) {
+    return {
+      entityType: entry.entityType,
+      action: MCP_SOURCE_ACTIONS.includes(entry.action) ? entry.action : "block",
+      ...(entry.action === "reroute" && entry.routeClass ? { routeClass: entry.routeClass } : {}),
+    };
+  }
   const policy: Record<string, unknown> = {
     entityType: entry.entityType,
     action: entry.action,
@@ -242,15 +256,16 @@ function appendEntityPolicies(policy: ConfigState["piiEngine"]["pii"], lines: st
   }
   for (const entry of policy.entityPolicies) {
     lines.push(`${indent(4)}- entityType: ${yamlString(entry.entityType)}`);
-    lines.push(`${indent(5)}action: ${yamlString(entry.action)}`);
-    if (entry.routeClass) lines.push(`${indent(5)}routeClass: ${yamlString(entry.routeClass)}`);
+    const normalized = normalizedEntityPolicy(entry);
+    lines.push(`${indent(5)}action: ${yamlString(String(normalized.action))}`);
+    if (typeof normalized.routeClass === "string") lines.push(`${indent(5)}routeClass: ${yamlString(normalized.routeClass)}`);
     for (const [key, value] of Object.entries(normalizedEntityPolicy(entry))) {
       if (["entityType", "action", "routeClass", "patterns"].includes(key)) continue;
       lines.push(
         `${indent(5)}${key}: ${typeof value === "string" ? yamlString(value) : String(value)}`,
       );
     }
-    if (entry.patterns.length > 0) {
+    if (!isMcpSource(entry.entityType) && entry.patterns.length > 0) {
       lines.push(
         `${indent(5)}patterns:`,
         ...entry.patterns.map((pattern) => `${indent(6)}- ${yamlString(pattern)}`),

@@ -3,7 +3,7 @@
 import { Plus, Settings, Globe, Eye } from "lucide-react";
 
 import type { AttachmentMode, AttachmentPolicyVersion, ConfigState, ImageForwarding } from "@/lib/config-generator";
-import { PRESET_ENTITIES, SAFETY_RULES, VALID_ACTIONS } from "@/lib/config-generator";
+import { isMcpSource, PRESET_ENTITIES, SAFETY_RULES, VALID_ACTIONS } from "@/lib/config-generator";
 
 import { EntityRow } from "./config-panel/entity-row";
 import { SafetyRuleRow } from "./config-panel/safety-rule-row";
@@ -56,6 +56,7 @@ export function ConfigPanel({ state, onChange }: { state: ConfigState; onChange:
   const attachment = state.llmPolicyEngine.attachment;
   const attachmentVersion = state.llmPolicyEngine.attachmentPolicyVersion;
   const processingAttachments = attachment.mode === "process" || attachment.mode === "extract";
+  const fallback = engine.pii.entityPolicies.find((entry) => entry.entityType === "MCP_TOOL_DEFAULT") ?? { entityType: "MCP_TOOL_DEFAULT", action: "block", params: {}, patterns: [] };
 
   return <div className="policy-config space-y-5">
     <Section title="PII Engine Policy">
@@ -84,7 +85,14 @@ export function ConfigPanel({ state, onChange }: { state: ConfigState; onChange:
       <button className="inline-flex items-center gap-1 rounded border border-dashed px-2 py-1 text-[10px]" onClick={() => updateEngine({ safety: { ...engine.safety, custom: [...engine.safety.custom, { name: "customRule", pattern: "", action: "block", message: "Blocked by custom rule" }] } })}><Plus className="h-3 w-3" />Custom rule</button>
     </Section>
 
-    <Section title="PII Entity Policies"><div className="space-y-2">{engine.pii.entityPolicies.map((entry, index) => <EntityRow key={`${entry.entityType}-${index}`} entry={entry} onChange={(next) => { const policies = [...engine.pii.entityPolicies]; policies[index] = next; updatePii({ entityPolicies: policies }); }} onRemove={() => updatePii({ entityPolicies: engine.pii.entityPolicies.filter((_, item) => item !== index) })} />)}</div>
+    <Section title="MCP source rules">
+      <p className="text-[11px] text-muted-foreground">Gateway-assigned source classifications restrict the whole request across all models. An explicit source rule overrides the fallback for that source only. Pass leaves ordinary PII checks active. Missing rules use MCP_TOOL_DEFAULT; an omitted fallback blocks.</p>
+      <EntityRow entry={fallback} fixedName sourceRule defaultTarget={engine.routing.defaultTarget} onChange={(next) => updatePii({ entityPolicies: [...engine.pii.entityPolicies.filter((entry) => entry.entityType !== "MCP_TOOL_DEFAULT"), next] })} />
+      {engine.pii.entityPolicies.map((entry, index) => isMcpSource(entry.entityType) && entry.entityType !== "MCP_TOOL_DEFAULT" ? <EntityRow key={index} entry={entry} sourceRule defaultTarget={engine.routing.defaultTarget} usedNames={engine.pii.entityPolicies.filter((_, item) => item !== index).map((item) => item.entityType)} onChange={(next) => { const policies = [...engine.pii.entityPolicies]; policies[index] = next; updatePii({ entityPolicies: policies }); }} onRemove={() => updatePii({ entityPolicies: engine.pii.entityPolicies.filter((_, item) => item !== index) })} /> : null)}
+      <button className="btn btn-outline btn-xs" onClick={() => { let name = "MCP_TOOL_NEW_SOURCE"; let suffix = 2; while (usedTypes.has(name)) name = `MCP_TOOL_NEW_SOURCE_${suffix++}`; updatePii({ entityPolicies: [...engine.pii.entityPolicies, { entityType: name, action: "block", params: {}, patterns: [] }] }); }}><Plus className="h-3 w-3" />Add source rule</button>
+    </Section>
+
+    <Section title="PII Entity Policies"><div className="space-y-2">{engine.pii.entityPolicies.map((entry, index) => !isMcpSource(entry.entityType) ? <EntityRow key={`${entry.entityType}-${index}`} entry={entry} onChange={(next) => { const policies = [...engine.pii.entityPolicies]; policies[index] = next; updatePii({ entityPolicies: policies }); }} onRemove={() => updatePii({ entityPolicies: engine.pii.entityPolicies.filter((_, item) => item !== index) })} /> : null)}</div>
       <div className="flex gap-2"><button className="inline-flex items-center gap-1 rounded border border-dashed px-2 py-1 text-[10px]" onClick={() => updatePii({ entityPolicies: [...engine.pii.entityPolicies, { entityType: "NEW_ENTITY", action: "replace", params: {}, patterns: [] }] })}><Plus className="h-3 w-3" />Custom entity</button><select value="" onChange={(event) => { if (event.target.value) updatePii({ entityPolicies: [...engine.pii.entityPolicies, { entityType: event.target.value, action: "replace", params: {}, patterns: [] }] }); }}><option value="">+ Add preset</option>{presets.map((entity) => <option key={entity}>{entity}</option>)}</select></div>
     </Section>
 
