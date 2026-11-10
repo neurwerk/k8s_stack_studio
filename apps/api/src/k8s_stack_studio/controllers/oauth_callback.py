@@ -103,11 +103,14 @@ async def oauth_callback(
     params = request.query_params
     if (
         len(params) != len(params.multi_items())
-        or not set(params) <= {"code", "state", "error", "error_description", "iss"}
+        or not set(params)
+        <= {"code", "state", "error", "error_description", "iss", "session_state"}
         or not re.fullmatch(r"popup\.[A-Za-z0-9_-]{20,512}", params.get("state", ""))
         or len(params.get("error", "")) > 100
         or len(params.get("error_description", "")) > 500
         or len(params.get("iss", "")) > 2048
+        # Optional OIDC session metadata is opaque and never forwarded or rendered.
+        or len(params.get("session_state", "")) > 2048
     ):
         return _popup_response(settings, 400)
     if "iss" in params:
