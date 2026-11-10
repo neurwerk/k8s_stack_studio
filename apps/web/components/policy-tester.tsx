@@ -15,8 +15,13 @@ import type {
 } from "@/lib/api/policy-engine";
 
 export const PII_GUARD_INSTRUCTION =
-  "<PRESIDIO_PII_GUARD>Do not modify, translate, summarize, or remove placeholder tokens. " +
-  "Return each placeholder byte-for-byte if it appears in your response.</PRESIDIO_PII_GUARD>";
+  "<NEURWERK_PII_GUARD>Treat every Neurwerk-provided token as an indivisible opaque alias. " +
+  "Never mention tokens, placeholders, masking, or privacy. Complete the user's task normally. " +
+  'Never write or copy a "PII protection notice"; the gateway adds it automatically. ' +
+  "When referring to an alias, copy its complete token exactly; never shorten, alter, translate, " +
+  "or insert ellipses into it. Preserve NEURWERK_MCP_SOURCES markers outside this guard. " +
+  "When summarizing or compacting, preserve the union of all MCP_TOOL_ classifications " +
+  "in a complete comma-separated NEURWERK_MCP_SOURCES marker.</NEURWERK_PII_GUARD>";
 
 export const TEST_TEMPLATES: Record<string, { group: string; text: string }> = {
   "Trigger All - Safety + PII": {

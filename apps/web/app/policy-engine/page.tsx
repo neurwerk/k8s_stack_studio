@@ -23,6 +23,9 @@ export default function PolicyEnginePage() {
   const [showConfig, setShowConfig] = useState(false);
   const [useDraftPolicy, setUseDraftPolicy] = useState(false);
   const [testText, setTestText] = useState(DEFAULT_TEXT);
+  const [mcpSourceText, setMcpSourceText] = useState("");
+  const mcpSources = mcpSourceText.trim() ? mcpSourceText.trim().split(/[\s,]+/) : [];
+  const validSources = mcpSources.length <= 32 && mcpSources.every((source) => source.length <= 64 && /^MCP_TOOL_[A-Z0-9_]+$/.test(source));
   const [template, setTemplate] = useState("");
 
   const [loading, setLoading] = useState(false);
@@ -47,7 +50,7 @@ export default function PolicyEnginePage() {
   };
 
   const handleEvaluate = async () => {
-    if (!testText.trim()) return;
+    if (!testText.trim() || !validSources) return;
     const requestId = ++evaluationId.current;
     setLoading(true);
     setError(null);
@@ -55,7 +58,7 @@ export default function PolicyEnginePage() {
     try {
       const req = buildRequest(testText);
       const policy = useDraftPolicy ? toPolicyOverride(config.piiEngine) : undefined;
-      const res = await policyEngineEvaluate(req, policy);
+      const res = await policyEngineEvaluate(req, policy, mcpSources);
       if (requestId === evaluationId.current) setResult(res);
     } catch {
       if (requestId === evaluationId.current) {
@@ -169,6 +172,11 @@ export default function PolicyEnginePage() {
                className="textarea textarea-bordered w-full bg-base-100 font-mono text-sm resize-y"
               placeholder="Enter text to test against the policy engine..."
             />
+            <label className="block space-y-1 text-sm" htmlFor="policy-test-sources">MCP sources (optional)
+              <input id="policy-test-sources" className="input input-bordered w-full font-mono text-sm" value={mcpSourceText} aria-invalid={!validSources} onChange={(event) => { setMcpSourceText(event.target.value); clearEvaluation(); }} placeholder="MCP_TOOL_SALESFORCE, MCP_TOOL_BRAVE" />
+              <span className="block text-[11px] text-muted-foreground">Preview gateway-assigned classifications; separate up to 32 names with commas or spaces. This does not assign sources in real traffic.</span>
+              {!validSources && <span className="block text-xs text-error">Use MCP_TOOL_ names with uppercase letters, digits or underscores, at most 64 characters each (maximum 32 inputs).</span>}
+            </label>
             {error && (
                <div className="alert alert-error flex items-start gap-2" role="alert">
                  <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -190,7 +198,7 @@ export default function PolicyEnginePage() {
               </label>
               <button
                 onClick={() => { void handleEvaluate(); }}
-                disabled={loading || !testText.trim()}
+                disabled={loading || !testText.trim() || !validSources}
                 aria-busy={loading}
                  className="btn btn-primary shrink-0 gap-2"
               >

@@ -276,6 +276,102 @@ async def test_client_evaluate_uses_dedicated_studio_path_without_headers(
     }
 
 
+@pytest.mark.parametrize("endpoint", ["analyze", "evaluate"])
+@pytest.mark.parametrize(
+    "sources",
+    [[], ["MCP_TOOL_Z", "MCP_TOOL_DEFAULT", "MCP_TOOL_Z", "MCP_TOOL_" + "A" * 55]],
+)
+async def test_preview_sources_are_only_segment_metadata(
+    client, mock_http_client, endpoint, sources
+):
+    mock_http_client.request = AsyncMock(
+        return_value=httpx.Response(
+            200, json=studio_response() if endpoint == "analyze" else evaluation_response()
+        )
+    )
+    model = StudioAnalyzeRequest if endpoint == "analyze" else StudioPolicyEvaluationRequest
+    request = model.model_validate(request_model().model_dump() | {"mcp_sources": sources})
+
+    result = await getattr(client, endpoint)(request)
+
+    call = mock_http_client.request.await_args
+    assert call is not None
+    payload = call.kwargs["json"]
+    assert "mcp_sources" not in payload
+    if sources:
+        assert payload["request"]["mcp_sources"] == sorted(set(sources))
+    else:
+        assert "mcp_sources" not in payload["request"]
+    assert result.request.model_dump() == request_model().request.model_dump() | {
+        "messages": [ChatMessage(role="user", content="email *************").model_dump()]
+    }
+
+
+@pytest.mark.parametrize("model", [StudioAnalyzeRequest, StudioPolicyEvaluationRequest])
+@pytest.mark.parametrize(
+    "sources",
+    [
+        ["MCP_TOOL_"],
+        ["MCP_TOOL_lower"],
+        [" MCP_TOOL_A"],
+        ["MCP_TOOL_A\n"],
+        ["MCP_TOOL_A-B"],
+        ["MCP_TOOL_" + "A" * 56],
+        [1],
+        ["MCP_TOOL_A"] * 33,
+        "MCP_TOOL_A",
+        None,
+    ],
+)
+def test_preview_rejects_invalid_source_classifications(model, sources):
+    with pytest.raises(ValidationError):
+        model.model_validate(request_model().model_dump() | {"mcp_sources": sources})
+
+
+@pytest.mark.parametrize("endpoint", ["analyze", "evaluate"])
+async def test_source_only_reply_needs_no_text_spans(client, mock_http_client, endpoint):
+    payload = studio_response() if endpoint == "analyze" else evaluation_response()
+    payload.update(
+        decision="reroute",
+        route_class="local-model",
+        remote_allowed=False,
+        entities=["MCP_TOOL_DEFAULT"],
+        entity_counts={"MCP_TOOL_DEFAULT": 1},
+        applied_actions=["reroute"],
+        segments=[{"id": "s0", "text": "email a@example.com"}],
+    )
+    payload["analysis"] = cast(dict[str, object], payload["analysis"]) | {
+        "scan_performed": False,
+        "duration_ms": None,
+    }
+    if endpoint == "evaluate":
+        payload["report"] = {
+            "rows": [
+                {
+                    "entity_type": "MCP_TOOL_DEFAULT",
+                    "action": "reroute",
+                    "detected_count": 1,
+                    "transformed_count": 0,
+                    "unique_transformed_count": 0,
+                }
+            ]
+        }
+        payload["diagnostics"] = {
+            "logical_detections": [],
+            "effective_regions": [],
+            "truncated": False,
+        }
+    mock_http_client.request = AsyncMock(return_value=httpx.Response(200, json=payload))
+    request = request_model() if endpoint == "analyze" else evaluation_request_model()
+
+    result = await getattr(client, endpoint)(request)
+
+    assert result.decision == "reroute"
+    assert result.request == request.request
+    assert result.analysis.scan_performed is False
+    assert result.analysis.duration_ms is None
+
+
 @pytest.mark.parametrize(
     "update",
     [

@@ -72,11 +72,13 @@ export type PolicyOverride = Record<string, unknown>;
 export interface AnalyzeRequest {
   request: SupportedRequest;
   policy?: PolicyOverride;
+  mcp_sources?: string[];
 }
 
 export interface EvaluateRequest {
   request: SupportedRequest;
   policy?: PolicyOverride;
+  mcp_sources?: string[];
   simulation?: "deterministic_echo";
 }
 
@@ -200,16 +202,20 @@ export type EvaluateResponse = ValidEvaluateResponse | InvalidEvaluateResponse;
 export async function policyEngineAnalyze(
   request: SupportedRequest,
   policy?: PolicyOverride,
+  mcpSources: string[] = [],
 ): Promise<AnalyzeResponse> {
   const body: AnalyzeRequest = policy ? { request, policy } : { request };
+  if (mcpSources.length) body.mcp_sources = mcpSources;
   return apiPost<AnalyzeRequest, AnalyzeResponse>("/policy-engine/analyze", body);
 }
 
 export async function policyEngineEvaluate(
   request: SupportedRequest,
   policy?: PolicyOverride,
+  mcpSources: string[] = [],
 ): Promise<EvaluateResponse> {
   const body: EvaluateRequest = policy ? { request, policy } : { request };
+  if (mcpSources.length) body.mcp_sources = mcpSources;
   return apiPost<EvaluateRequest, EvaluateResponse>("/policy-engine/evaluate", body);
 }
 
