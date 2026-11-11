@@ -10,6 +10,50 @@ import pytest
 from k8s_stack_studio.config.settings import Settings
 
 
+@pytest.mark.parametrize("enabled", [True, "true", "1", "yes", "on"])
+@pytest.mark.parametrize("source", ["environment", "constructor", "model", "alias"])
+def test_enabled_retired_operator_discovery_requires_migration(monkeypatch, source, enabled):
+    name = "contextforge_operator_discovery_enabled"
+    environment = "K8S_STUDIO_CONTEXTFORGE_OPERATOR_DISCOVERY_ENABLED"
+    with pytest.raises(ValueError, match=r"is retired;.*MCP Setup with admin discovery"):
+        if source == "environment":
+            monkeypatch.setenv(environment, str(enabled))
+            Settings()
+        elif source == "constructor":
+            Settings(**{name: enabled})
+        else:
+            Settings.model_validate({environment if source == "alias" else name: enabled})
+
+
+@pytest.mark.parametrize("disabled", [False, "false", "0", "no", "off"])
+@pytest.mark.parametrize("source", ["environment", "constructor", "model", "alias"])
+def test_disabled_retired_remnants_allow_managed_setup(monkeypatch, tmp_path, source, disabled):
+    from tests.test_mcp_publication import configured_projection
+
+    managed, _ = configured_projection(tmp_path)
+    name = "contextforge_operator_discovery_enabled"
+    environment = "K8S_STUDIO_CONTEXTFORGE_OPERATOR_DISCOVERY_ENABLED"
+    values = managed.model_dump()
+    values.update(
+        {
+            "contextforge_operator_email": "retired@example.test",
+            "contextforge_operator_subject": "retired-subject",
+            "contextforge_operator_role_id": "retired-role",
+        }
+    )
+    if source == "environment":
+        monkeypatch.setenv(environment, str(disabled))
+        settings = Settings(**values)
+    elif source == "constructor":
+        settings = Settings(**values, **{name: disabled})
+    else:
+        settings = Settings.model_validate(
+            {**values, environment if source == "alias" else name: disabled}
+        )
+    assert settings.mcp_setup_enabled and settings.contextforge_admin_discovery_enabled
+    assert settings.model_dump() == managed.model_dump()
+
+
 def test_tls_verification_is_enabled_by_default() -> None:
     """Production clients start with TLS verification and no local bypass."""
     s = Settings(

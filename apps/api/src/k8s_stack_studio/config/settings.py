@@ -7,7 +7,7 @@ from typing import Literal, Self
 from urllib.parse import SplitResult, quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from k8s_stack_studio.models.mcp import McpRegistration
@@ -75,6 +75,17 @@ class InvalidContextForgeOAuthConfigError(ValueError):
         super().__init__(
             "Personal MCP OAuth requires account onboarding, trusted-proxy service auth, "
             "approved HTTPS Studio/callback origins and per-integration authorization origins."
+        )
+
+
+class RetiredOperatorDiscoveryError(ValueError):
+    """Named-operator discovery must be migrated rather than silently disabled."""
+
+    def __init__(self) -> None:
+        """Identify the retired switch without exposing configured identities."""
+        super().__init__(
+            "contextforge_operator_discovery_enabled is retired; remove the enabled setting "
+            "and use MCP Setup with admin discovery."
         )
 
 
@@ -225,6 +236,16 @@ class Settings(BaseSettings):
     mcp_connections_enabled: bool = False
     contextforge_oauth_studio_origin: str = ""
     contextforge_oauth_callback_url: str = ""
+    # Rejection-only tombstone: parse constructor/env booleans, never enable a runtime mode.
+    retired_operator_discovery_enabled: bool = Field(
+        default=False,
+        exclude=True,
+        repr=False,
+        validation_alias=AliasChoices(
+            "contextforge_operator_discovery_enabled",
+            "K8S_STUDIO_CONTEXTFORGE_OPERATOR_DISCOVERY_ENABLED",
+        ),
+    )
     contextforge_admin_discovery_enabled: bool = False
     # Loaded only from the verified setup projection, never from browser input.
     contextforge_admin_discovery_role_id: str = ""
@@ -463,6 +484,14 @@ class Settings(BaseSettings):
         ):
             raise InvalidContextForgeAccountConfigError
         return self
+
+    @field_validator("retired_operator_discovery_enabled")
+    @classmethod
+    def reject_retired_operator_discovery(cls, enabled: bool) -> bool:
+        """Allow disabled remnants but never silently accept the retired mode."""
+        if enabled:
+            raise RetiredOperatorDiscoveryError
+        return enabled
 
     @model_validator(mode="after")
     def validate_contextforge_oauth_config(self) -> Self:
