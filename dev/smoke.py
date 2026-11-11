@@ -131,16 +131,11 @@ def main() -> None:
                 assert {item["id"] for item in catalog.json()} == {"context7", "brave", "github"}
                 assert all(item["permitted"] for item in catalog.json())
             if username == "viewer":
-                github = next(item for item in catalog.json() if item["id"] == "github")
-                assert not github["can_discover"]
                 viewer_status = client.get("/api/me/mcp/github/status", headers=headers)
                 assert viewer_status.json()["status"] == "connect required"
                 viewer_tools = client.post("/api/me/mcp/github/tools", headers=headers, json={})
                 assert viewer_tools.status_code == 403
                 assert client.get("/api/dev/mcp/scenarios", headers=headers).status_code == 403
-                assert client.post("/api/me/mcp/github/discover", headers={
-                    **headers, "Origin": base,
-                }, json={}).status_code == 403
                 viewer_id = session.json()["subject"]
                 assert (
                     client.get(
@@ -172,7 +167,6 @@ def main() -> None:
                 )
             if username != "developer":
                 continue
-            assert next(item for item in catalog.json() if item["id"] == "github")["can_discover"]
             assert client.get("/api/dev/mcp/scenarios", headers=headers).status_code == 200
             reset = client.post("/api/dev/mcp/scenario", headers=headers, json={
                 "integration": "github", "publication": "published", "check": "passed",
@@ -197,9 +191,6 @@ def main() -> None:
             sample["check"] = "passed"
             changed = client.post("/api/dev/mcp/scenario", headers=headers, json=sample)
             assert changed.status_code == 200
-            assert client.post("/api/me/mcp/github/discover", headers={
-                **headers, "Origin": base,
-            }, json={}).status_code == 409
             connection = client.post("/api/me/mcp/github/connect", headers={
                 **headers, "Origin": base,
             }, json={})
@@ -207,11 +198,6 @@ def main() -> None:
             assert client.get(connection.json()["authorization_url"]).status_code == 200
             github_status = client.get("/api/me/mcp/github/status", headers=headers)
             assert github_status.json()["status"] == "connected"
-            assert client.post("/api/me/mcp/github/discover", headers={
-                **headers, "Origin": base,
-            }, json={}).status_code == 200
-            github_publication = client.get("/api/me/mcp/github/publication", headers=headers)
-            assert github_publication.json()["state"] == "pending-discovery"
             assert client.post("/api/dev/mcp/publish", headers=headers, json={}).status_code == 200
             github_tools = client.post("/api/me/mcp/github/tools", headers=headers, json={})
             assert github_tools.status_code == 200

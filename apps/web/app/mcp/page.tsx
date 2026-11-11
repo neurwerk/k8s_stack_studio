@@ -6,7 +6,6 @@ import type { McpCatalogEntry, McpConnectionStatus } from "@/lib/api/mcp";
 import { ApiRequestError } from "@/lib/api/client";
 import { useVerifiedSession } from "@/lib/auth/session-context";
 import { McpTable } from "@/components/mcp-table";
-import { afterDiscovery } from "@/lib/mcp-checks";
 import { McpRefresh, waitForMcpRetry } from "@/lib/mcp-refresh";
 
 type RefreshResult = [PromiseSettledResult<McpCatalogEntry[]>, PromiseSettledResult<McpConnectionStatus | null>];
@@ -20,12 +19,11 @@ export default function McpPage() {
     <McpCatalog
       key={JSON.stringify([session.subject, session.agentgateway_roles])}
       connectionsEnabled={!!session.mcp_connections_available}
-      previewEnabled={process.env.NEXT_PUBLIC_STUDIO_MCP_PREVIEW === "true" && session.realm_roles.includes("mcp-admin")}
     />
   );
 }
 
-function McpCatalog({ connectionsEnabled, previewEnabled }: { connectionsEnabled: boolean; previewEnabled: boolean }) {
+function McpCatalog({ connectionsEnabled }: { connectionsEnabled: boolean }) {
   const [items, setItems] = useState<McpCatalogEntry[]>([]);
   const [revisions, setRevisions] = useState<Record<string, number>>({});
   const [pendingRefresh, setPendingRefresh] = useState<Record<string, boolean>>({});
@@ -41,12 +39,10 @@ function McpCatalog({ connectionsEnabled, previewEnabled }: { connectionsEnabled
   const inFlight = useRef(false);
   const refreshing = useRef(new Map<string, McpRefresh<RefreshResult | null>>());
   const connectionVersions = useRef<Record<string, number>>({});
-  const publicationAfter = useRef<Record<string, string>>({});
   const statusRetryDeadline = useRef<Record<string, number>>({});
   const connectionRetryDeadline = useRef(0);
 
-  function refreshIntegration(id: string, discoveredAt?: string): Promise<void> {
-    if (discoveredAt) publicationAfter.current[id] = discoveredAt;
+  function refreshIntegration(id: string): Promise<void> {
     setPendingRefresh((previous) => ({ ...previous, [id]: true }));
     connectionVersions.current[id] = (connectionVersions.current[id] ?? 0) + 1;
     let controller = refreshing.current.get(id);
@@ -87,7 +83,7 @@ function McpCatalog({ connectionsEnabled, previewEnabled }: { connectionsEnabled
       setItems((previous) => previous.flatMap((item) => {
         if (item.id !== id) return [item];
         const updated = catalog.value.find((entry) => entry.id === id);
-        return updated ? [afterDiscovery(updated, publicationAfter.current[id])] : [];
+        return updated ? [updated] : [];
       }));
       setError("");
     } else {
@@ -230,7 +226,6 @@ function McpCatalog({ connectionsEnabled, previewEnabled }: { connectionsEnabled
         !error &&
         (items.length ? (
           <McpTable
-            showDiscovery={!previewEnabled}
             items={items}
             connections={connections}
             revisions={revisions}

@@ -3,7 +3,6 @@
 import { Fragment, useState, useEffect } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { McpConnection } from "@/components/mcp-connection";
-import { McpDiscovery } from "@/components/mcp-discovery";
 import { fetchMcpTools, mcpError, runMcpCheck } from "@/lib/api/mcp";
 import { ApiRequestError } from "@/lib/api/client";
 import { McpChecks, checkSummary, skipReason, needsMcpMetadataRefresh } from "@/lib/mcp-checks";
@@ -11,7 +10,6 @@ import type { IntegrationChecks, CheckState } from "@/lib/mcp-checks";
 import type { McpCatalogEntry, McpConnectionStatus, McpCheck } from "@/lib/api/mcp";
 
 interface TableProps {
-  showDiscovery?: boolean;
   items: McpCatalogEntry[];
   connections: Record<string, McpConnectionStatus>;
   revisions: Record<string, number>;
@@ -21,7 +19,7 @@ interface TableProps {
   connectionError: string;
   statusRetryUntil: Record<string, number>;
   connectionRetryUntil: number;
-  onRefresh: (id: string, discoveredAt?: string) => Promise<void>;
+  onRefresh: (id: string) => Promise<void>;
 }
 
 export function McpTable(props: TableProps) {
@@ -76,7 +74,7 @@ function CheckedAt({ value }: { value: string }) {
   );
 }
 
-function McpRow({ item, connections, connectionsEnabled, checking, connectionError, connectionRetryUntil, statusRetryUntil, onRefresh, pendingRefresh, state, onRecheck, showDiscovery = true }:
+function McpRow({ item, connections, connectionsEnabled, checking, connectionError, connectionRetryUntil, statusRetryUntil, onRefresh, pendingRefresh, state, onRecheck }:
   TableProps & { item: McpCatalogEntry; state?: IntegrationChecks; onRecheck: () => void }) {
   const [expanded, setExpanded] = useState(false);
   // A clock only unlocks the manual action. It never starts another check.
@@ -141,9 +139,7 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
             {personal && item.permitted && connectionsEnabled && <McpConnection id={item.id}
               appearance="link" status={connection?.status} onRefresh={() => void onRefresh(item.id)} />}
           </div>
-          {personal && item.can_discover && showDiscovery && <div className="mt-2"><McpDiscovery id={item.id}
-             initial={item.publication} onRefresh={(marker) => onRefresh(item.id, marker)} /></div>}
-          {(!item.can_discover || !showDiscovery) && item.permitted && item.publication?.state !== "published" && item.publication && (
+          {item.permitted && item.publication?.state !== "published" && item.publication && (
              <p className="mt-2 text-foreground">
               {item.publication.state === "error" ? "Publication failed" : item.publication.state === "unavailable"
                 ? "Publication status unavailable" : "Tool discovery pending"}

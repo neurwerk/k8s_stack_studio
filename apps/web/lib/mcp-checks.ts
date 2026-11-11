@@ -21,14 +21,6 @@ interface Driver {
   error: (error: unknown) => { message: string; retryAfter?: number };
 }
 
-export function afterDiscovery(item: McpCatalogEntry, marker?: string): McpCatalogEntry {
-  if (marker && item.publication?.state === "published" &&
-    (!item.publication.checked_at || !(Date.parse(item.publication.checked_at) > Date.parse(marker)))) {
-    return { ...item, publication: { ...item.publication, state: "pending-discovery" } };
-  }
-  return item;
-}
-
 export function skipReason(item: McpCatalogEntry, connection?: McpConnectionStatus): string {
   if (!item.permitted) return "No permission";
   if (item.publication && item.publication.state !== "published") return "Tools not published";

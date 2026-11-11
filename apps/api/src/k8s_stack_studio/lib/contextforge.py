@@ -229,14 +229,13 @@ class ContextForgeAccountClient:
             raise ContextForgeAccountError
         await self._ensure_membership(email, created=False, expected_role="owner")
 
-    async def _roles(self, email: str, *, operator: bool = False) -> set[str]:
+    async def _roles(self, email: str) -> set[str]:
         result = self._json(
             await self._request(
                 "GET",
                 f"/rbac/users/{quote(email, safe='')}/roles",
                 params={"active_only": "false"}
-                if operator
-                or (
+                if (
                     self.settings.contextforge_admin_discovery_enabled
                     and self.settings.contextforge_admin_discovery_role_id
                 )
@@ -249,11 +248,6 @@ class ContextForgeAccountClient:
             self.settings.contextforge_global_role_id: ("global", None),
             self.settings.contextforge_team_role_id: ("team", self.settings.contextforge_team_id),
         }
-        if operator:
-            expected[self.settings.contextforge_operator_role_id] = (
-                "team",
-                self.settings.contextforge_team_id,
-            )
         found: set[str] = set()
         discovery_seen = False
         for value in result:
@@ -370,41 +364,6 @@ class ContextForgeAccountClient:
         actual_expiry = self._discovery_expiration(_object(self._json(result)), email)
         if not 45 <= (actual_expiry - datetime.now(UTC)).total_seconds() <= DISCOVERY_GRANT_SECONDS:
             raise ContextForgeAccountError
-
-    async def check_operator(self, email: str) -> None:
-        """Read-only verification of the named operator; never create or repair grants."""
-        if (
-            not self.settings.contextforge_operator_discovery_enabled
-            or email != self.settings.contextforge_operator_email
-            or not self.settings.contextforge_operator_role_id
-        ):
-            raise ContextForgeAccountError
-        await self._check_configuration()
-        user = self._check_user(
-            self._json(
-                await self._request("GET", f"/auth/email/admin/users/{quote(email, safe='')}")
-            ),
-            email,
-        )
-        role_id = self.settings.contextforge_operator_role_id
-        role = _object(self._json(await self._request("GET", f"/rbac/roles/{role_id}")))
-        if (
-            user.get("is_active") is not True
-            or role.get("id") != role_id
-            or role.get("name") != self.settings.contextforge_operator_role_name
-            or role.get("scope") != "team"
-            or role.get("is_active") is not True
-            or role.get("inherits_from") is not None
-            or role.get("permissions") != ["gateways.update"]
-            or await self._roles(email, operator=True)
-            != {
-                self.settings.contextforge_global_role_id,
-                self.settings.contextforge_team_role_id,
-                role_id,
-            }
-        ):
-            raise ContextForgeAccountError
-        await self._ensure_membership(email, created=False)
 
     def _check_membership(
         self, value: object, email: str, *, expected_role: str = "member"

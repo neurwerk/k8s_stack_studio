@@ -95,6 +95,8 @@ class McpForwarding(BaseModel):
 class McpRegistration(BaseModel):
     """Fixed mapping to an operator-owned native registration and virtual server."""
 
+    # Serialized fields and defaults bind saved setup intent; retain them even when
+    # a runtime consumer is retired. Changing them requires an explicit state migration.
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str = Field(min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_-]+$")
@@ -191,7 +193,6 @@ class McpCatalogEntry(BaseModel):
     authentication_model: AuthenticationModel
     permitted: bool
     connection_status: Literal["status unavailable"] | None
-    can_discover: bool = False
     publication: McpPublicationStatus | None = None
 
 
@@ -201,12 +202,6 @@ class McpPublicationStatus(BaseModel):
     state: Literal["pending-discovery", "published", "error", "unavailable"]
     checked_at: datetime | None = None
     error_code: str | None = None
-
-
-class McpDiscoverResponse(BaseModel):
-    """Native discovery completion is not proof of setup publication."""
-
-    discovered_at: datetime
 
 
 ConnectionStatus = Literal["connected", "refresh pending", "connect required", "status unavailable"]

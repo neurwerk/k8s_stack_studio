@@ -146,9 +146,6 @@ def catalog(principal: Principal) -> list[dict[str, object]]:
             "authentication_model": item.authentication_model,
             "permitted": {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles,
             "connection_status": "status unavailable" if item.id == "github" else None,
-            "can_discover": item.id == "github"
-            and "mcp-admin" in principal.roles
-            and "mcp:github:invoke" in principal.agentgateway_roles,
             "publication": _publication(item.id),
         }
         for item in INTEGRATIONS
@@ -181,13 +178,6 @@ def status(integration: str, principal: Principal) -> dict[str, object]:
     return connections(principal)["github"]
 
 
-@mcp.get("/{integration}/publication")
-def publication(integration: str, principal: Principal) -> dict[str, str | None]:
-    """Publish status is not personal connection state."""
-    _admit(principal, integration)
-    return _publication(integration)
-
-
 @mcp.post("/{integration}/connect")
 def connect(integration: str, request: Request, principal: Principal) -> dict[str, str]:
     """Open a one-time local popup; no external provider is contacted."""
@@ -200,22 +190,6 @@ def connect(integration: str, request: Request, principal: Principal) -> dict[st
         "authorization_url": f"http://localhost:4010/oauth/callback?ticket={ticket}",
         "callback_origin": "http://localhost:4010",
     }
-
-
-@mcp.post("/{integration}/discover")
-def discover(integration: str, request: Request, principal: Principal) -> dict[str, str]:
-    """An administrator discovers with their own existing sample connection."""
-    _admit(principal, integration)
-    if (
-        integration != "github"
-        or "mcp-admin" not in principal.roles
-        or request.headers.get("origin") != "http://localhost:3001"
-    ):
-        raise HTTPException(403, "MCP administrator and local Studio origin required")
-    if state.connection(principal) != "connected":
-        raise HTTPException(409, "Connect your own provider account first")
-    state.publication[integration] = "pending-discovery"
-    return {"discovered_at": _stamp()}
 
 
 def _available(integration: str, principal: StudioPrincipal) -> McpRegistration:

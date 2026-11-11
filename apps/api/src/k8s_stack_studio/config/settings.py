@@ -7,7 +7,7 @@ from typing import Literal, Self
 from urllib.parse import SplitResult, quote, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from k8s_stack_studio.models.mcp import McpRegistration
@@ -75,6 +75,17 @@ class InvalidContextForgeOAuthConfigError(ValueError):
         super().__init__(
             "Personal MCP OAuth requires account onboarding, trusted-proxy service auth, "
             "approved HTTPS Studio/callback origins and per-integration authorization origins."
+        )
+
+
+class RetiredOperatorDiscoveryError(ValueError):
+    """Named-operator discovery must be migrated rather than silently disabled."""
+
+    def __init__(self) -> None:
+        """Identify the retired switch without exposing configured identities."""
+        super().__init__(
+            "contextforge_operator_discovery_enabled is retired; remove the enabled setting "
+            "and use MCP Setup with admin discovery."
         )
 
 
@@ -225,15 +236,19 @@ class Settings(BaseSettings):
     mcp_connections_enabled: bool = False
     contextforge_oauth_studio_origin: str = ""
     contextforge_oauth_callback_url: str = ""
-    contextforge_operator_discovery_enabled: bool = False
+    # Rejection-only tombstone: parse constructor/env booleans, never enable a runtime mode.
+    retired_operator_discovery_enabled: bool = Field(
+        default=False,
+        exclude=True,
+        repr=False,
+        validation_alias=AliasChoices(
+            "contextforge_operator_discovery_enabled",
+            "K8S_STUDIO_CONTEXTFORGE_OPERATOR_DISCOVERY_ENABLED",
+        ),
+    )
     contextforge_admin_discovery_enabled: bool = False
     # Loaded only from the verified setup projection, never from browser input.
     contextforge_admin_discovery_role_id: str = ""
-    contextforge_operator_email: str = Field(default="", max_length=254)
-    contextforge_operator_subject: str = Field(default="", max_length=254)
-    contextforge_operator_role_name: str = "neurwerk-mcp-discovery"
-    # Resolved only from the trusted setup projection, never from browser input.
-    contextforge_operator_role_id: str = ""
     contextforge_publication_status_path: str = ""
     mcp_setup_enabled: bool = False
     mcp_openbao_url: str = "https://infra-openbao.infra-openbao.svc.cluster.local:8200"
@@ -446,7 +461,7 @@ class Settings(BaseSettings):
             raise InvalidContextForgeAccountConfigError
         return self
 
-    @field_validator("contextforge_service_account_email", "contextforge_operator_email")
+    @field_validator("contextforge_service_account_email")
     @classmethod
     def validate_contextforge_service_email(cls, value: str) -> str:
         """Accept only a canonical operator-configured native identity, never request input."""
@@ -458,28 +473,25 @@ class Settings(BaseSettings):
         return value.lower()
 
     @model_validator(mode="after")
-    def validate_operator_discovery(self) -> Self:
-        """Discovery needs an explicit bound identity and the existing private proxy."""
+    def validate_admin_discovery(self) -> Self:
+        """Discovery needs role-based admission and the existing private proxy."""
         if self.contextforge_admin_discovery_enabled and (
-            self.contextforge_operator_discovery_enabled
-            or not self.contextforge_account_onboarding_enabled
+            not self.contextforge_account_onboarding_enabled
             or not self.mcp_connections_enabled
             or self.contextforge_service_auth_mode != "trusted-proxy"
             or not self.contextforge_publication_status_path
             or not self.contextforge_oauth_studio_origin
         ):
             raise InvalidContextForgeAccountConfigError
-        if self.contextforge_operator_discovery_enabled and (
-            not self.contextforge_account_onboarding_enabled
-            or self.contextforge_service_auth_mode != "trusted-proxy"
-            or not self.contextforge_operator_email
-            or not self.contextforge_operator_subject
-            or not self.contextforge_publication_status_path
-            or not self.contextforge_operator_role_name
-            or not self.contextforge_oauth_studio_origin
-        ):
-            raise InvalidContextForgeAccountConfigError
         return self
+
+    @field_validator("retired_operator_discovery_enabled")
+    @classmethod
+    def reject_retired_operator_discovery(cls, enabled: bool) -> bool:
+        """Allow disabled remnants but never silently accept the retired mode."""
+        if enabled:
+            raise RetiredOperatorDiscoveryError
+        return enabled
 
     @model_validator(mode="after")
     def validate_contextforge_oauth_config(self) -> Self:
