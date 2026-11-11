@@ -29,6 +29,7 @@ from k8s_stack_studio.lib.mcp_credentials import CredentialRecord, McpSetupError
 from k8s_stack_studio.lib.mcp_publication import personal_snapshot, publication_snapshot
 from k8s_stack_studio.models.mcp import McpRegistration
 from tests.test_mcp_admin_discovery import admin_projection, native_grant
+from tests.test_mcp_publication import PRE_CLEANUP_BINDING, REGISTRATION, configured_projection
 
 
 @pytest.fixture
@@ -64,6 +65,29 @@ def principal(subject="one", *, roles=None, grants=None, verified=True):
         ),
         {"email": subject + "@example.test", "email_verified": verified},
     )
+
+
+async def test_pre_cleanup_registration_preserves_durable_setup(database, tmp_path):
+    settings, _ = configured_projection(tmp_path)
+    settings.notice_database_url = database
+    item = McpRegistration.model_validate_json(REGISTRATION.read_text())
+    assert mcp_store.binding(item) == PRE_CLEANUP_BINDING
+    async with mcp_store.connection(database) as conn:
+        await conn.execute(
+            "INSERT INTO mcp_setups "
+            "(integration_id,revision,selected_tools,published_tools,enabled,binding,actor) "
+            "VALUES ('github',7,'[\"read\"]','{\"read\":\"github_read\"}',true,$1,"
+            "'existing-owner')",
+            PRE_CLEANUP_BINDING,
+        )
+    before = await mcp_store.setups(database)
+    live, statuses = await personal_snapshot(settings)
+    assert statuses["github"].state == "published"
+    assert live.mcp_catalog[0].tool_names == {"read": "github_read"}
+    assert mcp_store.binding(live.mcp_catalog[0]) == PRE_CLEANUP_BINDING
+    assert (await mcp_store.setups(database)) == before
+    assert before["github"]["selected_tools"] == ["read"]
+    assert before["github"]["actor"] == "existing-owner" and before["github"]["revision"] == 7
 
 
 def setup_projection(tmp_path, dsn):

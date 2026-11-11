@@ -64,7 +64,7 @@ def _statuses(publication: _Publication) -> dict[str, McpPublicationStatus]:
     return statuses
 
 
-def _binding(directory: Path, settings: Settings) -> str:
+def _check_binding(directory: Path, settings: Settings) -> None:
     fields = [
         ("team_id", "contextforge_team_id"),
         ("global_role_id", "contextforge_global_role_id"),
@@ -74,26 +74,6 @@ def _binding(directory: Path, settings: Settings) -> str:
         value = _read(directory, key).strip()
         if not value or value != getattr(settings, field):
             raise PublicationUnavailableError
-    if not settings.contextforge_operator_discovery_enabled:
-        return ""
-    # These keys are deliberately absent after failed/disabled Base admission.
-    for key, field in (
-        ("operator_email", "contextforge_operator_email"),
-        ("operator_subject", "contextforge_operator_subject"),
-    ):
-        if not (directory / key).exists() or _read(directory, key).strip() != getattr(
-            settings, field
-        ):
-            return ""
-    if not (directory / "operator_role_id").exists():
-        return ""
-    role_id = _read(directory, "operator_role_id").strip()
-    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", role_id) or role_id in {
-        settings.contextforge_global_role_id,
-        settings.contextforge_team_role_id,
-    }:
-        return ""
-    return role_id
 
 
 def _snapshot(
@@ -119,7 +99,7 @@ def _snapshot(
     ):
         raise PublicationUnavailableError
     statuses = _statuses(publication)
-    if settings.mcp_setup_enabled and _read(directory, "setup_mode") != "studio-v1":
+    if _read(directory, "setup_mode") != "studio-v1":
         raise PublicationUnavailableError
     if any(status.state != "error" for identity, status in statuses.items() if identity not in ids):
         raise PublicationUnavailableError
@@ -131,11 +111,11 @@ def _snapshot(
         if statuses[item.id].state == "pending-discovery" and item.tool_names:
             raise PublicationUnavailableError
     # Re-run the normal configuration validators for live native mappings.
+    _check_binding(directory, settings)
     live = Settings.model_validate(
         {
             **settings.model_dump(),
             "mcp_catalog": catalog,
-            "contextforge_operator_role_id": _binding(directory, settings),
             "contextforge_admin_discovery_role_id": _admin_role(directory, settings),
         }
     )
@@ -164,6 +144,8 @@ def publication_snapshot(settings: Settings) -> tuple[Settings, dict[str, McpPub
     """Resolve Kubernetes' ..data once so all sibling reads belong to one update."""
     if not settings.contextforge_publication_status_path:
         return settings, {}
+    if not settings.mcp_setup_enabled:
+        raise PublicationUnavailableError
     try:
         path = Path(settings.contextforge_publication_status_path)
         directory = path.parent

@@ -1,0 +1,20 @@
+{
+  "id": "github",
+  "name": "GitHub",
+  "authentication_model": "individual-authentication",
+  "credential": {
+    "owner": "individual",
+    "required": true,
+    "method": "oauth",
+    "header": ""
+  },
+  "forwarding": null,
+  "upstream_url": "https://provider.example.test/mcp",
+  "native_url": "",
+  "gateway_id": "fixed-gateway",
+  "server_id": "fixed-server",
+  "oauth_authorization_origin": "https://provider.example.test",
+  "approved_tools": [],
+  "tool_names": {},
+  "checks": []
+}

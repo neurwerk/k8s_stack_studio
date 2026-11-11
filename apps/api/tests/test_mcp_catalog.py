@@ -298,7 +298,6 @@ async def test_catalog_verified_permission_boundary(roles, permitted):
                 "authentication_model": "individual-authentication",
                 "permitted": permitted,
                 "connection_status": "status unavailable",
-                "can_discover": False,
                 "publication": None,
             }
         ]

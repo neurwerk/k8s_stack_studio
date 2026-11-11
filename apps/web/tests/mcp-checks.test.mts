@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { McpChecks, checkSummary, afterDiscovery, needsMcpMetadataRefresh } from "../lib/mcp-checks.ts";
+import { McpChecks, checkSummary, needsMcpMetadataRefresh } from "../lib/mcp-checks.ts";
 import { McpRefresh, waitForMcpRetry } from "../lib/mcp-refresh.ts";
 import type { McpCatalogEntry, McpTool, McpCheckResult, McpConnectionStatus } from "../lib/api/mcp";
 
@@ -218,25 +218,6 @@ void test("read-only saved-status retry waits for Retry-After and checks only a 
   await settled(checks);
   assert.equal(reads, 1);
   assert.equal(calls, 2);
-  checks.stop();
-});
-
-void test("discovery waits for a fresh publication before checks resume", async () => {
-  let calls = 0;
-  const checks = new McpChecks(driver({ tools: () => { calls++; return Promise.resolve(tools); } }));
-  checks.start(() => { /* No UI subscriber in this test. */ });
-  const marker = "2026-01-01T12:00:00Z";
-  const published = (checked_at: string | null) => entry("fixture", {
-    publication: { state: "published", checked_at, error_code: null },
-  });
-  for (const timestamp of [null, "2026-01-01T11:59:59Z", marker]) {
-    checks.sync([afterDiscovery(published(timestamp), marker)], {}, { fixture: 1 });
-    await tick();
-    assert.equal(calls, 0);
-  }
-  checks.sync([afterDiscovery(published("2026-01-01T12:00:01Z"), marker)], {}, { fixture: 2 });
-  await settled(checks);
-  assert.equal(calls, 1);
   checks.stop();
 });
 

@@ -19,7 +19,7 @@ from k8s_stack_studio.lib.http_client import _create_client
 
 router = APIRouter(tags=["mcp"])
 
-# Exact v1.0.11 success-page envelope. Never relay its HTML, gateway names or headers.
+# Native success-page envelope (including v1.1.1). Never relay HTML, names or headers.
 _NATIVE_POPUP = re.compile(
     r"<!DOCTYPE html><html><head><title>OAuth Authorization Successful</title></head>"
     r'<body><script nonce="[A-Za-z0-9_+/=-]{0,128}">'
@@ -52,12 +52,14 @@ def _popup_response(settings: Settings, status_code: int) -> HTMLResponse:
     )
 
 
-async def _native_popup_succeeded(settings: Settings, code: str, state: str) -> bool:
+async def _native_popup_succeeded(
+    settings: Settings, code: str, state: str, issuer: str | None
+) -> bool:
     # A fresh, short-lived client cannot share a user's or provisioner's cookie jar.
     request = httpx.Request(
         "GET",
         settings.contextforge_url.rstrip("/") + "/oauth/callback",
-        params={"code": code, "state": state},
+        params={"code": code, "state": state, **({"iss": issuer} if issuer is not None else {})},
     )
     async with _create_client(
         verify=settings.contextforge_ca_cert or True, trust_env=False
@@ -114,7 +116,7 @@ async def oauth_callback(
     ):
         return _popup_response(settings, 400)
     if "iss" in params:
-        # Syntax-only metadata: never select a destination or claim issuer/state binding.
+        # Validate syntax only; native OAuth owns issuer/state binding. Preserve the value.
         try:
             _https_url(params["iss"])
         except ContextForgeAccountError:
@@ -125,7 +127,9 @@ async def oauth_callback(
         return _popup_response(settings, 400)
     try:
         async with asyncio.timeout(30):
-            succeeded = await _native_popup_succeeded(settings, code, params["state"])
+            succeeded = await _native_popup_succeeded(
+                settings, code, params["state"], params.get("iss")
+            )
     except (httpx.HTTPError, ValueError, RecursionError, TimeoutError):
         succeeded = False
     return _popup_response(settings, 200 if succeeded else 502)

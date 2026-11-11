@@ -7,7 +7,6 @@ export interface McpCatalogEntry {
   authentication_model: "no-authentication" | "shared-authentication" | "individual-authentication";
   permitted: boolean;
   connection_status: "status unavailable" | null;
-  can_discover?: boolean;
   publication?: McpPublicationStatus | null;
 }
 
@@ -15,16 +14,6 @@ export interface McpPublicationStatus {
   state: "pending-discovery" | "published" | "error" | "unavailable";
   checked_at: string | null;
   error_code: string | null;
-}
-
-export function fetchMcpPublication(id: string, signal?: AbortSignal): Promise<McpPublicationStatus> {
-  return apiGet<McpPublicationStatus>(`/me/mcp/${encodeURIComponent(id)}/publication`, undefined, signal);
-}
-
-export function discoverMcp(id: string): Promise<{ discovered_at: string }> {
-  return apiPost<Record<string, never>, { discovered_at: string }>(
-    `/me/mcp/${encodeURIComponent(id)}/discover`, {},
-  );
 }
 
 export function fetchMcpConnection(id: string): Promise<McpConnectionStatus> {

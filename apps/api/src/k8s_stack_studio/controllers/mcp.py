@@ -19,10 +19,7 @@ from k8s_stack_studio.lib.contextforge import (
     ContextForgeAccountMissingError,
     ContextForgeRateLimitError,
 )
-from k8s_stack_studio.lib.contextforge_oauth import (
-    ContextForgeDiscoveryBusyError,
-    ContextForgeOAuthClient,
-)
+from k8s_stack_studio.lib.contextforge_oauth import ContextForgeOAuthClient
 from k8s_stack_studio.lib.dependencies import get_current_principal, get_settings, require_role
 from k8s_stack_studio.lib.mcp_gateway import (
     McpGatewayError,
@@ -36,8 +33,6 @@ from k8s_stack_studio.models.mcp import (
     McpCheckResult,
     McpConnectionStatus,
     McpConnectResponse,
-    McpDiscoverResponse,
-    McpPublicationStatus,
     McpRegistration,
     McpTool,
 )
@@ -83,48 +78,15 @@ async def _live_settings(request: Request, settings: Settings = Depends(get_sett
     return live
 
 
-def _named_operator(principal: StudioPrincipal, settings: Settings) -> bool:
-    return (
-        settings.contextforge_operator_discovery_enabled
-        and bool(settings.contextforge_operator_role_id)
-        and principal.subject == settings.contextforge_operator_subject
-        and principal.profile.get("email_verified") is True
-        and isinstance(principal.profile.get("email"), str)
-        and str(principal.profile["email"]).lower() == settings.contextforge_operator_email
-    )
-
-
-def _discovery_admin(principal: StudioPrincipal, settings: Settings) -> bool:
-    return (
-        settings.contextforge_admin_discovery_enabled
-        and bool(settings.contextforge_admin_discovery_role_id)
-        and "mcp-admin" in principal.roles
-        and principal.profile.get("email_verified") is True
-    )
-
-
 async def _check_caller(
     request: Request,
-    principal: StudioPrincipal,
     settings: Settings,
     email: str,
     *,
     prepare: bool = False,
 ) -> None:
     client = ContextForgeAccountClient(settings, request.app.state.contextforge_admin_client)
-    if (
-        settings.contextforge_operator_discovery_enabled
-        and email == settings.contextforge_operator_email
-    ):
-        if principal.subject != settings.contextforge_operator_subject:
-            raise HTTPException(status_code=403, detail="Approved MCP operator binding is required")
-        if _named_operator(principal, settings):
-            await client.check_operator(email)
-        else:
-            # Withheld operator admission may still permit the strict ordinary profile.
-            # Never create or repair the configured operator even in this case.
-            await client.check_account(email)
-    elif prepare:
+    if prepare:
         await client.prepare_account(email)
     else:
         await client.check_account(email)
@@ -198,7 +160,7 @@ async def connect(
     response.headers["Cache-Control"] = "no-store"
     try:
         async with asyncio.timeout(30):
-            await _check_caller(request, principal, settings, email, prepare=True)
+            await _check_caller(request, settings, email, prepare=True)
             authorization_url = await ContextForgeOAuthClient(
                 settings, request.app.state.contextforge_oauth_client, email
             ).authorize(item)
@@ -224,7 +186,7 @@ async def connection_status(
     response.headers["Cache-Control"] = "no-store"
     try:
         async with asyncio.timeout(30):
-            await _check_caller(request, principal, settings, email)
+            await _check_caller(request, settings, email)
             return await ContextForgeOAuthClient(
                 settings, request.app.state.contextforge_oauth_client, email
             ).status(item)
@@ -252,7 +214,7 @@ async def connection_statuses(
     email = _verified_email(principal)
     try:
         async with asyncio.timeout(30):
-            await _check_caller(request, principal, settings, email)
+            await _check_caller(request, settings, email)
     except ContextForgeAccountMissingError:
         return {
             item.id: McpConnectionStatus(status="connect required", checked_at=datetime.now(UTC))
@@ -325,9 +287,7 @@ async def _prepare_tool_caller(
         raise HTTPException(status_code=401, detail="A signed-in caller is required")
     try:
         async with asyncio.timeout(30):
-            await _check_caller(
-                request, principal, settings, _verified_email(principal), prepare=True
-            )
+            await _check_caller(request, settings, _verified_email(principal), prepare=True)
     except (ContextForgeAccountError, TimeoutError) as exc:
         raise _native_unavailable(exc) from None
     return authorization
@@ -396,7 +356,7 @@ async def prepare_account(
     response.headers["Cache-Control"] = "no-store"
     try:
         async with asyncio.timeout(30):
-            await _check_caller(request, principal, settings, email, prepare=True)
+            await _check_caller(request, settings, email, prepare=True)
     except (ContextForgeAccountError, TimeoutError):
         raise HTTPException(
             status_code=502,
@@ -423,12 +383,6 @@ async def get_catalog(
             name=item.name,
             authentication_model=item.authentication_model,
             permitted={"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles,
-            can_discover=(
-                not settings.mcp_setup_enabled
-                and (_named_operator(principal, settings) or _discovery_admin(principal, settings))
-                and item.authentication_model == "individual-authentication"
-                and {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles
-            ),
             publication=request.state.mcp_publication.get(item.id),
             connection_status=(
                 "status unavailable"
@@ -438,77 +392,3 @@ async def get_catalog(
         )
         for item in settings.mcp_catalog
     ]
-
-
-@router.get("/{integration_id}/publication")
-async def publication_status(
-    integration_id: str,
-    response: Response,
-    principal: StudioPrincipal = Depends(get_current_principal),
-    settings: Settings = Depends(get_settings),
-) -> McpPublicationStatus:
-    """Polling is a read only; it never triggers discovery or a Kubernetes Job."""
-    response.headers["Cache-Control"] = "no-store"
-    if not settings.mcp_catalog_enabled or not settings.contextforge_publication_status_path:
-        raise HTTPException(status_code=404, detail="MCP publication status is not enabled")
-    if not {"llm:invoke", f"mcp:{integration_id}:invoke"} <= principal.agentgateway_roles:
-        raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
-    try:
-        _, statuses = await personal_snapshot(settings)
-        if integration_id not in statuses:
-            raise HTTPException(status_code=404, detail="MCP integration is not available")
-        return statuses[integration_id]
-    except PublicationUnavailableError:
-        return McpPublicationStatus(state="unavailable")
-
-
-@router.post("/{integration_id}/discover")
-async def discover(
-    integration_id: str,
-    body: PrepareAccountRequest,
-    request: Request,
-    response: Response,
-    principal: StudioPrincipal = Depends(get_current_principal),
-    settings: Settings = Depends(_live_settings),
-) -> McpDiscoverResponse:
-    """Explicit administrator discovery using only the verified caller's own connection."""
-    response.headers["Cache-Control"] = "no-store"
-    if settings.mcp_setup_enabled:
-        raise HTTPException(status_code=404, detail="Refresh tools from MCP Setup")
-    if not (
-        settings.contextforge_operator_discovery_enabled
-        or settings.contextforge_admin_discovery_enabled
-    ):
-        raise HTTPException(status_code=404, detail="MCP operator discovery is not enabled")
-    if not (_named_operator(principal, settings) or _discovery_admin(principal, settings)):
-        raise HTTPException(
-            status_code=403, detail="MCP discovery administrator permission is required"
-        )
-    if request.headers.get("origin") != settings.contextforge_oauth_studio_origin:
-        raise HTTPException(status_code=403, detail="Approved Studio origin is required")
-    item = next((item for item in settings.mcp_catalog if item.id == integration_id), None)
-    if item is None or item.authentication_model != "individual-authentication":
-        raise HTTPException(status_code=404, detail="MCP OAuth discovery is not available")
-    if not {"llm:invoke", f"mcp:{item.id}:invoke"} <= principal.agentgateway_roles:
-        raise HTTPException(status_code=403, detail="Missing approved MCP invocation permission")
-    email = _verified_email(principal)
-    try:
-        async with asyncio.timeout(45):
-            if settings.contextforge_admin_discovery_enabled:
-                await ContextForgeAccountClient(
-                    settings, request.app.state.contextforge_admin_client
-                ).prepare_discovery(email)
-            else:
-                await _check_caller(request, principal, settings, email)
-            await ContextForgeOAuthClient(
-                settings, request.app.state.contextforge_oauth_client, email
-            ).discover(item)
-    except ContextForgeDiscoveryBusyError:
-        raise HTTPException(
-            status_code=409,
-            detail="Discovery is already running for this integration",
-            headers={"Cache-Control": "no-store"},
-        ) from None
-    except (ContextForgeAccountError, TimeoutError) as exc:
-        raise _native_unavailable(exc) from None
-    return McpDiscoverResponse(discovered_at=datetime.now(UTC))
