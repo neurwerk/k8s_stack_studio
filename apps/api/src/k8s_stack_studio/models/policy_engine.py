@@ -100,6 +100,9 @@ class StudioAnalyzeRequest(StrictModel):
     request: StudioRequest
     policy: dict[str, JsonValue] | None = Field(default=None, max_length=16)
     mcp_sources: list[McpSource] = Field(default_factory=list, max_length=32)
+    destination_model: str | None = Field(
+        default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+    )
 
     @model_validator(mode="after")
     def normalize_sources(self) -> StudioAnalyzeRequest:

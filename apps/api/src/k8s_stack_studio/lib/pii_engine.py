@@ -73,7 +73,9 @@ def _engine_error_detail(response: httpx.Response) -> str:
     return detail
 
 
-def _segment_payload(extracted: ExtractedRequest, mcp_sources: list[str]) -> dict[str, object]:
+def _segment_payload(
+    extracted: ExtractedRequest, mcp_sources: list[str], destination_model: str | None
+) -> dict[str, object]:
     payload: dict[str, object] = {
         "api_version": "v2",
         "request_kind": extracted.request_kind,
@@ -85,6 +87,8 @@ def _segment_payload(extracted: ExtractedRequest, mcp_sources: list[str]) -> dic
     }
     if mcp_sources:
         payload["mcp_sources"] = mcp_sources
+    if destination_model is not None:
+        payload["destination_model"] = destination_model
     return payload
 
 
@@ -169,7 +173,9 @@ class PiiEngineClient:
     async def analyze(self, request: StudioAnalyzeRequest) -> StudioAnalyzeResponse:
         """Analyze a supported request and optional request-local policy preview."""
         extracted = _extract_sample(request.request)
-        payload: dict[str, object] = {"request": _segment_payload(extracted, request.mcp_sources)}
+        payload: dict[str, object] = {
+            "request": _segment_payload(extracted, request.mcp_sources, request.destination_model)
+        }
         if request.policy is not None:
             payload["policy"] = request.policy
         data = await self._request("POST", "/v2/studio/analyze-segments", payload)
@@ -184,7 +190,7 @@ class PiiEngineClient:
         """Evaluate a policy candidate and parse strict model-free evidence."""
         extracted = _extract_sample(request.request)
         payload: dict[str, object] = {
-            "request": _segment_payload(extracted, request.mcp_sources),
+            "request": _segment_payload(extracted, request.mcp_sources, request.destination_model),
             "simulation": request.simulation,
         }
         if request.policy is not None:

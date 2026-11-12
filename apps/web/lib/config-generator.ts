@@ -70,6 +70,7 @@ export interface ConfigState {
       maskOnReroute: boolean;
       hashWindowHours: number;
       entityPolicies: EntityPolicyEntry[];
+      modelSourcePolicies: Record<string, EntityPolicyEntry[]>;
     };
     attachments: { policy: "block"; faces: { action: FaceAction; routeClass: string } };
     safety: { enabled: string[]; custom: SafetyRule[] };
@@ -173,6 +174,7 @@ export function createDefaultState(): ConfigState {
         analyzerEntities: [],
         maskOnReroute: true,
         hashWindowHours: 24,
+        modelSourcePolicies: {},
         entityPolicies: [
           { entityType: "MCP_TOOL_DEFAULT", action: "block", params: {}, patterns: [] },
           { entityType: "PERSON_NAME", action: "replace", params: {}, patterns: [] },
@@ -244,6 +246,9 @@ export function toPolicyOverride(policy: ConfigState["piiEngine"]): Record<strin
     pii: {
       ...policy.pii,
       entityPolicies: policy.pii.entityPolicies.map(normalizedEntityPolicy),
+      modelSourcePolicies: Object.fromEntries(Object.entries(policy.pii.modelSourcePolicies).map(
+        ([model, rules]) => [model, rules.map(normalizedEntityPolicy)],
+      )),
     },
   };
 }
@@ -309,6 +314,15 @@ function appendPolicy(
     `${indent(3)}hashWindowHours: ${pii.hashWindowHours}`,
   );
   appendEntityPolicies(pii, lines);
+  lines.push(`${indent(3)}modelSourcePolicies:${Object.keys(pii.modelSourcePolicies).length ? "" : " {}"}`);
+  for (const [model, rules] of Object.entries(pii.modelSourcePolicies)) {
+    lines.push(`${indent(4)}${yamlString(model)}:${rules.length ? "" : " []"}`);
+    for (const entry of rules) {
+      lines.push(`${indent(5)}- entityType: ${yamlString(entry.entityType)}`);
+      lines.push(`${indent(6)}action: ${yamlString(entry.action)}`);
+      if (entry.action === "reroute" && entry.routeClass) lines.push(`${indent(6)}routeClass: ${yamlString(entry.routeClass)}`);
+    }
+  }
   lines.push(
     `${indent(2)}attachments:`,
     `${indent(3)}policy: ${yamlString(policy.attachments.policy)}`,
