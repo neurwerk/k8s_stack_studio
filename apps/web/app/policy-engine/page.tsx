@@ -24,6 +24,8 @@ export default function PolicyEnginePage() {
   const [useDraftPolicy, setUseDraftPolicy] = useState(false);
   const [testText, setTestText] = useState(DEFAULT_TEXT);
   const [mcpSourceText, setMcpSourceText] = useState("");
+  const [destinationModel, setDestinationModel] = useState("");
+  const validModel = !destinationModel || /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(destinationModel);
   const mcpSources = mcpSourceText.trim() ? mcpSourceText.trim().split(/[\s,]+/) : [];
   const validSources = mcpSources.length <= 32 && mcpSources.every((source) => source.length <= 64 && /^MCP_TOOL_[A-Z0-9_]+$/.test(source));
   const [template, setTemplate] = useState("");
@@ -50,7 +52,7 @@ export default function PolicyEnginePage() {
   };
 
   const handleEvaluate = async () => {
-    if (!testText.trim() || !validSources) return;
+    if (!testText.trim() || !validSources || !validModel) return;
     const requestId = ++evaluationId.current;
     setLoading(true);
     setError(null);
@@ -58,7 +60,7 @@ export default function PolicyEnginePage() {
     try {
       const req = buildRequest(testText);
       const policy = useDraftPolicy ? toPolicyOverride(config.piiEngine) : undefined;
-      const res = await policyEngineEvaluate(req, policy, mcpSources);
+      const res = await policyEngineEvaluate(req, policy, mcpSources, destinationModel || undefined);
       if (requestId === evaluationId.current) setResult(res);
     } catch {
       if (requestId === evaluationId.current) {
@@ -172,6 +174,12 @@ export default function PolicyEnginePage() {
                className="textarea textarea-bordered w-full bg-base-100 font-mono text-sm resize-y"
               placeholder="Enter text to test against the policy engine..."
             />
+            <label className="block space-y-1 text-sm" htmlFor="policy-test-model">Canonical model ID (optional)
+              <input id="policy-test-model" list="policy-model-ids" className="input input-bordered w-full font-mono text-sm" value={destinationModel} maxLength={128} aria-invalid={!validModel} onChange={(event) => { setDestinationModel(event.target.value); clearEvaluation(); }} />
+              <datalist id="policy-model-ids">{Object.keys(config.piiEngine.pii.modelSourcePolicies).map((id) => <option key={id} value={id} />)}</datalist>
+              <span className="block text-xs text-muted-foreground">Preview only; no model is invoked. Missing or unconfigured IDs use global source rules. Draft suggestions are explicit IDs, not upstream aliases.</span>
+              {!validModel && <span className="block text-xs text-error">Start with a letter or digit; use letters, digits, dots, underscores, slashes or hyphens.</span>}
+            </label>
             <label className="block space-y-1 text-sm" htmlFor="policy-test-sources">MCP sources (optional)
               <input id="policy-test-sources" className="input input-bordered w-full font-mono text-sm" value={mcpSourceText} aria-invalid={!validSources} onChange={(event) => { setMcpSourceText(event.target.value); clearEvaluation(); }} placeholder="MCP_TOOL_SALESFORCE, MCP_TOOL_BRAVE" />
               <span className="block text-[11px] text-muted-foreground">Preview gateway-assigned classifications; separate up to 32 names with commas or spaces. This does not assign sources in real traffic.</span>
@@ -198,7 +206,7 @@ export default function PolicyEnginePage() {
               </label>
               <button
                 onClick={() => { void handleEvaluate(); }}
-                disabled={loading || !testText.trim() || !validSources}
+                disabled={loading || !testText.trim() || !validSources || !validModel}
                 aria-busy={loading}
                  className="btn btn-primary shrink-0 gap-2"
               >

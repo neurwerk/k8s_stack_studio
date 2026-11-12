@@ -281,8 +281,9 @@ async def test_client_evaluate_uses_dedicated_studio_path_without_headers(
     "sources",
     [[], ["MCP_TOOL_Z", "MCP_TOOL_DEFAULT", "MCP_TOOL_Z", "MCP_TOOL_" + "A" * 55]],
 )
+@pytest.mark.parametrize("destination", [None, "approved/model"])
 async def test_preview_sources_are_only_segment_metadata(
-    client, mock_http_client, endpoint, sources
+    client, mock_http_client, endpoint, sources, destination
 ):
     mock_http_client.request = AsyncMock(
         return_value=httpx.Response(
@@ -290,13 +291,30 @@ async def test_preview_sources_are_only_segment_metadata(
         )
     )
     model = StudioAnalyzeRequest if endpoint == "analyze" else StudioPolicyEvaluationRequest
-    request = model.model_validate(request_model().model_dump() | {"mcp_sources": sources})
+    candidate = {
+        "pii": {
+            "modelSourcePolicies": {
+                "approved/model": [{"entityType": "MCP_TOOL_DEFAULT", "action": "pass"}]
+            }
+        }
+    }
+    request = model.model_validate(
+        request_model().model_dump()
+        | {
+            "mcp_sources": sources,
+            "destination_model": destination,
+            "policy": candidate,
+        }
+    )
 
     result = await getattr(client, endpoint)(request)
 
     call = mock_http_client.request.await_args
     assert call is not None
     payload = call.kwargs["json"]
+    assert payload["request"]["scope"] == "request"
+    assert payload["request"].get("destination_model") == destination
+    assert payload["policy"] == candidate
     assert "mcp_sources" not in payload
     if sources:
         assert payload["request"]["mcp_sources"] == sorted(set(sources))
