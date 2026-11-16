@@ -1,35 +1,46 @@
-"""Public usage schemas and private AgentGateway analytics models."""
+"""Public reporting schemas shared by the existing LLM and MCP dashboard."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
-from pydantic import (
-    AwareDatetime,
-    BaseModel,
-    ConfigDict,
-    Field,
-    StrictBool,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, Field
+from studio_collector.models import Kind, UsageRow
+
+
+class Coverage(BaseModel):
+    """Missing coverage is independent of known accounting in collected records."""
+
+    activated_at: datetime | None = None
+    refreshed_at: datetime | None = None
+    complete: bool = False
+    stale: bool = True
+    provisional: bool = False
+    estimated: bool = False
 
 
 class UsageMetric(BaseModel):
-    """Reported sums are not complete totals when any native record lacks evidence."""
+    """Reported sums are not complete totals when evidence or coverage is missing."""
 
     state: Literal["known", "partial", "unknown"] = "known"
     reported_sum: int | float = 0
     complete_total: int | float | None = 0
-    known_records: int = 0
-    total_records: int = 0
+    known_records: float = 0
+    total_records: float = 0
 
-    def add(self, value: int | float, records: int, *, known: bool) -> None:
-        """Retain every reported contribution, including legacy reported retry usage."""
+    def add(
+        self,
+        value: int | float,
+        records: float,
+        known_records: float = 0,
+        *,
+        known: bool | None = None,
+    ) -> None:
+        """Retain reported contributions separately from accounting evidence."""
         self.reported_sum += value
         self.total_records += records
-        self.known_records += records if known else 0
+        self.known_records += records if known is True else known_records
         self.state = (
             "known"
             if self.known_records == self.total_records
@@ -39,40 +50,50 @@ class UsageMetric(BaseModel):
         )
         self.complete_total = self.reported_sum if self.state == "known" else None
 
+    def unavailable(self) -> None:
+        """Missing coverage or unsupported measurements cannot become known zero."""
+        self.state = "partial" if self.known_records else "unknown"
+        self.complete_total = None
+
 
 class UsageAccounting(BaseModel):
-    """Completeness applies only to selected native LLM records, not provider bills."""
+    """Independent token and cost evidence."""
 
     tokens: UsageMetric = Field(default_factory=UsageMetric)
     cost_usd: UsageMetric = Field(default_factory=UsageMetric)
 
 
 class UsagePeriod(BaseModel):
-    """Aggregated calls, tokens, and cost for one time period."""
+    """A single, non-overlapping set of stored usage rows."""
 
-    requests: int = Field(default=0, ge=0)
+    requests: float = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
-    cost_usd: float = Field(default=0.0, ge=0, allow_inf_nan=False)
-    request_scope: Literal["native_llm_records"] = "native_llm_records"
+    cost_usd: float = Field(default=0, ge=0, allow_inf_nan=False)
+    request_scope: Literal["native_llm_records", "estimated_mcp_calls"] = "native_llm_records"
     accounting: UsageAccounting = Field(default_factory=UsageAccounting)
 
-    def add(self, item: AgentGatewaySummaryGroup) -> None:
-        """Combine completeness groups without counting them as extra requests."""
-        self.requests += item.requests
-        self.total_tokens += item.total_tokens
-        self.cost_usd += item.cost or 0.0
-        self.accounting.tokens.add(
-            item.total_tokens, item.requests, known=item.group.token_usage_known is True
-        )
+    def add(self, row: UsageRow) -> None:
+        """Combine stored measures without losing fractional MCP counts."""
+        self.requests += float(row.requests)
+        self.total_tokens += row.total_tokens
+        self.cost_usd += float(row.cost_usd)
+        self.accounting.tokens.add(row.total_tokens, float(row.requests), float(row.tokens_known))
         self.accounting.cost_usd.add(
-            item.cost or 0.0,
-            item.requests,
-            known=item.group.cost_known is True and item.cost is not None,
+            float(row.cost_usd), float(row.requests), float(row.cost_known)
         )
+
+    def qualify(self, kind: Kind, coverage: Coverage) -> None:
+        """Apply collection and metric availability after summing rows."""
+        if kind == "mcp":
+            self.request_scope = "estimated_mcp_calls"
+            self.accounting.tokens.unavailable()
+        if not coverage.complete:
+            self.accounting.tokens.unavailable()
+            self.accounting.cost_usd.unavailable()
 
 
 class UsageResponse(BaseModel):
-    """All calendar and rolling usage periods for one Studio user."""
+    """Existing calendar and rolling totals."""
 
     total: UsagePeriod
     this_month: UsagePeriod
@@ -83,148 +104,57 @@ class UsageResponse(BaseModel):
     last_7_days: UsagePeriod
     today: UsagePeriod
     last_24_hours: UsagePeriod
-
-
-class AgentGatewayAccountingKey(BaseModel):
-    """PostgreSQL extracts boolean JSON attributes as text; absence stays unknown."""
-
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
-
-    token_usage_known: StrictBool | None = Field(default=None, alias="neurwerk.token_usage_known")
-    cost_known: StrictBool | None = Field(default=None, alias="neurwerk.cost_known")
-
-    @field_validator("token_usage_known", "cost_known", mode="before")
-    @classmethod
-    def boolean_attribute(cls, value: object) -> object:
-        """Accept native PostgreSQL text and JSON booleans without truthy coercion."""
-        if value == "true":
-            return True
-        if value == "false":
-            return False
-        return value
-
-    @model_validator(mode="before")
-    @classmethod
-    def flatten_attributes(cls, value: object) -> object:
-        """Support flat and nested attributes without dropping unrequested group fields."""
-        if not isinstance(value, dict):
-            return value
-        nested = value.get("attributes")
-        if isinstance(nested, dict):
-            fields = {key: item for key, item in value.items() if key != "attributes"}
-            if fields.keys() & nested.keys():
-                raise ValueError("Duplicate analytics group fields")  # noqa: TRY003
-            return {**fields, **nested}
-        return value
-
-
-class AgentGatewaySummaryGroup(BaseModel):
-    """Relevant values from one AgentGateway analytics summary group."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True, strict=True)
-
-    group: AgentGatewayAccountingKey
-    requests: int = Field(ge=0)
-    total_tokens: int = Field(alias="totalTokens", ge=0)
-    cost: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-
-
-class AgentGatewaySummary(BaseModel):
-    """Relevant fields from AgentGateway's analytics summary response."""
-
-    model_config = ConfigDict(extra="ignore", strict=True)
-
-    groups: list[AgentGatewaySummaryGroup] = Field(max_length=100_000)
+    coverage: dict[str, Coverage] = Field(default_factory=dict)
 
 
 class ModelUsage(UsagePeriod):
-    """Usage attributed to a requested model, including unknown models."""
+    """Requested model, or a server/tool pair for the same MCP charts."""
 
     model: str | None
+    server: str | None = None
+    tool: str | None = None
 
 
 class DailyUsage(BaseModel):
-    """One local calendar day, with no model entries when there is no usage."""
+    """One local calendar day or a bounded multi-day chart point."""
 
     date: date
+    end_date: date | None = None
     models: list[ModelUsage]
+    coverage: Coverage = Field(default_factory=Coverage)
 
 
 class DailyUsageResponse(BaseModel):
-    """Inclusive calendar range and daily per-model usage in the configured timezone."""
+    """Calendar usage, with missing periods explicitly identified."""
 
     timezone: str
     start_date: date
     end_date: date
     today: date
+    kind: Kind = "llm"
     days: list[DailyUsage]
+    coverage: Coverage = Field(default_factory=Coverage)
+    previous_year: list[DailyUsage] | None = None
 
 
 class UserUsageTotal(UsagePeriod):
-    """One attributed principal's totals in the selected calendar range."""
+    """Usage attributed to a trusted principal."""
 
     user_id: str
 
 
 class UsagePeopleResponse(BaseModel):
-    """Active attributed principals, without Keycloak profile information."""
+    """Active attributed principals without directory profile information."""
 
     timezone: str
     start_date: date
     end_date: date
     users: list[UserUsageTotal]
-
-
-class AgentGatewayModelKey(AgentGatewayAccountingKey):
-    """The exact grouping requested by Studio, never upstream filter options."""
-
-    request_model: str | None = Field(alias="requestModel")
-
-
-class AgentGatewayModelGroup(AgentGatewaySummaryGroup):
-    """Validated metrics grouped only by requested model."""
-
-    group: AgentGatewayModelKey
-
-
-class AgentGatewayModelBucket(AgentGatewayModelGroup):
-    """A typed upstream time bucket with a timezone-aware timestamp."""
-
-    start: AwareDatetime
-
-
-class AgentGatewayDailySummary(BaseModel):
-    """Private grouped summary; unscoped filterOptions are deliberately ignored."""
-
-    model_config = ConfigDict(extra="ignore", strict=True)
-
-    bucket_seconds: int = Field(alias="bucketSeconds", gt=0)
-    groups: list[AgentGatewayModelGroup] = Field(max_length=100_000)
-    buckets: list[AgentGatewayModelBucket] = Field(max_length=100_000)
-
-
-class AgentGatewayUserKey(AgentGatewayAccountingKey):
-    """Identity attribute produced by AgentGateway, not supplied by the browser."""
-
-    user_id: str | None = Field(default=None, alias="agentgateway.user")
-
-
-class AgentGatewayUserGroup(AgentGatewaySummaryGroup):
-    """User-scoped summary without access to raw logs or prompt content."""
-
-    group: AgentGatewayUserKey
-
-
-class AgentGatewayUserSummary(BaseModel):
-    """Bound the upstream grouped-user response for the admin leaderboard."""
-
-    model_config = ConfigDict(extra="ignore", strict=True)
-
-    groups: list[AgentGatewayUserGroup] = Field(max_length=45_000)
+    coverage: Coverage = Field(default_factory=Coverage)
 
 
 class UsageSource(UsagePeriod):
-    """Recorded origin or non-secret platform credential identifier."""
+    """Non-secret recorded app or credential identifier."""
 
     id: str | None
     kind: str | None = None
@@ -233,7 +163,7 @@ class UsageSource(UsagePeriod):
 
 
 class UsagePersonSources(BaseModel):
-    """Same-total app and credential views within one recorded principal."""
+    """Independent app and credential breakdowns of the same person's usage."""
 
     user_id: str | None
     total: UsagePeriod = Field(default_factory=UsagePeriod)
@@ -242,7 +172,7 @@ class UsagePersonSources(BaseModel):
 
 
 class UsageNameEnrichment(BaseModel):
-    """Name lookup completeness is independent of usage accounting completeness."""
+    """Directory lookup completeness is independent of accounting completeness."""
 
     eligible_keys: int = 0
     looked_up_keys: int = 0
@@ -252,7 +182,7 @@ class UsageNameEnrichment(BaseModel):
 
 
 class UsageSourcesResponse(BaseModel):
-    """Independent breakdowns of the same scoped native records."""
+    """Independent app, key and principal views; these totals must not be added."""
 
     timezone: str
     start_date: date
@@ -262,30 +192,4 @@ class UsageSourcesResponse(BaseModel):
     origins: list[UsageSource] = Field(default_factory=list)
     people: list[UsagePersonSources] = Field(default_factory=list)
     key_name_enrichment: UsageNameEnrichment = Field(default_factory=UsageNameEnrichment)
-
-
-class AgentGatewaySourceKey(AgentGatewayAccountingKey):
-    """Only trusted normalized origin and credential attributes."""
-
-    app_id: str | None = Field(default=None, alias="neurwerk.app_id", max_length=255)
-    user_id: str | None = Field(
-        default=None, alias="agentgateway.user", min_length=1, max_length=255
-    )
-    credential_id: str | None = Field(default=None, alias="neurwerk.credential_id", max_length=255)
-    credential_kind: str | None = Field(
-        default=None, alias="neurwerk.credential_kind", max_length=255
-    )
-
-
-class AgentGatewaySourceGroup(AgentGatewaySummaryGroup):
-    """Native accounting evidence retained across origin/key groups."""
-
-    group: AgentGatewaySourceKey
-
-
-class AgentGatewaySourceSummary(BaseModel):
-    """Ignore global filter options; never expose unscoped identifiers."""
-
-    model_config = ConfigDict(extra="ignore", strict=True)
-
-    groups: list[AgentGatewaySourceGroup] = Field(max_length=100_000)
+    coverage: Coverage = Field(default_factory=Coverage)

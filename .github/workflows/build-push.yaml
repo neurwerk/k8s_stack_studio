@@ -50,6 +50,14 @@ jobs:
               api_version = tomllib.load(file)["project"]["version"]
           with Path("apps/web/package.json").open(encoding="utf-8") as file:
               web_version = json.load(file)["version"]
+          with Path("apps/collector/pyproject.toml").open("rb") as file:
+              collector_version = tomllib.load(file)["project"]["version"]
+          with Path("apps/collector/uv.lock").open("rb") as file:
+              collector_lock = tomllib.load(file)
+          locked_collector_version = next(
+              p["version"] for p in collector_lock["package"]
+              if p["name"] == "k8s-stack-studio-collector"
+          )
           with Path("apps/api/uv.lock").open("rb") as file:
               api_lock = tomllib.load(file)
           locked_api_version = next(
@@ -63,6 +71,8 @@ jobs:
               "apps/api/pyproject.toml": api_version,
               "apps/api/uv.lock": locked_api_version,
               "apps/web/package.json": web_version,
+              "apps/collector/pyproject.toml": collector_version,
+              "apps/collector/uv.lock": locked_collector_version,
           }
           if any(version != expected for version in versions.values()):
               raise SystemExit(
@@ -78,6 +88,10 @@ jobs:
 
       - name: Verify API lockfile
         working-directory: apps/api
+        run: uv lock --check
+
+      - name: Verify collector lockfile
+        working-directory: apps/collector
         run: uv lock --check
 
       - name: Set up pnpm
@@ -191,7 +205,8 @@ jobs:
         id: build-api
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
-          context: apps/api
+          context: .
+          file: apps/api/Dockerfile
           push: true
           platforms: linux/amd64
           tags: ${{ steps.meta-api.outputs.tags }}
@@ -338,8 +353,68 @@ jobs:
           fi
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
 
+  collector:
+    needs: [validate, quality]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.resolve.outputs.digest }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Inspect immutable version
+        id: existing
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          image="ghcr.io/neurwerk/k8s-stack-studio-collector:${GITHUB_REF_NAME#v}"
+          printf 'image=%s\n' "$image" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          if manifest="$(docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' 2>&1)"; then
+            digest="$(jq -er '.digest | select(test("^sha256:[a-f0-9]{64}$"))' <<< "$manifest")"
+            config="$(docker buildx imagetools inspect "$image@$digest" --format '{{json .Image}}')"
+            jq -e --arg revision "$EXPECTED_REVISION" \
+              '.os == "linux" and .architecture == "amd64" and .config.Labels["org.opencontainers.image.revision"] == $revision' \
+              <<< "$config" >/dev/null
+            printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          elif [[ "$manifest" != *"not found"* && "$manifest" != *"manifest unknown"* ]]; then
+            printf '%s\n' "$manifest" >&2
+            exit 1
+          fi
+      - name: Build and push collector
+        id: build
+        if: steps.existing.outputs.digest == ''
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: apps/collector/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.existing.outputs.image }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.existing.outputs.version }}
+          cache-from: type=gha,scope=collector
+          cache-to: type=gha,mode=max,scope=collector
+      - name: Resolve collector digest
+        id: resolve
+        env:
+          EXISTING: ${{ steps.existing.outputs.digest }}
+          BUILT: ${{ steps.build.outputs.digest }}
+        run: |
+          digest="${EXISTING:-$BUILT}"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
   release:
-    needs: [api, web]
+    needs: [api, web, collector]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -347,11 +422,13 @@ jobs:
       - name: Publish GitHub Release
         env:
           API_DIGEST: ${{ needs.api.outputs.digest }}
+          COLLECTOR_DIGEST: ${{ needs.collector.outputs.digest }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           WEB_DIGEST: ${{ needs.web.outputs.digest }}
         run: |
           if [[ ! "$API_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || \
+             [[ ! "$COLLECTOR_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || \
              [[ ! "$WEB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             printf '%s\n' "image publication did not return valid digests" >&2
             exit 1
@@ -361,8 +438,11 @@ jobs:
           api_digest_ref="ghcr.io/neurwerk/k8s-stack-studio-api@$API_DIGEST"
           web_tag="ghcr.io/neurwerk/k8s-stack-studio-web:$version"
           web_digest_ref="ghcr.io/neurwerk/k8s-stack-studio-web@$WEB_DIGEST"
+          collector_tag="ghcr.io/neurwerk/k8s-stack-studio-collector:$version"
+          collector_digest_ref="ghcr.io/neurwerk/k8s-stack-studio-collector@$COLLECTOR_DIGEST"
           api_row="| \`$api_tag\` | \`$api_digest_ref\` |"
           web_row="| \`$web_tag\` | \`$web_digest_ref\` |"
+          collector_row="| \`$collector_tag\` | \`$collector_digest_ref\` |"
           release_exists=false
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             release_exists=true
@@ -373,6 +453,7 @@ jobs:
                 --jq .body
             )"
             if [[ "$existing_notes" == *"$api_row"* ]] && \
+               [[ "$existing_notes" == *"$collector_row"* ]] && \
                [[ "$existing_notes" == *"$web_row"* ]]; then
               printf '%s\n' "GitHub Release $RELEASE_TAG already has current image notes"
               exit 0
@@ -386,6 +467,7 @@ jobs:
             printf '| Version tag | Manifest digest |\n'
             printf '| --- | --- |\n'
             printf '| `%s` | `%s` |\n' "$api_tag" "$api_digest_ref"
+            printf '| `%s` | `%s` |\n' "$collector_tag" "$collector_digest_ref"
             printf '| `%s` | `%s` |\n\n' "$web_tag" "$web_digest_ref"
             cat "$RUNNER_TEMP/generated-notes.md"
           } > "$RUNNER_TEMP/release-notes.md"

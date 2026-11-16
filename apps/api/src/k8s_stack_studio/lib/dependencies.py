@@ -14,11 +14,11 @@ import httpx
 from fastapi import Depends, HTTPException, Request, status
 
 from k8s_stack_studio.config.settings import Settings
-from k8s_stack_studio.lib.agentgateway import AgentGatewayClient
 from k8s_stack_studio.lib.auth import StudioPrincipal
 from k8s_stack_studio.lib.keycloak_admin import KeycloakAdminClient
 from k8s_stack_studio.lib.opensearch import OpenSearchClient
 from k8s_stack_studio.lib.pii_engine import PiiEngineClient
+from k8s_stack_studio.lib.usage import UsageReader
 
 
 @lru_cache
@@ -61,13 +61,13 @@ def get_opensearch(
     return OpenSearchClient(settings=settings, client=client)
 
 
-def get_agentgateway(
+def get_usage(
     request: Request,
     settings: Settings = Depends(get_settings),
-) -> AgentGatewayClient:
-    """Return an AgentGatewayClient backed by its private-network client."""
+) -> UsageReader:
+    """Return the read-only reporting service with its request-ID lookup client."""
     client: httpx.AsyncClient = request.app.state.agentgateway_client
-    return AgentGatewayClient(settings=settings, client=client)
+    return UsageReader(settings=settings, client=client)
 
 
 # ── auth helpers ─────────────────────────────────────────────────────────────

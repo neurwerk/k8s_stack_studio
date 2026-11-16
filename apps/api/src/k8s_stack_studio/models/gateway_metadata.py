@@ -43,11 +43,20 @@ class GatewayFilters(BaseModel):
         }
 
 
-class UsageQuery(GatewayFilters):
+class UsageFilters(GatewayFilters):
+    """Select a reporting source without forwarding that selector upstream."""
+
+    kind: Literal["llm", "mcp"] = "llm"
+    server: MetadataValue | None = None
+    tool: MetadataValue | None = None
+
+
+class UsageQuery(UsageFilters):
     """Inclusive calendar bounds plus the same display filters."""
 
     start: Annotated[str, Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")] | None = None
     end: Annotated[str, Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")] | None = None
+    compare_year: bool = False
 
 
 class GatewayMetadata(GatewayFilters):

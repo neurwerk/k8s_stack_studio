@@ -466,7 +466,7 @@ wheels = [
 
 [[package]]
 name = "k8s-stack-studio"
-version = "0.25.0"
+version = "0.26.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -476,6 +476,7 @@ dependencies = [
     { name = "fastapi-keycloak-middleware" },
     { name = "httpx" },
     { name = "httpx2" },
+    { name = "k8s-stack-studio-collector" },
     { name = "mcp" },
     { name = "mcp-types" },
     { name = "neurwerk-request-segments" },
@@ -504,6 +505,7 @@ requires-dist = [
     { name = "fastapi-keycloak-middleware", specifier = ">=1.6.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx2", specifier = ">=2.10.0" },
+    { name = "k8s-stack-studio-collector", editable = "../collector" },
     { name = "mcp", specifier = "==2.3.0" },
     { name = "mcp-types", specifier = "==2.3.0" },
     { name = "neurwerk-request-segments", directory = "vendor/request_segments" },
@@ -519,6 +521,33 @@ dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-cov", specifier = ">=6" },
+    { name = "ruff", specifier = ">=0.15.20" },
+    { name = "ty", specifier = ">=0.0.55" },
+]
+
+[[package]]
+name = "k8s-stack-studio-collector"
+version = "0.26.0"
+source = { editable = "../collector" }
+dependencies = [
+    { name = "asyncpg" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asyncpg", specifier = ">=0.30.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "pydantic", specifier = ">=2.12.0" },
+    { name = "pydantic-settings", specifier = ">=2.7" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "ruff", specifier = ">=0.15.20" },
     { name = "ty", specifier = ">=0.0.55" },
 ]

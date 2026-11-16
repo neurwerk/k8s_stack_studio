@@ -200,6 +200,9 @@ class Settings(BaseSettings):
     )
     # Calendar usage periods are calculated in this IANA timezone.
     usage_timezone: str = "Europe/Berlin"
+    usage_postgres_host: str = "postgres-operations.infra-postgres-operations.svc.cluster.local"
+    usage_postgres_port: int = 5432
+    usage_postgres_password: str = ""
 
     # Base-owned public projections; these environment names are shared across products.
     gateway_catalog_file: str = Field(default="", validation_alias="STUDIO_GATEWAY_CATALOG_FILE")

@@ -45,7 +45,7 @@ export function presetRange(today: string, preset: Exclude<UsagePreset, "custom"
 export function validRange(range: UsageDateRange, today: string): boolean {
   const days = (Date.parse(range.end) - Date.parse(range.start)) / DAY_MS + 1;
   return Boolean(range.start && range.end) && Number.isInteger(days) &&
-    days >= 1 && days <= 90 && range.end <= today;
+    days >= 1 && days <= 3660 && range.end <= today;
 }
 
 export function usageSummary(usage: UserDailyUsage) {
@@ -61,15 +61,27 @@ export function usageSummary(usage: UserDailyUsage) {
       addUsage(model, entry);
       models.set(entry.model, model);
     }
+    qualify(row, usage.kind === "mcp", day.coverage?.complete !== false);
     addUsage(totals, row);
     return row;
   });
+  qualify(totals, usage.kind === "mcp", usage.coverage?.complete !== false);
+  for (const model of models.values()) qualify(model, usage.kind === "mcp", usage.coverage?.complete !== false);
   return {
     totals,
     models: [...models.values()].sort((a, b) => b.total_tokens - a.total_tokens ||
       (a.model ?? "").localeCompare(b.model ?? "")),
     daily,
   };
+}
+
+function qualify(row: ReturnType<typeof emptyUsage>, mcp: boolean, complete: boolean) {
+  for (const name of ["tokens", "cost_usd"] as const) {
+    if (!complete || (mcp && name === "tokens")) {
+      row.accounting[name].state = row.accounting[name].known_records > 0 ? "partial" : "unknown";
+      row.accounting[name].complete_total = null;
+    }
+  }
 }
 
 /** Give each displayed series a distinct color, regardless of the chart's ranking order. */
@@ -87,13 +99,18 @@ export function modelColors(models: readonly (string | null)[]): Map<string | nu
 /** One stack per requested model, preserving empty dates and unknown models. */
 export function modelTrend(
   usage: UserDailyUsage, models: (string | null)[], metric: PersonMetric,
-): ({ date: string } & Record<string, string | number>)[] {
+): ({ date: string } & Record<string, string | number | null>)[] {
   return usage.days.map((day) => ({
     date: day.date,
-    ...Object.fromEntries(models.map((model, index) => [
-      `model${String(index)}`,
-      day.models.find((entry) => entry.model === model)?.[metric] ?? 0,
-    ])),
+    ...Object.fromEntries(models.map((model, index) => {
+      const entry = day.models.find((item) => item.model === model);
+      const unknownCost = metric === "cost_usd" && entry?.accounting?.cost_usd.state === "unknown" && entry.cost_usd === 0;
+      return [
+        `model${String(index)}`,
+        (usage.kind === "mcp" && metric === "total_tokens") || unknownCost ? null
+          : entry?.[metric] ?? (day.coverage?.complete === false ? null : 0),
+      ];
+    })),
   }));
 }
 
