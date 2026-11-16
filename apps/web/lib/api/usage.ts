@@ -4,6 +4,15 @@ import { apiGet } from "@/lib/api/client";
 import { gatewayParams } from "@/lib/api/gateway-metadata";
 import type { GatewayFilters } from "@/lib/api/gateway-metadata";
 
+export type UsageKind = "llm" | "mcp";
+export interface UsageCoverage {
+  complete: boolean;
+  stale: boolean;
+  provisional: boolean;
+  estimated: boolean;
+  refreshed_at: string | null;
+}
+
 export interface UsageMetric {
   state: "known" | "partial" | "unknown";
   reported_sum: number;
@@ -22,7 +31,7 @@ export interface UsagePeriod {
   requests: number;
   total_tokens: number;
   cost_usd: number;
-  request_scope?: "native_llm_records";
+  request_scope?: "native_llm_records" | "estimated_mcp_calls";
   accounting?: UsageAccounting;
 }
 
@@ -35,7 +44,9 @@ export interface UserDailyUsage {
   start_date: string;
   end_date: string;
   today: string;
-  days: { date: string; models: DailyModelUsage[] }[];
+  kind?: UsageKind;
+  coverage?: UsageCoverage;
+  days: { date: string; models: DailyModelUsage[]; coverage?: UsageCoverage }[];
 }
 
 export interface UsageDateRange {
@@ -86,9 +97,9 @@ export interface UsageSources {
 }
 
 /** Self-or-admin scope is enforced by the API, including identifier discovery. */
-export function fetchUsageSources(userId: string | null, range: UsageDateRange, signal?: AbortSignal, filters: GatewayFilters = {}): Promise<UsageSources> {
+export function fetchUsageSources(userId: string | null, range: UsageDateRange, signal?: AbortSignal, filters: GatewayFilters = {}, kind: UsageKind = "llm"): Promise<UsageSources> {
   const path = userId === null ? "/usage/sources" : `/users/${encodeURIComponent(userId)}/usage/sources`;
-  return apiGet<UsageSources>(path, { ...range, ...gatewayParams(filters) }, signal);
+  return apiGet<UsageSources>(path, { ...range, ...gatewayParams(filters), kind }, signal);
 }
 
 /** Omit the range to use the server's last 30 calendar days, including today. */
@@ -97,9 +108,10 @@ export function fetchUserDailyUsage(
   range?: UsageDateRange,
   signal?: AbortSignal,
   filters: GatewayFilters = {},
+  kind: UsageKind = "llm",
 ): Promise<UserDailyUsage> {
   const path = `/users/${encodeURIComponent(userId)}/usage/daily`;
-  const params = { ...range, ...gatewayParams(filters) };
+  const params = { ...range, ...gatewayParams(filters), kind };
   return signal ? apiGet<UserDailyUsage>(path, params, signal) : apiGet<UserDailyUsage>(path, params);
 }
 
@@ -108,15 +120,16 @@ export function fetchAllDailyUsage(
   range?: UsageDateRange,
   signal?: AbortSignal,
   filters: GatewayFilters = {},
+  kind: UsageKind = "llm",
 ): Promise<UserDailyUsage> {
   return apiGet<UserDailyUsage>(
     "/usage/daily",
-    { ...range, ...gatewayParams(filters) },
+    { ...range, ...gatewayParams(filters), kind },
     signal,
   );
 }
 
 /** Active principals for the admin selector and per-person breakdown. */
-export function fetchUsagePeople(range: UsageDateRange, signal?: AbortSignal, filters: GatewayFilters = {}): Promise<UsagePeople> {
-  return apiGet<UsagePeople>("/usage/people", { ...range, ...gatewayParams(filters) }, signal);
+export function fetchUsagePeople(range: UsageDateRange, signal?: AbortSignal, filters: GatewayFilters = {}, kind: UsageKind = "llm"): Promise<UsagePeople> {
+  return apiGet<UsagePeople>("/usage/people", { ...range, ...gatewayParams(filters), kind }, signal);
 }

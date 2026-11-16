@@ -12,7 +12,10 @@ permissions:
 
 jobs:
   api:
-    name: API
+    name: Python (${{ matrix.app }})
+    strategy:
+      matrix:
+        app: [api, collector]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -26,9 +29,10 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       MCP_SETUP_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/studio_test
+      USAGE_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:5432/studio_test
     defaults:
       run:
-        working-directory: apps/api
+        working-directory: apps/${{ matrix.app }}
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -38,7 +42,7 @@ jobs:
         with:
           version-file: ${{ github.workspace }}/.tool-versions
           enable-cache: true
-          cache-dependency-glob: apps/api/uv.lock
+          cache-dependency-glob: apps/*/uv.lock
 
       - name: Install Python
         run: uv python install 3.12

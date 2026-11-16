@@ -11,7 +11,7 @@ import { AccountingValue } from "@/components/accounting-value";
 import { GatewayClassificationFilters } from "@/components/gateway-filters";
 import type { GatewayFilters } from "@/lib/api/gateway-metadata";
 import { fetchAllDailyUsage, fetchUsagePeople, fetchUsageSources, fetchUserDailyUsage } from "@/lib/api/usage";
-import type { UsageDateRange, UsagePeople, UsageSources, UsageSource, UsagePersonSources, UserDailyUsage } from "@/lib/api/usage";
+import type { UsageDateRange, UsageKind, UsagePeople, UsageSources, UsageSource, UsagePersonSources, UserDailyUsage } from "@/lib/api/usage";
 import { useCurrentUserId, useHasRole, useIsKeycloakAdmin } from "@/lib/auth/roles";
 import { modelColors, modelTrend, presetRange, rankModels, usageBarWidth, usageSummary, validRange } from "@/lib/usage-dashboard";
 import type { PersonMetric, UsagePreset } from "@/lib/usage-dashboard";
@@ -65,6 +65,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   userId: string; isAdmin: boolean; canReadNames: boolean;
 }) {
   const [selected, setSelected] = useState(isAdmin ? "all" : userId);
+  const [kind, setKind] = useState<UsageKind>("llm");
+  const callsLabel = kind === "mcp" ? "Estimated tool calls" : "Native LLM records";
   const [range, setRange] = useState<UsageDateRange>();
   const [preset, setPreset] = useState<UsagePreset>("month");
   const [draftStart, setDraftStart] = useState("");
@@ -85,7 +87,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
   const [error, setError] = useState<string | null>(null);
   const [dateError, setDateError] = useState<string | null>(null);
   const [filters, setFilters] = useState<GatewayFilters>({});
-  const key = JSON.stringify([selected, range?.start, range?.end, filters, refresh]);
+  const key = JSON.stringify([selected, range?.start, range?.end, filters, refresh, kind]);
   const shown = result?.key === key ? result : undefined;
   const ranked = useMemo(() => [...(shown?.sources.people ?? [])].sort((a, b) =>
     b.total[metric] - a.total[metric] || (a.user_id ?? "").localeCompare(b.user_id ?? "")), [shown?.sources.people, metric]);
@@ -99,16 +101,16 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
       setError(null);
       try {
         const getDaily = (bounds?: UsageDateRange) => selected === "all"
-          ? fetchAllDailyUsage(bounds, controller.signal, filters)
-          : fetchUserDailyUsage(selected, bounds, controller.signal, filters);
+          ? fetchAllDailyUsage(bounds, controller.signal, filters, kind)
+          : fetchUserDailyUsage(selected, bounds, controller.signal, filters, kind);
         let usage = await getDaily(range);
         const bounds = range ?? presetRange(usage.today, "month");
         if (usage.start_date !== bounds.start || usage.end_date !== bounds.end) {
           usage = await getDaily(bounds);
         }
         const [people, sources] = await Promise.all([
-          isAdmin ? fetchUsagePeople(bounds, controller.signal, filters) : Promise.resolve(null),
-          fetchUsageSources(selected === "all" ? null : selected, bounds, controller.signal, filters),
+          isAdmin ? fetchUsagePeople(bounds, controller.signal, filters, kind) : Promise.resolve(null),
+          fetchUsageSources(selected === "all" ? null : selected, bounds, controller.signal, filters, kind),
         ]);
         if (controller.signal.aborted) return;
         setResult({ key, range: bounds, usage, people, sources });
@@ -123,7 +125,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
     };
     void load();
     return () => { controller.abort(); };
-  }, [selected, range, isAdmin, key, filters]);
+  }, [selected, range, isAdmin, key, filters, kind]);
 
   useEffect(() => { resolvedProfiles.current.clear(); }, [refresh, canReadNames]);
 
@@ -185,12 +187,27 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Usage</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Native LLM records, token usage and cost completeness.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{kind === "llm" ? "Native LLM records, token usage and cost completeness." : "Estimated MCP tool calls and gross usage costs; tokens are unavailable."}{shown?.usage.coverage?.complete === false && " Usage coverage is incomplete."}{shown?.usage.coverage?.stale && " Collection is stale."}</p>
         </div>
+        <div className="flex items-center gap-3">
+        <label className="flex items-center gap-2 text-sm">LLM
+          <input type="checkbox" className="toggle toggle-primary toggle-sm" aria-label="Show MCP usage"
+            checked={kind === "mcp"} onChange={(event) => {
+              setKind(event.target.checked ? "mcp" : "llm");
+              if (event.target.checked) {
+                if (metric === "total_tokens") setMetric("cost_usd");
+                if (modelMetric === "total_tokens") setModelMetric("cost_usd");
+                if (originMetric === "total_tokens") setOriginMetric("cost_usd");
+                if (trendMetric === "total_tokens") setTrendMetric("cost_usd");
+              }
+            }} />
+          MCP
+        </label>
         <button type="button" onClick={() => { setRefresh((value) => value + 1); }}
           className="btn btn-outline inline-flex items-center gap-2">
           <RefreshCw className="h-4 w-4" aria-hidden="true" /> Refresh
         </button>
+        </div>
       </div>
 
       <section className={panel} aria-label="Usage filters">
@@ -213,7 +230,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           event.preventDefault();
           const chosen = { start: draftStart, end: draftEnd };
           if (!today || !validRange(chosen, today)) {
-            setDateError("Choose 1 to 90 days, in order, ending no later than today.");
+            setDateError("Choose 1 to 3660 days, in order, ending no later than today.");
             return;
           }
           setDateError(null);
@@ -249,7 +266,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
           </label>
           <button type="submit" className="btn btn-primary">Apply</button>
           <span className="pb-2 text-xs text-muted-foreground">
-            {shown ? shown.usage.timezone : "Up to 90 days"}
+            {shown ? shown.usage.timezone : "Up to 10 years"}
           </span>
           {dateError && <p role="alert" className="w-full text-sm text-destructive">{dateError}</p>}
         </form>
@@ -273,8 +290,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
             {([
               ["Tokens", <AccountingValue key="tokens" metric={summary.totals.accounting.tokens} reported={summary.totals.total_tokens} />],
               ["Cost (USD)", <AccountingValue key="cost" metric={summary.totals.accounting.cost_usd} reported={summary.totals.cost_usd} currency />],
-              ["Native LLM records", count(summary.totals.requests)],
-              ["Models", count(summary.models.length)],
+              [callsLabel, count(summary.totals.requests)],
+              [kind === "mcp" ? "Server / tools" : "Models", count(summary.models.length)],
               [selected === "all" ? "Recorded principals" : "Token completeness",
                 selected === "all" ? count(ranked.filter((person) => person.user_id !== null).length) : summary.totals.accounting.tokens.state],
             ] as const).map(([title, value]) => (
@@ -288,7 +305,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-semibold">{selected === "all" ? "Usage per person" : `Usage for ${label(selected)}`}</h2>
               <label className="text-xs text-muted-foreground">Rank by{" "}<select className={control} value={metric} onChange={(event) => { setMetric(event.target.value as PersonMetric); }}>
-                <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option><option value="requests">Native LLM records</option>
+                <option value="total_tokens" disabled={kind === "mcp"}>Reported tokens</option><option value="cost_usd">Reported USD</option><option value="requests">{callsLabel}</option>
               </select></label>
             </div>
             <p className="mt-2 text-sm text-muted-foreground">Select a person to see their originating apps and platform API keys. Each is a separate breakdown of the same usage; do not add them together.</p>
@@ -300,7 +317,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
             <div className="mt-5 overflow-x-auto"><table className="table w-full min-w-[640px] text-left text-sm">
               <thead className="border-b border-border text-xs uppercase text-muted-foreground"><tr>
                 <th className="py-3 pr-4">Person or account</th><th className="px-3 text-right">Tokens</th>
-                <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">Native LLM records</th>
+                <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">{callsLabel}</th>
               </tr></thead><tbody>{visiblePeople.map((person) => {
                 const id = person.user_id ?? "unknown";
                 const expanded = expandedPerson === id;
@@ -319,7 +336,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                 </tr>{expanded && <tr className="border-b border-border/70 bg-muted/30"><td colSpan={4} className="p-4">
                    <p className="mb-2 text-sm font-medium">Originating apps</p>
                    {person.apps.length ? <table className="table w-full text-left text-sm"><thead><tr>
-                     <th>App</th><th className="text-right">Tokens</th><th className="text-right">Cost (USD)</th><th className="text-right">Native LLM records</th>
+                      <th>App</th><th className="text-right">Tokens</th><th className="text-right">Cost (USD)</th><th className="text-right">{callsLabel}</th>
                    </tr></thead><tbody>{person.apps.map((app) => <tr key={app.id ?? "unknown"}>
                      <td className="break-all">{app.id ? appLabels.get(app.id) ?? app.id : "No recorded app"}</td>
                      <td className="text-right tabular-nums"><AccountingValue metric={app.accounting?.tokens} reported={app.total_tokens} /></td>
@@ -329,7 +346,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                    <p className="mb-2 mt-5 text-sm font-medium">Platform API keys</p>
                    <p className="mb-2 text-xs text-muted-foreground">No recorded API key can mean an OIDC-authenticated request or missing key attribution in older records.</p>
                   {person.credentials.length ? <table className="table w-full text-left text-sm"><thead><tr>
-                    <th>API key</th><th className="text-right">Tokens</th><th className="text-right">Cost (USD)</th><th className="text-right">Native LLM records</th>
+                    <th>API key</th><th className="text-right">Tokens</th><th className="text-right">Cost (USD)</th><th className="text-right">{callsLabel}</th>
                   </tr></thead><tbody>{person.credentials.map((key) => <tr key={JSON.stringify([key.id, key.kind])}>
                     <td className="break-all">{key.id ? sourceLabel(key) : "No recorded API key"}{key.id && key.name && <span className="ml-2 text-xs text-muted-foreground">{key.id}</span>}</td>
                     <td className="text-right tabular-nums"><AccountingValue metric={key.accounting?.tokens} reported={key.total_tokens} /></td>
@@ -345,13 +362,13 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-xl font-semibold">Usage per app</h2>
               <label className="text-xs text-muted-foreground">Rank by{" "}<select className={control} value={originMetric} onChange={(event) => { setOriginMetric(event.target.value as PersonMetric); }}>
-                <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option><option value="requests">Native LLM records</option>
+                <option value="total_tokens" disabled={kind === "mcp"}>Reported tokens</option><option value="cost_usd">Reported USD</option><option value="requests">{callsLabel}</option>
               </select></label>
             </div>
             <p className="mt-2 text-sm text-muted-foreground">Verified originating app when recorded; otherwise the platform API key name and ID. Each record appears once.</p>
             <div className="mt-5 overflow-x-auto"><table className="table w-full min-w-[640px] text-left text-sm">
               <thead className="border-b border-border text-xs uppercase text-muted-foreground"><tr>
-                <th className="py-3 pr-4">App or API key</th><th className="px-3 text-right">Tokens</th><th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">Native LLM records</th>
+                <th className="py-3 pr-4">App or API key</th><th className="px-3 text-right">Tokens</th><th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">{callsLabel}</th>
               </tr></thead><tbody>{origins.map((origin) => <tr key={JSON.stringify([origin.id, origin.kind])} className="border-b border-border/70 last:border-0">
                 <td className="max-w-xs py-3 pr-4 font-medium"><span className="break-all">{origin.kind === "app" ? sourceLabel(origin) : origin.id ? origin.name ?? "API key name unavailable" : "No recorded app or API key"}</span>
                   {origin.kind !== "app" && origin.id && <span className="ml-2 break-all text-xs font-normal text-muted-foreground">(ID: {origin.id})</span>}
@@ -363,22 +380,22 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               </tr>)}{origins.length === 0 && <tr><td colSpan={4} className="py-8 text-center text-muted-foreground">No usage in this range.</td></tr>}</tbody>
             </table></div>
           </section>
-          <section className={panel} aria-label="Usage by model">
+          <section className={panel} aria-label={kind === "mcp" ? "Usage by server / tool" : "Usage by model"}>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-xl font-semibold">Usage per model</h2>
+              <h2 className="text-xl font-semibold">{kind === "mcp" ? "Usage per server / tool" : "Usage per model"}</h2>
               <label className="text-xs text-muted-foreground">Rank by{" "}
                 <select className={control} value={modelMetric}
                   onChange={(event) => { setModelMetric(event.target.value as PersonMetric); }}>
-                  <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option>
-                  <option value="requests">Native LLM records</option>
+                  <option value="total_tokens" disabled={kind === "mcp"}>Reported tokens</option><option value="cost_usd">Reported USD</option>
+                  <option value="requests">{callsLabel}</option>
                 </select>
               </label>
             </div>
             <div className="mt-5 overflow-x-auto">
               <table className="table w-full min-w-[640px] text-left text-sm">
                 <thead className="border-b border-border text-xs uppercase text-muted-foreground">
-                  <tr><th className="py-3 pr-4">Model</th><th className="px-3 text-right">Tokens</th>
-                    <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">Native LLM records</th></tr>
+                  <tr><th className="py-3 pr-4">{kind === "mcp" ? "Server / tool" : "Model"}</th><th className="px-3 text-right">Tokens</th>
+                    <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">{callsLabel}</th></tr>
                 </thead>
                 <tbody>
                   {rankedModels.map((model) => (
@@ -409,8 +426,8 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
               <label className="text-xs text-muted-foreground">Show{" "}
                 <select className={control} value={trendMetric}
                   onChange={(event) => { setTrendMetric(event.target.value as PersonMetric); }}>
-                  <option value="total_tokens">Reported tokens</option><option value="cost_usd">Reported USD</option>
-                  <option value="requests">Native LLM records</option>
+                  <option value="total_tokens" disabled={kind === "mcp"}>Reported tokens</option><option value="cost_usd">Reported USD</option>
+                  <option value="requests">{callsLabel}</option>
                 </select>
               </label>
             </div>
@@ -425,7 +442,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                      <CartesianGrid vertical={false} stroke="var(--border-color)" />
                     <XAxis dataKey="date" tickFormatter={dayLabel} minTickGap={32}
                       tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-                    <YAxis width={65} allowDecimals={trendMetric !== "requests"}
+                    <YAxis width={65} allowDecimals={kind === "mcp" || trendMetric !== "requests"}
                       tickFormatter={(value: number) => new Intl.NumberFormat("en-US", {
                         notation: "compact", maximumFractionDigits: trendMetric === "cost_usd" ? 4 : trendMetric === "requests" ? 0 : 1,
                         ...(trendMetric === "cost_usd" ? { style: "currency", currency: "USD" } : {}),
@@ -457,7 +474,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                <table className="table w-full min-w-[560px] text-left text-sm">
                  <thead className="sticky top-0 border-b border-border bg-card text-xs uppercase text-muted-foreground">
                   <tr><th className="py-3">Date</th><th className="px-3 text-right">Tokens</th>
-                    <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">Native LLM records</th></tr>
+                    <th className="px-3 text-right">Cost (USD)</th><th className="pl-3 text-right">{callsLabel}</th></tr>
                 </thead>
                 <tbody>{[...summary.daily].reverse().map((day) => (
                   <tr key={day.date} className="border-b border-border/70 last:border-0">
