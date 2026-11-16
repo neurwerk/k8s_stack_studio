@@ -115,7 +115,7 @@ wheels = [
 
 [[package]]
 name = "k8s-stack-studio-collector"
-version = "0.26.0"
+version = "0.26.1"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },

@@ -77,51 +77,128 @@ async def test_native_rejects_partial_or_malformed_data(groups):
         await collect_llm(groups)
 
 
-async def test_mcp_increase_before_sum_and_fractional_counts():
-    queries = []
+def counter(values, *, instance="one", tool="lookup", until=3600):
+    observed = dict(values)
+    value = values[0][1]
+    samples = []
+    for time in range(values[0][0], until + 1, 30):
+        value = observed.get(time, value)
+        samples.append([START.timestamp() + time, str(value)])
+    return {
+        "metric": {
+            "__name__": "agentgateway_mcp_requests_total",
+            "job": "gateway",
+            "instance": instance,
+            "gateway": "infra-agentgateway/infra-agentgateway-gateway",
+            "listener": "api-bindings",
+            "method": "tools/call",
+            "resource_type": "tool",
+            "studio_principal_id": "person",
+            "server": "search",
+            "resource": tool,
+        },
+        "values": samples,
+    }
+
+
+def healthy(instance="one"):
+    return {
+        "metric": {"__name__": "up", "job": "gateway", "instance": instance},
+        "values": [[START.timestamp() + time, "1"] for time in range(0, 3601, 30)],
+    }
+
+
+async def collect_mcp(series, increases, *, health=None, start=START, end=END):
+    if health is None:
+        health = [healthy(instance) for instance in {s["metric"]["instance"] for s in series}]
+    # These are recorded native counter labels, deliberately independent of MCP_SELECTOR.
+    selector = (
+        'agentgateway_mcp_requests_total{gateway="infra-agentgateway/infra-agentgateway-gateway",'
+        'listener="api-bindings",method="tools/call",resource_type="tool"}'
+    )
 
     def handler(request):
-        expression = request.url.params["query"]
-        queries.append(expression)
-        if "min_over_time" in expression:
-            result = [{"metric": {"instance": "one"}, "value": [END.timestamp(), "1"]}]
-        elif "count_over_time(up" in expression:
-            result = [{"metric": {"instance": "one"}, "value": [END.timestamp(), "120"]}]
-        elif "< 2" in expression:
-            result = []
-        else:
-            assert "sum by (" in expression and "(increase(" in expression
-            assert 'method="tools/call"' in expression and 'listener="api-bindings"' in expression
-            assert "request_id" not in expression
+        query = request.url.params["query"]
+        seconds = int((end - start).total_seconds())
+        if query == f'up{{job="gateway"}}[{seconds + 60}s]':
+            result_type, result = "matrix", health
+        elif query == f"{selector}[{seconds + 60}s]":
+            result_type, result = "matrix", series
+        elif query == f"increase({selector}[{seconds}s])":
+            result_type = "vector"
             result = [
                 {
-                    "metric": {
-                        "studio_principal_id": "person",
-                        "server": "search",
-                        "resource": "lookup",
-                    },
-                    "value": [END.timestamp(), "2.125"],
+                    "metric": {k: v for k, v in s["metric"].items() if k != "__name__"},
+                    "value": [end.timestamp(), str(value)],
                 }
+                for s, value in zip(series, increases, strict=True)
+                if value is not None
             ]
+        else:
+            # A selector that does not match the native labels returns no series.
+            result_type = "vector" if query.startswith("increase(") else "matrix"
+            result = []
         return httpx.Response(
-            200,
-            json={
-                "status": "success",
-                "data": {
-                    "resultType": "vector",
-                    "result": result,
-                },
-            },
+            200, json={"status": "success", "data": {"resultType": result_type, "result": result}}
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        rows = await McpSource(client, "http://prometheus", 'up{job="gateway"}', 30).collect(
-            START, END
+        return await McpSource(client, "http://prometheus", 'up{job="gateway"}', 30).collect(
+            start, end
         )
-    assert rows[0].requests == Decimal("2.125")
-    assert rows[0].dimensions.principal_id == "person"
-    assert rows[0].tokens_known == rows[0].cost_known == 0
-    assert any("count_over_time(agentgateway_mcp_requests_total" in q for q in queries)
+
+
+async def test_mcp_lazy_counters_count_first_calls_without_importing_existing_baselines():
+    series = [
+        counter([(600, 8), (630, 8)], tool="web"),
+        counter([(600, 2), (630, 2)], tool="news"),
+        counter([(0, 50), (30, 50), (60, 50)], instance="existing", tool="web"),
+    ]
+    rows = await collect_mcp(series, [0, 0, 0])
+    assert {row.dimensions.tool: row.requests for row in rows} == {"web": 8, "news": 2}
+    assert all(row.dimensions.principal_id == "person" for row in rows)
+    assert all(row.tokens_known == row.cost_known == 0 for row in rows)
+    assert await collect_mcp(series, [0, 0, 0]) == rows
+
+
+async def test_mcp_existing_series_keep_reset_aware_fractional_increases_before_aggregation():
+    # Independent native increases; summing these original counters before increase
+    # would hide the first target's reset behind the second target's growth.
+    series = [
+        counter([(0, 100), (30, 100), (60, 2), (90, 5)]),
+        counter([(0, 50), (30, 50), (60, 150), (90, 150)], instance="two"),
+    ]
+    rows = await collect_mcp(series, ["5.125", "100.5"])
+    assert len(rows) == 1 and rows[0].requests == Decimal("105.625")
+
+
+@pytest.mark.parametrize(
+    ("values", "native_increase", "expected"),
+    [
+        ([(600, 8), (630, 9), (660, 12)], "6", 12),
+        ([(600, 8), (630, 9), (660, 2), (690, 3)], "6", 12),
+    ],
+)
+async def test_mcp_growing_newborn_does_not_add_extrapolation_twice(
+    values, native_increase, expected
+):
+    rows = await collect_mcp([counter(values)], [native_increase])
+    assert rows[0].requests == expected
+
+
+@pytest.mark.parametrize("fault", ["failed", "gap", "boundary", "target"])
+async def test_mcp_uncertain_target_coverage_is_not_newborn_usage(fault):
+    health = healthy()
+    if fault == "failed":
+        health["values"][20][1] = "0"
+    elif fault == "gap":
+        del health["values"][20]
+    elif fault == "boundary":
+        del health["values"][0]
+    else:
+        health["metric"]["instance"] = "unrelated"
+    with pytest.raises(SourceError):
+        await collect_mcp([counter([(600, 8), (630, 8)])], [0], health=[health])
 
 
 @pytest.mark.parametrize(
@@ -150,22 +227,46 @@ async def test_mcp_missing_scrapes_or_partial_results_are_not_empty_usage(body):
             await McpSource(client, "http://prometheus", "up", 30).collect(START, END)
 
 
-async def test_mcp_sparse_series_does_not_overwrite_a_valid_bucket():
-    def handler(request):
-        query = request.url.params["query"]
-        value = "120" if query.startswith("count_over_time(up") else "1"
-        assert not query.startswith("sum by")
-        return httpx.Response(
-            200,
-            json={
-                "status": "success",
-                "data": {
-                    "resultType": "vector",
-                    "result": [{"metric": {}, "value": [END.timestamp(), value]}],
-                },
-            },
-        )
+async def test_mcp_existing_sparse_series_does_not_overwrite_a_valid_bucket():
+    with pytest.raises(SourceError):
+        await collect_mcp([counter([(0, 8), (30, 9)], until=30)], [None])
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(SourceError):
-            await McpSource(client, "http://prometheus", "up", 30).collect(START, END)
+
+async def test_mcp_boundary_birth_counts_once_and_next_hour_uses_it_as_baseline():
+    born = counter([(3600, 8)])
+    rows = await collect_mcp([born], [None])
+    assert rows[0].requests == 8
+    assert await collect_mcp([born], [None]) == rows
+    following = counter([(3600, 8)], until=7200)
+    health = healthy()
+    health["values"] = [[time + 3600, value] for time, value in health["values"]]
+    rows = await collect_mcp(
+        [following], [0], health=[health], start=END, end=END + timedelta(hours=1)
+    )
+    assert rows[0].requests == 0
+
+
+async def test_mcp_boundary_jitter_keeps_the_last_successful_baseline():
+    health = healthy()
+    health["values"] = [
+        [START.timestamp() - 59, "0"],
+        [START.timestamp() - 30.1, "1"],
+        *[[time + 0.1, value] for time, value in health["values"][:-1]],
+    ]
+    item = counter([(600, 8)])
+    item["values"] = [[time + 0.1, value] for time, value in item["values"][:-1]]
+    rows = await collect_mcp([item], [0], health=[health])
+    assert rows[0].requests == 8
+
+
+@pytest.mark.parametrize("fault", ["missing", "disappeared", "conflicting_increase"])
+async def test_mcp_counter_gaps_and_conflicting_queries_preserve_valid_buckets(fault):
+    item = counter([(600, 8)])
+    if fault == "missing":
+        del item["values"][1]
+    elif fault == "disappeared":
+        item["values"] = item["values"][:1]
+    else:
+        item = counter([(0, 8)], until=0)
+    with pytest.raises(SourceError):
+        await collect_mcp([item], [1])
