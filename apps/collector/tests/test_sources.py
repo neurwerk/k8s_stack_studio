@@ -270,3 +270,13 @@ async def test_mcp_counter_gaps_and_conflicting_queries_preserve_valid_buckets(f
         item = counter([(0, 8)], until=0)
     with pytest.raises(SourceError):
         await collect_mcp([item], [1])
+
+
+@pytest.mark.parametrize("recreated", [False, True])
+async def test_mcp_restart_before_healthy_boundary_does_not_poison_the_bucket(recreated):
+    health = healthy()
+    health["values"] = [[time - 15, value] for time, value in health["values"]]
+    item = counter([(15, 8)])
+    item["values"] = [[START.timestamp() - 45, "50"]] + (item["values"] if recreated else [])
+    rows = await collect_mcp([item], [0 if recreated else None], health=[health])
+    assert sum(row.requests for row in rows) == (8 if recreated else 0)

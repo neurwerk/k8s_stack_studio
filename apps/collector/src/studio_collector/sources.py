@@ -279,13 +279,18 @@ def _counter_amount(
     times = [time for time, _ in series.values]
     if times != sorted(set(times)) or times[-1] > end:
         raise SourceError
+    # Older context may belong to a process that ended before the healthy baseline.
+    values = [(time, value) for time, value in series.values if time >= scrapes[0]]
+    if not values:
+        if increase is not None:
+            raise SourceError
+        return None
+    times = [time for time, _ in values]
     # Persistent counters must appear in every successful target scrape after birth.
     # Missing counter samples cannot be treated as a new zero baseline.
-    if [time for time in times if time >= scrapes[0]] != [
-        time for time in scrapes if time >= times[0]
-    ]:
+    if times != [time for time in scrapes if time >= times[0]]:
         raise SourceError
-    current = [value for time, value in series.values if time > start]
+    current = [value for time, value in values if time > start]
     if not current:
         if increase is not None:
             raise SourceError
