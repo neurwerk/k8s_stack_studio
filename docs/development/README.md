@@ -37,7 +37,6 @@ Web checks use Node.js 22 and the pnpm version declared in [package.json](../../
 pnpm install --frozen-lockfile
 pnpm lint
 pnpm typecheck
-pnpm --filter web test:mcp
 pnpm --filter web test:gateway
 pnpm build
 ```

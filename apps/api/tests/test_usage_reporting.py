@@ -30,7 +30,8 @@ async def reporting():
     timezone = ZoneInfo("UTC")
     await store.initialize(connection, timezone)
     await connection.execute(
-        "UPDATE usage_meta SET activated_at=$1", datetime(2026, 11, 1, tzinfo=UTC)
+        "UPDATE usage_meta SET activated_at=$1,mcp_events_activated_at=$1",
+        datetime(2026, 11, 1, tzinfo=UTC),
     )
 
     class Reader(UsageReader):
@@ -105,7 +106,7 @@ async def test_long_chart_points_keep_totals_and_missing_previous_year(reporting
     start = datetime(2026, 11, 2, tzinfo=UTC)
     row = UsageRow(
         dimensions=Dimensions(principal_id="self", server="search", tool="lookup"),
-        requests=Decimal("1.25"),
+        requests=Decimal(1),
     )
     await store.replace(
         connection,
@@ -120,7 +121,7 @@ async def test_long_chart_points_keep_totals_and_missing_previous_year(reporting
         "self", date(2020, 1, 1), date(2026, 11, 2), UsageQuery(kind="mcp", compare_year=True)
     )
     assert len(result.days) <= 366
-    assert sum(m.requests for d in result.days for m in d.models) == 1.25
+    assert sum(m.requests for d in result.days for m in d.models) == 1
     assert result.previous_year and all(not d.models for d in result.previous_year)
     tool = next(m for d in result.days for m in d.models)
     assert tool.server == "search" and tool.tool == "lookup"

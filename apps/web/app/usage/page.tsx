@@ -20,7 +20,7 @@ const panel = "card min-w-0 border border-border bg-card p-4 sm:p-6";
 const control = "select select-bordered min-w-0 bg-base-100 text-sm";
 
 function count(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
 function dollars(value: number): string {
@@ -66,7 +66,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
 }) {
   const [selected, setSelected] = useState(isAdmin ? "all" : userId);
   const [kind, setKind] = useState<UsageKind>("llm");
-  const callsLabel = kind === "mcp" ? "Estimated tool calls" : "Native LLM records";
+  const callsLabel = kind === "mcp" ? "Tool calls" : "Native LLM records";
   const [range, setRange] = useState<UsageDateRange>();
   const [preset, setPreset] = useState<UsagePreset>("month");
   const [draftStart, setDraftStart] = useState("");
@@ -187,7 +187,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Usage</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{kind === "llm" ? "Native LLM records, token usage and cost completeness." : "Estimated MCP tool calls and gross usage costs; tokens are unavailable."}{shown?.usage.coverage?.complete === false && " Usage coverage is incomplete."}{shown?.usage.coverage?.stale && " Collection is stale."}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{kind === "llm" ? "Native LLM records, token usage and cost completeness." : "Recorded MCP tool calls and gross usage costs in USD; tokens are unavailable. Provider credits apply separately."}{shown?.usage.coverage?.complete === false && " Usage coverage is incomplete."}{shown?.usage.coverage?.stale && " Collection is stale."}</p>
         </div>
         <div className="flex items-center gap-3">
         <label className="flex items-center gap-2 text-sm">LLM
@@ -442,7 +442,7 @@ function UsageDashboard({ userId, isAdmin, canReadNames }: {
                      <CartesianGrid vertical={false} stroke="var(--border-color)" />
                     <XAxis dataKey="date" tickFormatter={dayLabel} minTickGap={32}
                       tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-                    <YAxis width={65} allowDecimals={kind === "mcp" || trendMetric !== "requests"}
+                    <YAxis width={65} allowDecimals={trendMetric === "cost_usd"}
                       tickFormatter={(value: number) => new Intl.NumberFormat("en-US", {
                         notation: "compact", maximumFractionDigits: trendMetric === "cost_usd" ? 4 : trendMetric === "requests" ? 0 : 1,
                         ...(trendMetric === "cost_usd" ? { style: "currency", currency: "USD" } : {}),

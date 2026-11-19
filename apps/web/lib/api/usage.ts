@@ -31,7 +31,7 @@ export interface UsagePeriod {
   requests: number;
   total_tokens: number;
   cost_usd: number;
-  request_scope?: "native_llm_records" | "estimated_mcp_calls";
+  request_scope?: "native_llm_records" | "mcp_calls";
   accounting?: UsageAccounting;
 }
 

@@ -46,8 +46,8 @@ async def put(connection, rows, offset=0, pricing=None):
 
 
 async def test_atomic_replace_vanished_groups_daily_corrections_and_failure(database):
-    await put(database, [row("first", "1.5"), row("removed", "2")])
-    await put(database, [row("first", "1.5"), row("removed", "2")])
+    await put(database, [row("first", "1"), row("removed", "2")])
+    await put(database, [row("first", "1"), row("removed", "2")])
     await put(database, [row("first", "4")], offset=1)
     await put(database, [row("first", "3")])
     daily = await database.fetch("SELECT * FROM usage_daily_mcp")
@@ -109,3 +109,35 @@ async def test_writer_lock_serializes_connections(database):
         assert await other.fetchval("SELECT pg_try_advisory_lock($1)", store.WRITER_LOCK)
     finally:
         await other.close()
+
+
+async def test_event_cutover_removes_only_legacy_mcp_once(database):
+    # Recreate the previous schema marker and fractional rows.
+    for table in ("usage_hourly_mcp", "usage_daily_mcp"):
+        await database.execute(f"ALTER TABLE {table} DROP CONSTRAINT {table}_integer_requests")
+    await database.execute("UPDATE usage_meta SET mcp_events_activated_at=NULL")
+    await put(database, [row("legacy", "1.5")], pricing=Catalogue())
+    await store.replace(
+        database,
+        "llm",
+        START,
+        end := START + timedelta(hours=1),
+        end,
+        TZ,
+        [UsageRow(dimensions=Dimensions(model="model"), requests=Decimal(2))],
+    )
+    activation = await store.metadata(database, TZ)
+    await store.initialize(database, TZ)
+    assert await database.fetchval("SELECT count(*) FROM usage_hourly_mcp") == 0
+    assert await database.fetchval("SELECT count(*) FROM usage_daily_mcp") == 0
+    assert await database.fetchval("SELECT count(*) FROM usage_bucket_status WHERE kind='mcp'") == 0
+    assert await database.fetchval("SELECT count(*) FROM usage_source_status WHERE kind='mcp'") == 0
+    assert await database.fetchval("SELECT sum(requests) FROM usage_daily_llm") == 2
+    assert await store.metadata(database, TZ) == activation
+    cutover = await store.metadata(database, TZ, "mcp")
+    await put(database, [row("new", "3")])
+    await store.initialize(database, TZ)
+    assert await store.metadata(database, TZ, "mcp") == cutover
+    assert await database.fetchval("SELECT sum(requests) FROM usage_daily_mcp") == 3
+    with pytest.raises(asyncpg.CheckViolationError):
+        await put(database, [row("invalid", "1.5")])

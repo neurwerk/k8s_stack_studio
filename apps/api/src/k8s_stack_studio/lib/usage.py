@@ -86,7 +86,7 @@ class UsageReader:
         provisional: bool = False,
     ) -> Coverage:
         """Distinguish successful empty buckets, missing history and stale sources."""
-        activation = await store.metadata(connection, self.timezone)
+        activation = await store.metadata(connection, self.timezone, kind)
         now = datetime.now(UTC)
         status = await connection.fetchrow("SELECT * FROM usage_source_status WHERE kind=$1", kind)
         collected = await connection.fetch(
@@ -121,7 +121,7 @@ class UsageReader:
             or refreshed is None
             or now - refreshed > timedelta(minutes=30),
             provisional=provisional,
-            estimated=kind == "mcp",
+            estimated=False,
         )
 
     async def rows(
@@ -336,7 +336,7 @@ class UsageReader:
         totals: dict[str, UsagePeriod] = {}
         coverage: dict[str, Coverage] = {}
         async with self.connection() as connection:
-            activation = await store.metadata(connection, self.timezone)
+            activation = await store.metadata(connection, self.timezone, filters.kind)
             for name, (start, end) in periods(now, self.timezone, activation).items():
                 coverage[name] = await self.coverage(
                     connection, filters.kind, start, end, provisional=end == now

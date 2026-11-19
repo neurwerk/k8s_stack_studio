@@ -8,5 +8,5 @@ export function AccountingValue({ metric, reported, currency = false }: {
   const complete = metric?.state === "known" ? metric.complete_total : null;
   const value = complete ?? ((metric?.known_records ?? 0) > 0 || (metric?.reported_sum ?? reported) !== 0
     ? metric?.reported_sum ?? reported : null);
-  return value === null ? null : <span>{format(value)}</span>;
+  return value === null ? <span className="text-muted-foreground">Unknown</span> : <span>{format(value)}</span>;
 }

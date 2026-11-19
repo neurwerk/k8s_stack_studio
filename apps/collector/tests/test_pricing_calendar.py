@@ -64,6 +64,16 @@ def test_prices_use_usage_instant_not_collection_instant():
     assert catalogue().apply(row, START + timedelta(days=1)).cost_usd == 20
 
 
+def test_future_paid_account_does_not_become_free_in_a_snapshot():
+    prices = catalogue().model_copy(update={"default_rate": Decimal(0)})
+    before = START - timedelta(hours=1)
+    row = UsageRow(dimensions=Dimensions(server="search", tool="new"), requests=Decimal(1))
+    snapshot = prices.at(before)
+    assert prices.apply(row, before).cost_known == 0
+    assert snapshot.apply(row, before).cost_known == 0
+    assert snapshot.default_rate == 0
+
+
 @pytest.mark.parametrize(
     "calls,expected", [(0, 10), (1500, 10), (2000, 10), (2500, Decimal("12.5"))]
 )

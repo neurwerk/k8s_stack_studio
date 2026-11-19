@@ -57,6 +57,7 @@ class Catalogue(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     accounts: list[Account] = Field(default_factory=list, max_length=200)
+    default_rate: Amount | None = None
 
     @model_validator(mode="after")
     def unique(self) -> Catalogue:
@@ -70,7 +71,16 @@ class Catalogue(BaseModel):
     def apply(self, row: UsageRow, instant: datetime) -> UsageRow:
         """Snapshot the selected rate, preserving an explicit unknown tool override."""
         account = next((a for a in self.accounts if a.server == row.dimensions.server), None)
-        if account is None or (price := account.at(instant)) is None:
+        if account is None:
+            rate = self.default_rate
+            return row.model_copy(
+                update={
+                    "rate": rate,
+                    "cost_usd": row.requests * rate / 1000 if rate is not None else Decimal(0),
+                    "cost_known": row.requests if rate is not None else Decimal(0),
+                }
+            )
+        if (price := account.at(instant)) is None:
             return row
         rate = price.tools.get(row.dimensions.tool or "", price.default)
         revision = hashlib.sha256(price.model_dump_json().encode()).hexdigest()
@@ -85,13 +95,13 @@ class Catalogue(BaseModel):
         )
 
     def at(self, instant: datetime) -> Catalogue:
-        """Keep only effective revisions in each bucket's small pricing snapshot."""
+        """Keep effective prices or the first future price to prevent free fallback."""
         return Catalogue(
+            default_rate=self.default_rate,
             accounts=[
-                account.model_copy(update={"prices": [price]})
+                account.model_copy(update={"prices": [account.at(instant) or account.prices[0]]})
                 for account in self.accounts
-                if (price := account.at(instant)) is not None
-            ]
+            ],
         )
 
 

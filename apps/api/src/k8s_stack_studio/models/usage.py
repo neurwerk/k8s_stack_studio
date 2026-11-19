@@ -66,15 +66,15 @@ class UsageAccounting(BaseModel):
 class UsagePeriod(BaseModel):
     """A single, non-overlapping set of stored usage rows."""
 
-    requests: float = Field(default=0, ge=0)
+    requests: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
     cost_usd: float = Field(default=0, ge=0, allow_inf_nan=False)
-    request_scope: Literal["native_llm_records", "estimated_mcp_calls"] = "native_llm_records"
+    request_scope: Literal["native_llm_records", "mcp_calls"] = "native_llm_records"
     accounting: UsageAccounting = Field(default_factory=UsageAccounting)
 
     def add(self, row: UsageRow) -> None:
-        """Combine stored measures without losing fractional MCP counts."""
-        self.requests += float(row.requests)
+        """Combine whole invocation counts from the reporting store."""
+        self.requests += int(row.requests)
         self.total_tokens += row.total_tokens
         self.cost_usd += float(row.cost_usd)
         self.accounting.tokens.add(row.total_tokens, float(row.requests), float(row.tokens_known))
@@ -85,7 +85,7 @@ class UsagePeriod(BaseModel):
     def qualify(self, kind: Kind, coverage: Coverage) -> None:
         """Apply collection and metric availability after summing rows."""
         if kind == "mcp":
-            self.request_scope = "estimated_mcp_calls"
+            self.request_scope = "mcp_calls"
             self.accounting.tokens.unavailable()
         if not coverage.complete:
             self.accounting.tokens.unavailable()
