@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,9 +17,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from studio_collector import store
 from studio_collector.calendar import hours
+from studio_collector.mcp_events import McpEventSource
 from studio_collector.models import Kind, SourceError, StoreError
 from studio_collector.pricing import Catalogue
-from studio_collector.sources import LlmSource, McpSource
+from studio_collector.sources import LlmSource
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +36,11 @@ class Settings(BaseSettings):
     postgres_password: SecretStr
     timezone: str = "Europe/Berlin"
     agentgateway_url: str
-    prometheus_url: str
-    prometheus_up_selector: str
-    scrape_seconds: int = Field(default=30, ge=1, le=300)
-    overlap_hours: int = Field(default=3, ge=1, le=24)
+    opensearch_url: str
+    opensearch_user: str = "studio-logs-read"
+    opensearch_password: SecretStr
+    opensearch_ca_cert: Path
+    overlap_hours: int = Field(default=24, ge=1, le=168)
     pricing_file: Path
 
 
@@ -72,30 +75,36 @@ async def collect(settings: Settings, *, initialize_only: bool = False) -> bool:
         if not await connection.fetchval("SELECT pg_try_advisory_lock($1)", store.WRITER_LOCK):
             logger.info("Another collector owns the writer lock")
             return True
-        activation = await store.metadata(connection, timezone)
         now = datetime.now(UTC).replace(microsecond=0)
-        start = max(activation, now - timedelta(hours=settings.overlap_hours))
-        async with httpx.AsyncClient(timeout=45, trust_env=False) as client:
-            sources: dict[Kind, LlmSource | McpSource] = {
+        async with (
+            httpx.AsyncClient(timeout=45, trust_env=False) as client,
+            httpx.AsyncClient(
+                timeout=45,
+                trust_env=False,
+                verify=ssl.create_default_context(cafile=settings.opensearch_ca_cert),
+                auth=(settings.opensearch_user, settings.opensearch_password.get_secret_value()),
+            ) as search,
+        ):
+            sources: dict[Kind, LlmSource | McpEventSource] = {
                 "llm": LlmSource(client, settings.agentgateway_url),
-                "mcp": McpSource(
-                    client,
-                    settings.prometheus_url,
-                    settings.prometheus_up_selector,
-                    settings.scrape_seconds,
-                ),
+                "mcp": McpEventSource(search, settings.opensearch_url),
             }
             success = True
             for kind, source in sources.items():
+                activation = await store.metadata(connection, timezone, kind)
+                # Retry collection gaps, as well as late events in the overlap.
+                previous = await connection.fetchval(
+                    "SELECT COALESCE(completed_through,succeeded_at) "
+                    "FROM usage_source_status WHERE kind=$1",
+                    kind,
+                )
+                start = max(
+                    activation,
+                    min(previous or activation, now - timedelta(hours=settings.overlap_hours)),
+                )
                 source_failed = False
                 for bucket_start, bucket_end in hours(start, now, timezone):
                     until = min(bucket_end, now)
-                    if (
-                        kind == "mcp"
-                        and (until - max(bucket_start, activation)).total_seconds()
-                        < 2 * settings.scrape_seconds
-                    ):
-                        continue  # Wait for enough samples; this is not a source outage.
                     try:
                         rows = await source.collect(max(bucket_start, activation), until)
                         pricing = None
@@ -112,9 +121,16 @@ async def collect(settings: Settings, *, initialize_only: bool = False) -> bool:
                             rows,
                             pricing,
                         )
+                        await connection.execute(
+                            "UPDATE usage_source_status SET completed_through="
+                            "GREATEST(completed_through,$2) WHERE kind=$1",
+                            kind,
+                            until,
+                        )
                     except (SourceError, asyncpg.PostgresError, OSError, TimeoutError):
                         logger.warning("%s bucket unavailable: %s", kind, bucket_start.isoformat())
                         source_failed = True
+                        break  # Keep the watermark before the first missing bucket.
                 if source_failed:
                     await store.failed(connection, kind)
                     success = False

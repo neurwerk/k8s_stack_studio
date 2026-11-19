@@ -134,7 +134,7 @@ function McpRow({ item, connections, connectionsEnabled, checking, connectionErr
             {item.permitted && (!reason || metadataUnavailable || pendingRefresh[item.id]) && <button type="button" className="link link-primary inline-flex h-4 items-center text-xs font-normal leading-4 disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
               disabled={!!pendingRefresh[item.id] || checking && personal || !!state?.busy || now < retryUntil}
               onClick={() => { if (metadataUnavailable) void onRefresh(item.id); else onRecheck(); }}>
-              Recheck
+              {Object.keys(state?.checks ?? {}).length ? "Recheck" : "Run checks"}
             </button>}
             {personal && item.permitted && connectionsEnabled && <McpConnection id={item.id}
               appearance="link" status={connection?.status} onRefresh={() => void onRefresh(item.id)} />}

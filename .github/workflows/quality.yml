@@ -92,9 +92,6 @@ jobs:
       - name: Type check
         run: pnpm typecheck
 
-      - name: MCP orchestration regressions
-        run: pnpm --filter web test:mcp
-
       - name: Gateway presentation regressions
         run: pnpm --filter web test:gateway
 

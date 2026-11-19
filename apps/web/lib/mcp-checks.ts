@@ -40,7 +40,7 @@ export function needsMcpMetadataRefresh(item: McpCatalogEntry, connection: McpCo
 }
 
 export function checkSummary(state?: IntegrationChecks): { label: string; failed: boolean } {
-  if (!state) return { label: "Waiting for checks", failed: false };
+  if (!state) return { label: "Not checked", failed: false };
   const values = Object.values(state.checks);
   const failed = values.filter((value) => value.result?.status === "failed").length;
   const unavailable = values.filter((value) => !!value.error).length;
@@ -53,7 +53,7 @@ export function checkSummary(state?: IntegrationChecks): { label: string; failed
   if (state.message) return { label: state.message, failed: false };
   if (!total) return { label: "No checks configured", failed: false };
   const passed = values.filter((value) => value.result?.status === "passed").length;
-  return { label: passed === total ? `${String(total)} ${noun} passed` : `${String(passed)} of ${String(total)} ${noun} completed`, failed: false };
+  return { label: passed === total ? `${String(total)} ${noun} passed` : values.length ? `${String(passed)} of ${String(total)} ${noun} completed` : "Not checked", failed: false };
 }
 
 // One controller per page visit. Three integration workers; tool calls within each
@@ -68,6 +68,7 @@ export class McpChecks {
   private generations = new Map<string, number>();
   private queue = new Set<string>();
   private running = new Set<string>();
+  private requested = new Set<string>();
   private cooldown = 0;
 
   constructor(driver: Driver) { this.driver = driver; }
@@ -84,6 +85,7 @@ export class McpChecks {
     this.running.clear();
     this.versions.clear();
     this.eligible.clear();
+    this.requested.clear();
     this.changed = null;
   }
 
@@ -102,6 +104,7 @@ export class McpChecks {
       const version = `${String(revisions[item.id] ?? 0)}:${reason}`;
       if (this.versions.get(item.id) === version) continue;
       this.versions.set(item.id, version);
+      this.requested.delete(item.id);
       this.generations.set(item.id, (this.generations.get(item.id) ?? 0) + 1);
       const retryUntil = this.states[item.id]?.retryUntil ?? 0;
       this.states[item.id] = { tools: null, checks: {}, busy: !reason, message: reason, retryUntil };
@@ -118,6 +121,7 @@ export class McpChecks {
     if (!this.eligible.has(id) || !state || state.busy || Date.now() < state.retryUntil) return;
     this.generations.set(id, (this.generations.get(id) ?? 0) + 1);
     this.states[id] = { ...state, checks: {}, busy: true, message: "" };
+    this.requested.add(id);
     this.queue.add(id);
     this.changed?.();
     this.pump();
@@ -141,6 +145,7 @@ export class McpChecks {
   }
 
   private async run(id: string, controller: AbortController) {
+    const invoke = this.requested.delete(id);
     const generation = this.generations.get(id);
     const current = () => !controller.signal.aborted && generation === this.generations.get(id);
     const state = this.states[id];
@@ -169,6 +174,8 @@ export class McpChecks {
       if (!current()) return;
       state.tools = tools;
       this.changed?.();
+      // Discovery is automatic; invoking tools (including paid checks) is explicit.
+      if (!invoke) return;
       for (const [checkId] of tools.flatMap((tool) => Object.entries(tool.checks))) {
         if (!await ready()) return;
         state.checks[checkId] = { running: true };

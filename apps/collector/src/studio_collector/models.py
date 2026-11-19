@@ -52,7 +52,7 @@ ATTRIBUTES = {
 
 
 class UsageRow(BaseModel):
-    """Reported sums plus independent evidence counts; MCP calls remain fractional."""
+    """Reported sums plus independent evidence counts."""
 
     model_config = ConfigDict(extra="forbid")
 

@@ -53,6 +53,12 @@ async def initialize(connection: asyncpg.Connection, timezone: ZoneInfo) -> None
             "INSERT INTO usage_meta(version, timezone) VALUES(1, $1) ON CONFLICT DO NOTHING",
             timezone.key,
         )
+        await connection.execute(
+            "ALTER TABLE usage_meta ADD COLUMN IF NOT EXISTS mcp_events_activated_at timestamptz"
+        )
+        await connection.execute(
+            "ALTER TABLE usage_source_status ADD COLUMN IF NOT EXISTS completed_through timestamptz"
+        )
         await metadata(connection, timezone)
         for (grain, kind), table in TABLES.items():
             pricing = (
@@ -83,14 +89,30 @@ async def initialize(connection: asyncpg.Connection, timezone: ZoneInfo) -> None
                     f"CREATE INDEX IF NOT EXISTS {table}_{field}_time "
                     f"ON {table} ((dimensions->>'{field}'), bucket_start)"
                 )
+        # Approved one-time cutover: sampled MCP estimates cannot become event counts.
+        # The existing LLM activation, rows, and source status remain untouched.
+        if not await connection.fetchval("SELECT mcp_events_activated_at FROM usage_meta"):
+            for table in (TABLES["hourly", "mcp"], TABLES["daily", "mcp"]):
+                await connection.execute(f"DELETE FROM {table}")  # noqa: S608 -- fixed tables
+                await connection.execute(
+                    f"ALTER TABLE {table} ADD CONSTRAINT {table}_integer_requests "
+                    "CHECK(requests = trunc(requests))"
+                )
+            await connection.execute("DELETE FROM usage_bucket_status WHERE kind='mcp'")
+            await connection.execute("DELETE FROM usage_source_status WHERE kind='mcp'")
+            await connection.execute(
+                "UPDATE usage_meta SET mcp_events_activated_at=date_trunc('second', now())"
+            )
 
 
-async def metadata(connection: asyncpg.Connection, timezone: ZoneInfo) -> datetime:
+async def metadata(
+    connection: asyncpg.Connection, timezone: ZoneInfo, kind: Kind = "llm"
+) -> datetime:
     """Check schema/calendar identity; calendar changes require a fresh activation."""
     row = await connection.fetchrow("SELECT * FROM usage_meta WHERE singleton")
     if not row or row["version"] != 1 or row["timezone"] != timezone.key:
         raise StoreError
-    return row["activated_at"]
+    return row["mcp_events_activated_at"] if kind == "mcp" else row["activated_at"]
 
 
 async def pricing_for(
